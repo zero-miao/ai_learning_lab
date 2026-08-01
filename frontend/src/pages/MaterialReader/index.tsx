@@ -50,7 +50,10 @@ const MaterialReader: React.FC = () => {
   const handleTaskSuccess = useCallback(async (task: AITask) => {
     if (task.task_type === 'briefing') {
       await loadData();
-    } else if (task.task_type === 'answer_question' && task.result_json.question_id) {
+    } else if (
+      task.task_type === 'answer_question' &&
+      typeof task.result_json.question_id === 'number'
+    ) {
       const response = await getQuestion(task.result_json.question_id);
       const answer = response.data.ai_responses[0];
       if (answer) {

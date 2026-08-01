@@ -7,6 +7,7 @@ from .models import (
     ExamQuestion,
     Material,
     MaterialChunk,
+    Note,
     Question,
     ReviewRecord,
     Topic,
@@ -39,6 +40,14 @@ class QuestionAdmin(admin.ModelAdmin):
     list_display = ("topic", "material", "question_text", "created_at")
     list_filter = ("topic", "material")
     search_fields = ("question_text", "selected_text")
+
+
+@admin.register(Note)
+class NoteAdmin(admin.ModelAdmin):
+    list_display = ("title", "topic", "source_task", "created_at", "updated_at")
+    list_filter = ("topic",)
+    search_fields = ("title", "content", "topic__title")
+    readonly_fields = ("source_task", "created_at", "updated_at")
 
 
 @admin.register(AIResponse)

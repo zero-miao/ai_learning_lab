@@ -42,8 +42,11 @@
 本机已验证环境：
 
 - Python 3.12.13，虚拟环境为项目根目录 `.venv`
-- Node.js v20.20.2，npm 10.8.2
 - 本地 Ollama
+
+前端构建需要 Node.js 20.x。当前 shell 实际仅安装 Node.js v18.20.8，因此
+Vite/Rolldown 构建会因缺少 `node:util.styleText` 失败；安装或切换 Node 20 后，再
+执行 `npm run build`。
 
 根目录 `.env` 是实际运行配置，后端 [api/ai_gateway.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/ai_gateway.py) 会固定从项目根目录加载。当前默认配置为：
 
@@ -65,13 +68,16 @@ LLM_API_KEY=ollama
 - Django Admin：所有核心模型均已注册。
 - LLM 网关：支持 OpenAI-compatible Provider 与本地 Ollama。
 - 异步 AI 交互：阅读前导、问答、出题和阅卷都通过 `AITask` 后台执行。
+- 结构化笔记：基于已处理材料异步生成 Markdown 草稿，用户确认后保存为 `Note`；
+  支持编辑、删除和携带用户要求的再次生成。
 
 ## 5. 异步任务架构
 
 核心文件：
 
-- [api/models.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/models.py)：`AITask`、`Exam`、`ExamQuestion`、`ReviewRecord`。
+- [api/models.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/models.py)：`AITask`、`Note`、`Exam`、`ExamQuestion`、`ReviewRecord`。
 - [api/task_service.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/task_service.py)：入队、去重、任务执行、三次重试和结果写回。
+- [api/note_service.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/note_service.py)：笔记材料上下文和内容指纹计算。
 - [api/scheduler.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/scheduler.py)：APScheduler 单 worker 调度器。
 - [api/apps.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/apps.py)：仅在 `runserver` 子进程启动 scheduler，避免 autoreloader 双启动。
 - [frontend/src/hooks/useAITaskPolling.ts](file:///Users/meiao/ai_workspace/ai-learning-lab/frontend/src/hooks/useAITaskPolling.ts)：前端每 2 秒轮询任务。
@@ -95,17 +101,32 @@ pending -> running -> succeeded
 | --- | --- | --- | --- |
 | 阅读前导 | 材料导入成功后自动入队 | 材料 CRUD 响应 | `GET /api/ai-tasks/?material={id}` |
 | 划词问答 | `POST /api/questions/` | `202`，`{question, task}` | `GET /api/ai-tasks/{id}/` |
+| 笔记草稿 | `POST /api/topics/{id}/note-drafts/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 考试生成 | `POST /api/exams/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 阅卷 | `POST /api/exams/{id}/submit/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 失败重试 | `POST /api/ai-tasks/{id}/retry/` | `202`，任务重置为 `pending` | - |
 
 不要让前端等待 LLM 的完成响应。页面应先显示任务提交状态，再通过轮询展示成功、失败或重试入口。
 
-## 6. 数据模型与业务状态
+## 6. 结构化笔记
+
+- `Note` 保存用户确认后的标题、Markdown 内容、来源任务与材料指纹；已应用
+  `api.0006_note` 和 `api.0007_note_material_fingerprint` 迁移。
+- 笔记草稿任务只读取 `import_status=success` 的材料。服务端基于材料 ID、标题和
+  清洗文本生成 SHA-256 指纹。
+- 若同一主题存在相同指纹的笔记，未携带 `instructions` 的草稿请求返回 `409`，避免
+  无材料变化时重复调用 LLM。
+- 用户可在前端编辑或删除正式笔记；若要在材料未变化时重新生成，必须填写
+  `instructions`，该要求会传入笔记 Prompt。
+- `NoteViewSet` 提供 `/api/notes/` CRUD；创建时只允许关联已成功的同主题
+  `note_draft` 任务。
+
+## 7. 数据模型与业务状态
 
 - `Topic`：学习主题和 `mastery_level`。
 - `Material` / `MaterialChunk`：材料原文、清洗文本和分段。
 - `Question` / `AIResponse`：用户问题及回答、阅读前导。
+- `Note`：用户确认的结构化笔记、来源任务和材料指纹。
 - `Exam` / `ExamQuestion`：主题综合测验、作答和评分。
 - `ReviewRecord`：Assessment 后的首次复习时间。
 - `AITask`：所有长耗时 AI 工作的状态、输入摘要、结构化结果、错误和重试信息。
@@ -118,7 +139,7 @@ pending -> running -> succeeded
 | >= 60 | `pass` | 3 天后 |
 | < 60 | `weak` | 1 天后 |
 
-## 7. 启动与验证
+## 8. 启动与验证
 
 启动后端：
 
@@ -148,21 +169,24 @@ cd /Users/meiao/ai_workspace/ai-learning-lab
 (cd frontend && npm run build)
 ```
 
-## 8. 代码规范
+当前已通过 Ruff、Django API 测试（8 项）、Django check 与 TypeScript `tsc -b`。
+完整 Vite 构建待 Node 20 环境恢复后执行。
+
+## 9. 代码规范
 
 - 后端 Python 必须遵循 PEP 8，使用 Ruff/Black 兼容的 88 字符行宽。
 - Ruff 规则见 [pyproject.toml](file:///Users/meiao/ai_workspace/ai-learning-lab/pyproject.toml)；配置和使用命令见 [DEV.md](file:///Users/meiao/ai_workspace/ai-learning-lab/DEV.md)。
 - 新增后端依赖必须更新 `requirements.txt`；新增前端依赖必须更新 `package.json` 和 lockfile。
 - 修改业务逻辑后至少运行相关 Django 测试和 `manage.py check`。
 
-## 9. 后续优先级
+## 10. 后续优先级
 
-1. 结构化笔记：从材料和 AI 对话生成草稿，并要求用户确认后保存。
-2. 复习工作流：展示待复习记录，并生成复习题或提示。
-3. 阅读体验：继续优化长文排版和任务状态的可见性。
-4. Assessment 质量：迭代 Prompt、输出校验与题目/评分质量。
+1. 复习工作流：展示待复习记录，并生成复习题或提示。
+2. 阅读体验：继续优化长文排版和任务状态的可见性。
+3. Assessment 质量：迭代 Prompt、输出校验与题目/评分质量。
+4. 结构化笔记：纳入 AI 对话上下文，并迭代草稿质量与结构模板。
 
-## 10. 接手原则
+## 11. 接手原则
 
 1. 修改前先确认当前文件状态，避免覆盖现有改动。
 2. 优先复用既有 Django、DRF、Ant Design、任务服务和 AI Gateway 模式。

@@ -1,13 +1,15 @@
 from django.utils import timezone
-from rest_framework import status, viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 
-from .models import AITask, Exam, Material, Question, Topic
+from .models import AITask, Exam, Material, Note, Question, Topic
+from .note_service import build_note_source
 from .serializers import (
     AITaskSerializer,
     ExamSerializer,
     MaterialSerializer,
+    NoteSerializer,
     QuestionSerializer,
     TopicSerializer,
 )
@@ -23,6 +25,43 @@ def health_check(request):
 class TopicViewSet(viewsets.ModelViewSet):
     queryset = Topic.objects.all()
     serializer_class = TopicSerializer
+
+    @action(detail=True, methods=["post"], url_path="note-drafts")
+    def create_note_draft(self, request, pk=None):
+        topic = self.get_object()
+        context, material_fingerprint = build_note_source(topic)
+        if not context:
+            return Response(
+                {"detail": "请先导入至少一份处理成功的学习材料。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        instructions = str(request.data.get("instructions", "")).strip()
+        has_current_note = Note.objects.filter(
+            topic=topic, material_fingerprint=material_fingerprint
+        ).exists()
+        if has_current_note and not instructions:
+            return Response(
+                {
+                    "detail": (
+                        "学习材料未变化，已有最新笔记。"
+                        "可编辑现有笔记，或填写新的生成要求后再生成。"
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        task, _ = enqueue_or_reuse(
+            "note_draft",
+            topic=topic,
+            input_json={
+                "topic_id": topic.id,
+                "context": context[:12000],
+                "material_fingerprint": material_fingerprint,
+                "instructions": instructions,
+            },
+        )
+        return Response(
+            {"task": AITaskSerializer(task).data}, status=status.HTTP_202_ACCEPTED
+        )
 
 
 class MaterialViewSet(viewsets.ModelViewSet):
@@ -66,6 +105,36 @@ class QuestionViewSet(viewsets.ModelViewSet):
                 "task": AITaskSerializer(task).data,
             },
             status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class NoteViewSet(viewsets.ModelViewSet):
+    queryset = Note.objects.select_related("topic", "source_task")
+    serializer_class = NoteSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        topic_id = self.request.query_params.get("topic")
+        return queryset.filter(topic_id=topic_id) if topic_id else queryset
+
+    def perform_create(self, serializer):
+        task_id = self.request.data.get("source_task")
+        task = None
+        if task_id:
+            task = AITask.objects.filter(
+                pk=task_id, task_type="note_draft", status="succeeded"
+            ).first()
+            if task is None:
+                raise serializers.ValidationError(
+                    {"source_task": "笔记草稿任务不存在或尚未完成。"}
+                )
+            if task.topic_id != serializer.validated_data["topic"].id:
+                raise serializers.ValidationError(
+                    {"source_task": "笔记草稿与所属主题不一致。"}
+                )
+        serializer.save(
+            source_task=task,
+            material_fingerprint=task.input_json.get("material_fingerprint", ""),
         )
 
 

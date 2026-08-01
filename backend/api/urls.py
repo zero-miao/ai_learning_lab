@@ -5,6 +5,7 @@ from .views import (
     AITaskViewSet,
     ExamViewSet,
     MaterialViewSet,
+    NoteViewSet,
     QuestionViewSet,
     TopicViewSet,
     health_check,
@@ -14,6 +15,7 @@ router = DefaultRouter()
 router.register(r"topics", TopicViewSet)
 router.register(r"materials", MaterialViewSet)
 router.register(r"questions", QuestionViewSet)
+router.register(r"notes", NoteViewSet)
 router.register(r"exams", ExamViewSet)
 router.register(r"ai-tasks", AITaskViewSet)
 

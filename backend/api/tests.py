@@ -4,7 +4,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from .models import AIResponse, AITask, Exam, Material, ReviewRecord, Topic
+from .models import AIResponse, AITask, Exam, Material, Note, ReviewRecord, Topic
 from .task_service import execute_task, recover_interrupted_tasks
 
 
@@ -46,6 +46,85 @@ class AsyncTaskApiTests(TestCase):
         self.assertEqual(first.status_code, 202)
         self.assertEqual(second.status_code, 202)
         self.assertEqual(first.data["task"]["id"], second.data["task"]["id"])
+
+    @patch("api.task_service.AIGateway.generate_note_draft")
+    def test_note_draft_worker_and_confirmation(self, generate_note_draft):
+        generate_note_draft.return_value = "## 核心结论\nQuerySet 可以组合。"
+        response = self.client.post(
+            f"/api/topics/{self.topic.id}/note-drafts/", format="json"
+        )
+        self.assertEqual(response.status_code, 202)
+        task = AITask.objects.get(pk=response.data["task"]["id"])
+        self.assertEqual(task.task_type, "note_draft")
+        task.status = "running"
+        task.attempt_count = 1
+        task.save()
+
+        execute_task(task.id)
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, "succeeded")
+        self.assertEqual(task.result_json["content"], generate_note_draft.return_value)
+        confirm_response = self.client.post(
+            "/api/notes/",
+            {
+                "topic": self.topic.id,
+                "title": task.result_json["title"],
+                "content": task.result_json["content"],
+                "source_task": task.id,
+            },
+            format="json",
+        )
+        self.assertEqual(confirm_response.status_code, 201)
+        self.assertEqual(Note.objects.count(), 1)
+        note = Note.objects.first()
+        self.assertEqual(note.source_task_id, task.id)
+        self.assertEqual(
+            note.material_fingerprint, task.input_json["material_fingerprint"]
+        )
+
+        topic_response = self.client.get(f"/api/topics/{self.topic.id}/")
+        self.assertTrue(topic_response.data["has_current_note"])
+        repeated_response = self.client.post(
+            f"/api/topics/{self.topic.id}/note-drafts/", format="json"
+        )
+        self.assertEqual(repeated_response.status_code, 409)
+
+        updated_note = self.client.patch(
+            f"/api/notes/{note.id}/",
+            {"content": "补充了适用边界。"},
+            format="json",
+        )
+        self.assertEqual(updated_note.status_code, 200)
+        note.refresh_from_db()
+        self.assertEqual(note.content, "补充了适用边界。")
+
+        regenerate_response = self.client.post(
+            f"/api/topics/{self.topic.id}/note-drafts/",
+            {"instructions": "重点说明查询优化。"},
+            format="json",
+        )
+        self.assertEqual(regenerate_response.status_code, 202)
+        regeneration_task = AITask.objects.get(
+            pk=regenerate_response.data["task"]["id"]
+        )
+        self.assertEqual(
+            regeneration_task.input_json["instructions"], "重点说明查询优化。"
+        )
+        regeneration_task.status = "running"
+        regeneration_task.attempt_count = 1
+        regeneration_task.save()
+        generate_note_draft.reset_mock()
+        execute_task(regeneration_task.id)
+        generate_note_draft.assert_called_once_with(
+            self.topic.title,
+            self.topic.goal,
+            regeneration_task.input_json["context"],
+            "重点说明查询优化。",
+        )
+        delete_response = self.client.delete(f"/api/notes/{note.id}/")
+        self.assertEqual(delete_response.status_code, 204)
+        self.assertFalse(Note.objects.filter(pk=note.id).exists())
 
     @patch("api.task_service.AIGateway.generate_exam")
     def test_exam_worker_creates_questions(self, generate_exam):
