@@ -2,6 +2,10 @@ from django.db import models
 
 
 class Topic(models.Model):
+    TYPE_CHOICES = [
+        ("learning", "学习"),
+        ("discussion", "讨论"),
+    ]
     STATUS_CHOICES = [
         ("draft", "草稿"),
         ("learning", "学习中"),
@@ -18,6 +22,13 @@ class Topic(models.Model):
     ]
 
     title = models.CharField(max_length=255, verbose_name="标题")
+    type = models.CharField(
+        max_length=20,
+        choices=TYPE_CHOICES,
+        default="learning",
+        db_index=True,
+        verbose_name="话题类型",
+    )
     goal = models.TextField(blank=True, verbose_name="学习目标")
     scope = models.TextField(blank=True, verbose_name="学习范围")
     status = models.CharField(
@@ -46,6 +57,10 @@ class Material(models.Model):
         ("url", "网页链接"),
         ("text", "纯文本"),
     ]
+    SOURCE_TYPE_CHOICES = [
+        ("manual", "人工添加"),
+        ("ai_recommended", "AI 推荐"),
+    ]
 
     IMPORT_STATUS_CHOICES = [
         ("pending", "处理中"),
@@ -60,6 +75,13 @@ class Material(models.Model):
         verbose_name="所属主题",
     )
     type = models.CharField(max_length=10, choices=TYPE_CHOICES, verbose_name="类型")
+    source_type = models.CharField(
+        max_length=20,
+        choices=SOURCE_TYPE_CHOICES,
+        default="manual",
+        db_index=True,
+        verbose_name="来源类型",
+    )
     source_url = models.URLField(
         max_length=500, blank=True, null=True, verbose_name="来源URL"
     )

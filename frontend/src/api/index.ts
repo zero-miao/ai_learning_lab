@@ -10,6 +10,8 @@ export interface Material {
   topic: number;
   type: 'url' | 'text';
   type_display: string;
+  source_type: 'manual' | 'ai_recommended';
+  source_type_display: string;
   source_url: string;
   title: string;
   raw_text: string;
@@ -33,6 +35,8 @@ export interface AIResponse {
 export interface Topic {
   id: number;
   title: string;
+  type: 'learning' | 'discussion';
+  type_display: string;
   goal: string;
   scope: string;
   status: 'draft' | 'learning' | 'exam_ready' | 'reviewing' | 'archived';

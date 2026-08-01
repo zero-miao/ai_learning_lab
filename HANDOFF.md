@@ -63,9 +63,11 @@ LLM_API_KEY=ollama
 
 ## 4. 当前已完成功能
 
-- 主题管理：`Topic` 的创建、列表和详情。
-- 材料导入：网页抓取或纯文本粘贴、清洗及 `MaterialChunk` 自动分段。
-- 阅读页：沉浸式阅读、划词提问和 AI 侧边助手。
+- 主题管理：`Topic` 的创建、列表和详情；支持学习型 / 讨论型分类、搜索与筛选。
+- 材料导入：网页抓取或纯文本粘贴、清洗及 `MaterialChunk` 自动分段；材料标记人工添加
+  或 AI 推荐来源。
+- 阅读页：`UniversalReader` HTML 外壳、暗色模式、来源入口、任务状态可见性、划词提问和
+  AI 侧边助手。
 - Assessment 闭环：迁移性题目生成、作答、AI 阅卷、掌握度更新和首次复习记录。
 - Django Admin：所有核心模型均已注册。
 - LLM 网关：支持 OpenAI-compatible Provider 与本地 Ollama。
@@ -184,7 +186,7 @@ cd /Users/meiao/ai_workspace/ai-learning-lab
 (cd frontend && npm run build)
 ```
 
-当前已通过 Ruff、Django API 测试（10 项）、Django check、TypeScript `tsc -b` 与
+当前已通过 Ruff、Django API 测试（11 项）、Django check、TypeScript `tsc -b` 与
 Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超过 500 kB，
 后续可通过代码分割优化。
 
@@ -200,16 +202,17 @@ Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超�
 当前进入 V1-alpha 的阶段化开发。完整范围、原型和验收标准见
 [docs/V1-ALPHA.md](file:///Users/meiao/ai_workspace/ai-learning-lab/docs/V1-ALPHA.md)。
 
-第一个实现迭代聚焦阶段 1 及其必要数据契约：
+阶段 1 已完成：
 
-1. 为 `Topic` 增加学习型 / 讨论型类型，为 `Material` 增加人工添加 / AI 推荐来源标记。
-2. 重构主页为话题列表、搜索、全部 / 学习 / 讨论筛选和“新建话题”入口。
-3. 新建话题的初始材料首版支持 URL 与粘贴文本，复用既有材料处理链路。
-4. 建立 `UniversalReader` 外壳，优先优化已支持的 HTML 正文阅读；不在本阶段伪支持
-   PDF、音视频或文件上传。
+1. `api.0010_material_source_type_topic_type` 已应用，`Topic.type` 和
+   `Material.source_type` 已贯穿 API 与 Django Admin。
+2. 主页已支持搜索、全部 / 学习 / 讨论筛选，以及带可选 URL 或粘贴文本初始材料的新建话题。
+3. `frontend/src/components/UniversalReader/` 已提供 HTML 正文阅读外壳和暗色模式；PDF、
+   音视频和文件上传仍未实现，不能在 UI 中伪支持。
 
-讨论型 AI 对话、概念卡片、高亮、知识图谱和阶段总结按 V1-alpha 后续阶段推进。所有长耗时
-AI 能力继续走 `AITask` 异步任务和前端轮询，不能退回为阻塞请求。
+下一步实施阶段 2：在阅读中加入可靠的选中文本操作菜单、概念草稿与来源锚点。讨论型 AI
+对话、高亮、知识图谱和阶段总结按 V1-alpha 后续阶段推进。所有长耗时 AI 能力继续走
+`AITask` 异步任务和前端轮询，不能退回为阻塞请求。
 
 ## 11. 接手原则
 

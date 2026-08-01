@@ -1,0 +1,71 @@
+.universal-reader {
+  min-height: 100%;
+  padding: clamp(28px, 6vw, 72px) clamp(24px, 8vw, 104px);
+  color: #1f2937;
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 10px 32px rgba(15, 23, 42, 0.06);
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.universal-reader--dark {
+  color: #e5e7eb;
+  background: #171717;
+}
+
+.universal-reader__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.universal-reader__title {
+  max-width: 760px;
+  margin: 18px 0 0 !important;
+  color: inherit !important;
+  font-size: clamp(28px, 3.5vw, 42px) !important;
+  line-height: 1.25 !important;
+  letter-spacing: -0.02em;
+}
+
+.universal-reader__divider {
+  margin: 32px 0 36px !important;
+}
+
+.universal-reader--dark .universal-reader__divider {
+  border-color: #3f3f46;
+}
+
+.universal-reader__content {
+  max-width: 760px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 19px;
+  line-height: 1.9;
+  letter-spacing: 0.012em;
+}
+
+.universal-reader__content p {
+  margin: 0 0 1.5em;
+  white-space: pre-wrap;
+}
+
+.universal-reader__content ::selection {
+  color: inherit;
+  background: #bae0ff;
+}
+
+.universal-reader--dark .universal-reader__content ::selection {
+  background: #1554ad;
+}
+
+@media (max-width: 640px) {
+  .universal-reader__header {
+    flex-direction: column;
+  }
+
+  .universal-reader__content {
+    font-size: 18px;
+    line-height: 1.8;
+  }
+}

@@ -16,15 +16,29 @@ from .models import (
 
 @admin.register(Topic)
 class TopicAdmin(admin.ModelAdmin):
-    list_display = ("title", "status", "mastery_level", "created_at", "updated_at")
-    list_filter = ("status", "mastery_level")
+    list_display = (
+        "title",
+        "type",
+        "status",
+        "mastery_level",
+        "created_at",
+        "updated_at",
+    )
+    list_filter = ("type", "status", "mastery_level")
     search_fields = ("title", "goal", "scope")
 
 
 @admin.register(Material)
 class MaterialAdmin(admin.ModelAdmin):
-    list_display = ("title", "topic", "type", "import_status", "created_at")
-    list_filter = ("type", "import_status")
+    list_display = (
+        "title",
+        "topic",
+        "type",
+        "source_type",
+        "import_status",
+        "created_at",
+    )
+    list_filter = ("type", "source_type", "import_status")
     search_fields = ("title", "source_url", "raw_text")
 
 

@@ -60,6 +60,9 @@ class MaterialSerializer(serializers.ModelSerializer):
     chunks = MaterialChunkSerializer(many=True, read_only=True)
     ai_responses = AIResponseSerializer(many=True, read_only=True)
     type_display = serializers.CharField(source="get_type_display", read_only=True)
+    source_type_display = serializers.CharField(
+        source="get_source_type_display", read_only=True
+    )
     import_status_display = serializers.CharField(
         source="get_import_status_display", read_only=True
     )
@@ -71,6 +74,8 @@ class MaterialSerializer(serializers.ModelSerializer):
             "topic",
             "type",
             "type_display",
+            "source_type",
+            "source_type_display",
             "source_url",
             "title",
             "raw_text",
@@ -106,6 +111,7 @@ class NoteSerializer(serializers.ModelSerializer):
 
 
 class TopicSerializer(serializers.ModelSerializer):
+    type_display = serializers.CharField(source="get_type_display", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     mastery_level_display = serializers.CharField(
         source="get_mastery_level_display", read_only=True
@@ -123,6 +129,8 @@ class TopicSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "title",
+            "type",
+            "type_display",
             "goal",
             "scope",
             "status",

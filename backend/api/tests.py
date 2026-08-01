@@ -38,6 +38,35 @@ class AsyncTaskApiTests(TestCase):
         self.assertEqual(first.data["task"]["status"], "pending")
         self.assertNotEqual(first.data["question"]["id"], second.data["question"]["id"])
 
+    def test_topic_type_and_material_source_type_are_exposed(self):
+        topic_response = self.client.post(
+            "/api/topics/",
+            {
+                "title": "是否学习向量数据库",
+                "type": "discussion",
+                "goal": "判断是否值得投入时间。",
+            },
+            format="json",
+        )
+        self.assertEqual(topic_response.status_code, 201)
+        self.assertEqual(topic_response.data["type"], "discussion")
+        self.assertEqual(topic_response.data["type_display"], "讨论")
+
+        material_response = self.client.post(
+            "/api/materials/",
+            {
+                "topic": topic_response.data["id"],
+                "type": "text",
+                "source_type": "ai_recommended",
+                "title": "向量数据库概览",
+                "raw_text": "向量数据库用于高维向量相似度检索。",
+            },
+            format="json",
+        )
+        self.assertEqual(material_response.status_code, 201)
+        self.assertEqual(material_response.data["source_type"], "ai_recommended")
+        self.assertEqual(material_response.data["source_type_display"], "AI 推荐")
+
     def test_exam_request_returns_reused_pending_task(self):
         first = self.client.post("/api/exams/", {"topic": self.topic.id}, format="json")
         second = self.client.post(

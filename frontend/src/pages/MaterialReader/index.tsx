@@ -1,12 +1,13 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Alert, Button, Divider, Drawer, FloatButton, Input, Layout, List, message, Space, Typography } from 'antd';
 import { ArrowLeftOutlined, CommentOutlined, ReloadOutlined, SendOutlined } from '@ant-design/icons';
 import { createQuestion, getQuestion, getTopic, listAITasks, retryAITask } from '../../api';
 import type { AITask, Material, Topic } from '../../api';
 import { useAITaskPolling } from '../../hooks/useAITaskPolling';
+import UniversalReader from '../../components/UniversalReader';
 
-const { Title, Paragraph, Text } = Typography;
+const { Text } = Typography;
 const { Content } = Layout;
 
 type ChatItem = {
@@ -29,8 +30,8 @@ const MaterialReader: React.FC = () => {
   const [chatHistory, setChatHistory] = useState<ChatItem[]>([]);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [activeTaskType, setActiveTaskType] = useState<string | null>(null);
+  const [darkMode, setDarkMode] = useState(false);
   const navigate = useNavigate();
-  const contentRef = useRef<HTMLDivElement>(null);
 
   const loadData = useCallback(async () => {
     if (!topicId || !materialId) return;
@@ -98,13 +99,9 @@ const MaterialReader: React.FC = () => {
     });
   }, [activeTaskId, material]);
 
-  const handleMouseUp = () => {
-    const selection = window.getSelection();
-    const text = selection?.toString().trim();
-    if (text) {
-      setSelectedText(text);
-      setChatVisible(true);
-    }
+  const handleSelectText = (text: string) => {
+    setSelectedText(text);
+    setChatVisible(true);
   };
 
   const handleAsk = async () => {
@@ -141,16 +138,41 @@ const MaterialReader: React.FC = () => {
   if (!material) return <div style={{ padding: '24px' }}>未找到材料</div>;
 
   return (
-    <Layout style={{ height: 'calc(100vh - 64px)', background: '#fdfdfd' }}>
-      <Content style={{ padding: '40px 24px', overflowY: 'auto', background: 'transparent' }}>
-        <div style={{ maxWidth: '720px', margin: '0 auto', background: '#fff', padding: '60px 80px', boxShadow: '0 2px 12px rgba(0,0,0,0.05)', borderRadius: '8px', minHeight: '100%' }}>
-          <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(`/topics/${topicId}`)} style={{ marginBottom: '40px', color: '#999' }}>返回主题</Button>
-          <Title level={1} style={{ marginBottom: '48px', fontSize: '32px', fontWeight: 600 }}>{material.title}</Title>
-          <div ref={contentRef} onMouseUp={handleMouseUp} className="reading-content">
-            {material.clean_text.split(/\n+/).map((paragraph, index) => paragraph.trim() && (
-              <Paragraph key={index} style={{ fontSize: '18px', lineHeight: '1.8', marginBottom: '1.5em', color: '#2c3e50', textAlign: 'justify', letterSpacing: '0.02em' }}>{paragraph.trim()}</Paragraph>
-            ))}
-          </div>
+    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: darkMode ? '#0f0f0f' : '#f5f7fa' }}>
+      <Content
+        style={{
+          padding: '28px 24px 56px',
+          overflowY: 'auto',
+          background: 'transparent',
+        }}
+      >
+        <div style={{ maxWidth: 980, margin: '0 auto' }}>
+          <Button
+            type="text"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => navigate(`/topics/${topicId}`)}
+            style={{ marginBottom: 20, color: darkMode ? '#d4d4d8' : '#595959' }}
+          >
+            返回话题
+          </Button>
+          {activeTask && (
+            <Alert
+              type="info"
+              showIcon
+              message={
+                activeTaskType === 'briefing'
+                  ? '阅读前导正在生成，你可以继续阅读。'
+                  : 'AI 正在处理你的问题，你可以继续阅读。'
+              }
+              style={{ marginBottom: 16 }}
+            />
+          )}
+          <UniversalReader
+            material={material}
+            darkMode={darkMode}
+            onDarkModeChange={setDarkMode}
+            onSelectText={handleSelectText}
+          />
         </div>
       </Content>
       <Drawer title="AI 学习助手" placement="right" width={400} onClose={() => setChatVisible(false)} open={chatVisible} mask={false}>
@@ -169,7 +191,6 @@ const MaterialReader: React.FC = () => {
               </List.Item>
             )} />
           </div>
-          {activeTask && <Alert type="info" showIcon message={activeTaskType === 'briefing' ? '正在生成阅读前导，可继续阅读或稍后返回。' : 'AI 正在思考，可继续阅读或稍后返回。'} style={{ marginBottom: 8 }} />}
           <Divider style={{ margin: '8px 0' }} />
           {selectedText && (
             <Alert

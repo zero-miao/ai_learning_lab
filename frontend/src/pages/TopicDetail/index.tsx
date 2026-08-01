@@ -233,6 +233,9 @@ const TopicDetail: React.FC = () => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <Title level={2}>{topic.title}</Title>
             <Space>
+              <Tag color={topic.type === 'learning' ? 'blue' : 'purple'}>
+                {topic.type_display}
+              </Tag>
               <Tag color="blue">{topic.status_display}</Tag>
               <Tag color="green">掌握度: {topic.mastery_level_display}</Tag>
               <Button
@@ -345,6 +348,9 @@ const TopicDetail: React.FC = () => {
                   description={
                     <Space>
                       <Tag>{item.type_display}</Tag>
+                      <Tag color={item.source_type === 'manual' ? 'default' : 'purple'}>
+                        {item.source_type_display}
+                      </Tag>
                       <Tag color={item.import_status === 'success' ? 'success' : 'warning'}>
                         {item.import_status_display}
                       </Tag>
