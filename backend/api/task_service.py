@@ -11,7 +11,14 @@ RETRY_DELAYS_SECONDS = (5, 15, 45)
 
 
 def enqueue_or_reuse(
-    task_type, *, topic=None, material=None, question=None, exam=None, input_json=None
+    task_type,
+    *,
+    topic=None,
+    material=None,
+    question=None,
+    exam=None,
+    review=None,
+    input_json=None,
 ):
     filters = {"task_type": task_type, "status__in": ("pending", "running")}
     if material is not None:
@@ -22,6 +29,8 @@ def enqueue_or_reuse(
         filters["question"] = question
     if exam is not None:
         filters["exam"] = exam
+    if review is not None:
+        filters["review"] = review
 
     with transaction.atomic():
         existing = AITask.objects.select_for_update().filter(**filters).first()
@@ -34,6 +43,7 @@ def enqueue_or_reuse(
             material=material,
             question=question,
             exam=exam,
+            review=review,
             input_json=input_json or {},
             next_run_at=timezone.now(),
             model=os.getenv("LLM_MODEL", ""),
@@ -99,7 +109,7 @@ def claim_due_task():
 
 def execute_task(task_id):
     task = AITask.objects.select_related(
-        "topic", "material", "question", "exam__topic"
+        "topic", "material", "question", "exam__topic", "review__topic", "review__exam"
     ).get(pk=task_id)
     try:
         result = _run_task(task)
@@ -126,6 +136,8 @@ def _run_task(task):
         return _generate_exam(task)
     if task.task_type == "grade_exam":
         return _grade_exam(task)
+    if task.task_type == "review_prompt":
+        return _generate_review_prompt(task)
     raise ValueError(f"不支持的 AI 任务类型：{task.task_type}")
 
 
@@ -269,6 +281,32 @@ def _grade_exam(task):
             due_at=timezone.now() + timedelta(days=review_after_days),
         )
     return {"exam_id": exam.id, "score": exam.score}
+
+
+def _generate_review_prompt(task):
+    review = task.review
+    if review is None:
+        raise ValueError("复习记录不存在。")
+    topic = review.topic
+    context = str(task.input_json.get("context", "")).strip()
+    if not context:
+        raise ValueError("复习记录缺少可用的学习上下文。")
+
+    exam_feedback = review.exam.feedback if review.exam else ""
+    content = AIGateway.generate_review_prompt(
+        topic.title, topic.goal, context, exam_feedback
+    ).strip()
+    if not content:
+        raise ValueError("AI 未生成复习提示。")
+
+    generated_at = timezone.now()
+    updated = ReviewRecord.objects.filter(pk=review.id, result="pending").update(
+        review_prompt=content,
+        review_prompt_generated_at=generated_at,
+    )
+    if not updated:
+        raise ValueError("复习记录已完成，无法写入新的复习提示。")
+    return {"review_id": review.id, "content": content}
 
 
 def _handle_failure(task_id, error):

@@ -1,3 +1,4 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -227,6 +228,72 @@ class AsyncTaskApiTests(TestCase):
         self.assertTrue(
             ReviewRecord.objects.filter(topic=self.topic, exam=exam).exists()
         )
+
+    def test_review_list_and_completion(self):
+        due_review = ReviewRecord.objects.create(
+            topic=self.topic,
+            due_at=timezone.now() - timedelta(hours=1),
+        )
+        future_review = ReviewRecord.objects.create(
+            topic=self.topic,
+            due_at=timezone.now() + timedelta(days=3),
+        )
+        ReviewRecord.objects.create(
+            topic=self.topic,
+            due_at=timezone.now() - timedelta(days=1),
+            result="completed",
+            completed_at=timezone.now() - timedelta(hours=2),
+        )
+
+        response = self.client.get("/api/reviews/?result=pending")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in response.data], [due_review.id, future_review.id]
+        )
+        self.assertEqual(response.data[0]["topic_title"], self.topic.title)
+
+        complete_response = self.client.post(
+            f"/api/reviews/{due_review.id}/complete/", format="json"
+        )
+
+        self.assertEqual(complete_response.status_code, 200)
+        due_review.refresh_from_db()
+        self.assertEqual(due_review.result, "completed")
+        self.assertIsNotNone(due_review.completed_at)
+
+        repeated_response = self.client.post(
+            f"/api/reviews/{due_review.id}/complete/", format="json"
+        )
+        self.assertEqual(repeated_response.status_code, 400)
+
+    @patch("api.task_service.AIGateway.generate_review_prompt")
+    def test_review_prompt_worker_persists_prompt(self, generate_review_prompt):
+        generate_review_prompt.return_value = (
+            "## 主动回忆\n\n1. QuerySet 为什么可以组合？"
+        )
+        review = ReviewRecord.objects.create(
+            topic=self.topic,
+            due_at=timezone.now(),
+        )
+
+        response = self.client.post(f"/api/reviews/{review.id}/prompt/", format="json")
+
+        self.assertEqual(response.status_code, 202)
+        task = AITask.objects.get(pk=response.data["task"]["id"])
+        self.assertEqual(task.task_type, "review_prompt")
+        self.assertEqual(task.review_id, review.id)
+        task.status = "running"
+        task.attempt_count = 1
+        task.save()
+
+        execute_task(task.id)
+
+        task.refresh_from_db()
+        review.refresh_from_db()
+        self.assertEqual(task.status, "succeeded")
+        self.assertEqual(review.review_prompt, generate_review_prompt.return_value)
+        self.assertIsNotNone(review.review_prompt_generated_at)
 
     @patch(
         "api.task_service.AIGateway.generate_briefing",

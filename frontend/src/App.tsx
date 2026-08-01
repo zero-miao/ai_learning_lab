@@ -1,9 +1,10 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { Layout, Typography } from 'antd';
+import { Button, Layout, Typography } from 'antd';
 import TopicList from './pages/TopicList';
 import TopicDetail from './pages/TopicDetail';
 import MaterialReader from './pages/MaterialReader';
 import ExamPage from './pages/Exam';
+import ReviewPage from './pages/Review';
 
 const { Header, Content, Footer } = Layout;
 const { Title } = Typography;
@@ -25,6 +26,9 @@ function App() {
           <Title level={3} style={{ margin: 0, cursor: 'pointer' }} onClick={() => window.location.href = '/'}>
             AI Learning Lab
           </Title>
+          <Button style={{ marginLeft: 'auto' }} onClick={() => window.location.href = '/reviews'}>
+            复习计划
+          </Button>
         </Header>
         <Content style={{ background: '#f5f7fa' }}>
           <Routes>
@@ -33,6 +37,7 @@ function App() {
             <Route path="/topics/:id" element={<TopicDetail />} />
             <Route path="/topics/:topicId/materials/:materialId" element={<MaterialReader />} />
             <Route path="/topics/:topicId/exam" element={<ExamPage />} />
+            <Route path="/reviews" element={<ReviewPage />} />
           </Routes>
         </Content>
         <Footer style={{ textAlign: 'center' }}>

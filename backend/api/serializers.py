@@ -9,6 +9,7 @@ from .models import (
     MaterialChunk,
     Note,
     Question,
+    ReviewRecord,
     Topic,
 )
 from .note_service import build_note_source
@@ -192,6 +193,38 @@ class ExamSerializer(serializers.ModelSerializer):
         ]
 
 
+class ReviewRecordSerializer(serializers.ModelSerializer):
+    topic_title = serializers.CharField(source="topic.title", read_only=True)
+    topic_mastery_level = serializers.CharField(
+        source="topic.mastery_level", read_only=True
+    )
+    topic_mastery_level_display = serializers.CharField(
+        source="topic.get_mastery_level_display", read_only=True
+    )
+    result_display = serializers.CharField(source="get_result_display", read_only=True)
+    exam_score = serializers.IntegerField(source="exam.score", read_only=True)
+
+    class Meta:
+        model = ReviewRecord
+        fields = [
+            "id",
+            "topic",
+            "topic_title",
+            "topic_mastery_level",
+            "topic_mastery_level_display",
+            "exam",
+            "exam_score",
+            "due_at",
+            "completed_at",
+            "result",
+            "result_display",
+            "next_due_at",
+            "review_prompt",
+            "review_prompt_generated_at",
+        ]
+        read_only_fields = fields
+
+
 class AITaskSerializer(serializers.ModelSerializer):
     task_type_display = serializers.CharField(
         source="get_task_type_display", read_only=True
@@ -210,6 +243,7 @@ class AITaskSerializer(serializers.ModelSerializer):
             "material",
             "question",
             "exam",
+            "review",
             "result_json",
             "error_message",
             "attempt_count",

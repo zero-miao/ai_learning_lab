@@ -67,6 +67,7 @@ class AITaskAdmin(admin.ModelAdmin):
         "material",
         "question",
         "exam",
+        "review",
         "attempt_count",
         "max_attempts",
         "next_run_at",
@@ -100,6 +101,13 @@ class ExamQuestionAdmin(admin.ModelAdmin):
 
 @admin.register(ReviewRecord)
 class ReviewRecordAdmin(admin.ModelAdmin):
-    list_display = ("topic", "exam", "due_at", "result", "completed_at")
+    list_display = (
+        "topic",
+        "exam",
+        "due_at",
+        "result",
+        "review_prompt_generated_at",
+        "completed_at",
+    )
     list_filter = ("result",)
     search_fields = ("topic__title",)
