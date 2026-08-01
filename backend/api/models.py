@@ -269,6 +269,10 @@ class ReviewRecord(models.Model):
     next_due_at = models.DateTimeField(
         null=True, blank=True, verbose_name="下次复习时间"
     )
+    review_prompt = models.TextField(blank=True, verbose_name="复习提示")
+    review_prompt_generated_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="复习提示生成时间"
+    )
 
     class Meta:
         verbose_name = "复习记录"
@@ -315,6 +319,7 @@ class AITask(models.Model):
         ("generate_exam", "生成考题"),
         ("grade_exam", "阅卷评分"),
         ("note_draft", "笔记草稿"),
+        ("review_prompt", "复习提示"),
     ]
     STATUS_CHOICES = [
         ("pending", "等待执行"),
@@ -365,6 +370,14 @@ class AITask(models.Model):
         null=True,
         blank=True,
         verbose_name="关联考试",
+    )
+    review = models.ForeignKey(
+        ReviewRecord,
+        related_name="ai_tasks",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        verbose_name="关联复习记录",
     )
     input_json = models.JSONField(default=dict, blank=True, verbose_name="任务输入")
     result_json = models.JSONField(default=dict, blank=True, verbose_name="任务结果")

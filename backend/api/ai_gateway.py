@@ -134,6 +134,32 @@ class AIGateway:
         return cls._parse_json(content, "questions")
 
     @classmethod
+    def generate_review_prompt(
+        cls, topic_title: str, goal: str, context: str, exam_feedback: str
+    ) -> str:
+        provider = cls.get_provider()
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是学习复习助手。基于给定学习上下文，生成简洁的 Markdown "
+                    "复习提示，帮助用户先主动回忆再回看材料。包含 3 个不直接给出"
+                    "答案的回忆或迁移问题、需要重点复盘的概念，以及一个可执行的"
+                    "微应用建议。不要虚构材料中不存在的事实，不要提供标准答案。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"学习主题：{topic_title}\n学习目标：{goal or '未提供'}\n"
+                    f"最近测验反馈：{exam_feedback or '暂无'}\n"
+                    f"学习上下文：\n{context}"
+                ),
+            },
+        ]
+        return provider.generate_response(messages)
+
+    @classmethod
     def grade_exam(
         cls,
         topic_title: str,

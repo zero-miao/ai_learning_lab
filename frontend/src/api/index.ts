@@ -83,11 +83,28 @@ export interface Exam {
   questions: ExamQuestion[];
 }
 
+export interface ReviewRecord {
+  id: number;
+  topic: number;
+  topic_title: string;
+  topic_mastery_level: Topic['mastery_level'];
+  topic_mastery_level_display: string;
+  exam: number | null;
+  exam_score: number | null;
+  due_at: string;
+  completed_at: string | null;
+  result: 'pending' | 'completed';
+  result_display: string;
+  next_due_at: string | null;
+  review_prompt: string;
+  review_prompt_generated_at: string | null;
+}
+
 export type AITaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 export interface AITask {
   id: number;
-  task_type: 'briefing' | 'answer_question' | 'generate_exam' | 'grade_exam' | 'note_draft';
+  task_type: 'briefing' | 'answer_question' | 'generate_exam' | 'grade_exam' | 'note_draft' | 'review_prompt';
   task_type_display: string;
   status: AITaskStatus;
   status_display: string;
@@ -95,6 +112,7 @@ export interface AITask {
   material: number | null;
   question: number | null;
   exam: number | null;
+  review: number | null;
   result_json: Record<string, unknown>;
   error_message: string;
   attempt_count: number;
@@ -143,6 +161,12 @@ export const getExam = (id: number) => api.get<Exam>(`exams/${id}/`);
 export const createExam = (topic: number) => api.post<TaskResponse>('exams/', { topic });
 export const submitExam = (id: number, answers: Array<{ id: number; answer_text: string }>) =>
   api.post<TaskResponse>(`exams/${id}/submit/`, { answers });
+export const getReviews = (params?: { result?: ReviewRecord['result'] }) =>
+  api.get<ReviewRecord[]>('reviews/', { params });
+export const completeReview = (id: number) =>
+  api.post<ReviewRecord>(`reviews/${id}/complete/`);
+export const createReviewPrompt = (id: number) =>
+  api.post<TaskResponse>(`reviews/${id}/prompt/`);
 export const getAITask = (id: number) => api.get<AITask>(`ai-tasks/${id}/`);
 export const listAITasks = (params: Record<string, number>) => api.get<AITask[]>('ai-tasks/', { params });
 export const retryAITask = (id: number) => api.post<AITask>(`ai-tasks/${id}/retry/`);

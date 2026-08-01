@@ -3,7 +3,7 @@ from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 
-from .models import AITask, Exam, Material, Note, Question, Topic
+from .models import AITask, Exam, Material, Note, Question, ReviewRecord, Topic
 from .note_service import build_note_source
 from .serializers import (
     AITaskSerializer,
@@ -11,6 +11,7 @@ from .serializers import (
     MaterialSerializer,
     NoteSerializer,
     QuestionSerializer,
+    ReviewRecordSerializer,
     TopicSerializer,
 )
 from .services import MaterialService
@@ -20,6 +21,21 @@ from .task_service import enqueue_or_reuse, retry_task
 @api_view(["GET"])
 def health_check(request):
     return Response({"status": "ok", "message": "AI Learning Lab API is running"})
+
+
+def _build_review_context(review):
+    materials = review.topic.materials.filter(import_status="success").exclude(
+        clean_text=""
+    )
+    material_context = "\n\n".join(
+        f"材料：{material.title}\n{material.clean_text}" for material in materials
+    )
+    note_context = "\n\n".join(
+        f"结构化笔记：{note.title}\n{note.content}" for note in review.topic.notes.all()
+    )
+    return "\n\n".join(
+        section for section in (material_context, note_context) if section
+    )[:12000]
 
 
 class TopicViewSet(viewsets.ModelViewSet):
@@ -229,13 +245,61 @@ class ExamViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
 
+class ReviewRecordViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = ReviewRecord.objects.select_related("topic", "exam")
+    serializer_class = ReviewRecordSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        result = self.request.query_params.get("result")
+        return queryset.filter(result=result) if result else queryset
+
+    @action(detail=True, methods=["post"])
+    def complete(self, request, pk=None):
+        review = self.get_object()
+        if review.result == "completed":
+            return Response(
+                {"detail": "该复习记录已完成。"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        review.result = "completed"
+        review.completed_at = timezone.now()
+        review.save(update_fields=["result", "completed_at"])
+        return Response(ReviewRecordSerializer(review).data)
+
+    @action(detail=True, methods=["post"], url_path="prompt")
+    def create_prompt(self, request, pk=None):
+        review = self.get_object()
+        if review.result == "completed":
+            return Response(
+                {"detail": "已完成的复习记录不能再生成提示。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        context = _build_review_context(review)
+        if not context:
+            return Response(
+                {"detail": "请先保留至少一份处理成功的材料或结构化笔记。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        task, _ = enqueue_or_reuse(
+            "review_prompt",
+            topic=review.topic,
+            review=review,
+            input_json={"review_id": review.id, "context": context},
+        )
+        return Response(
+            {"task": AITaskSerializer(task).data}, status=status.HTTP_202_ACCEPTED
+        )
+
+
 class AITaskViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = AITask.objects.select_related("topic", "material", "question", "exam")
+    queryset = AITask.objects.select_related(
+        "topic", "material", "question", "exam", "review"
+    )
     serializer_class = AITaskSerializer
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        for field in ("topic", "material", "question", "exam"):
+        for field in ("topic", "material", "question", "exam", "review"):
             value = self.request.query_params.get(field)
             if value:
                 queryset = queryset.filter(**{f"{field}_id": value})

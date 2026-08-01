@@ -7,6 +7,7 @@ from .views import (
     MaterialViewSet,
     NoteViewSet,
     QuestionViewSet,
+    ReviewRecordViewSet,
     TopicViewSet,
     health_check,
 )
@@ -17,6 +18,7 @@ router.register(r"materials", MaterialViewSet)
 router.register(r"questions", QuestionViewSet)
 router.register(r"notes", NoteViewSet)
 router.register(r"exams", ExamViewSet)
+router.register(r"reviews", ReviewRecordViewSet)
 router.register(r"ai-tasks", AITaskViewSet)
 
 urlpatterns = [
