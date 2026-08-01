@@ -185,6 +185,7 @@ export interface ReviewRecord {
   topic_mastery_level_display: string;
   exam: number | null;
   exam_score: number | null;
+  previous_review: number | null;
   due_at: string;
   completed_at: string | null;
   result: 'pending' | 'completed';
@@ -192,13 +193,17 @@ export interface ReviewRecord {
   next_due_at: string | null;
   review_prompt: string;
   review_prompt_generated_at: string | null;
+  response_text: string;
+  feedback: string;
+  score: number | null;
+  graded_at: string | null;
 }
 
 export type AITaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 export interface AITask {
   id: number;
-  task_type: 'briefing' | 'answer_question' | 'concept_draft' | 'generate_exam' | 'grade_exam' | 'note_draft' | 'review_prompt';
+  task_type: 'briefing' | 'answer_question' | 'concept_draft' | 'generate_exam' | 'grade_exam' | 'note_draft' | 'review_prompt' | 'grade_review' | 'discussion_opening' | 'discussion_assessment' | 'discussion_reply' | 'learning_path';
   task_type_display: string;
   status: AITaskStatus;
   status_display: string;
@@ -318,6 +323,10 @@ export const completeReview = (id: number) =>
   api.post<ReviewRecord>(`reviews/${id}/complete/`);
 export const createReviewPrompt = (id: number) =>
   api.post<TaskResponse>(`reviews/${id}/prompt/`);
+export const submitReview = (id: number, responseText: string) =>
+  api.post<TaskResponse>(`reviews/${id}/submit/`, {
+    response_text: responseText,
+  });
 export const getAITask = (id: number) => api.get<AITask>(`ai-tasks/${id}/`);
 export const listAITasks = (params: Record<string, number>) => api.get<AITask[]>('ai-tasks/', { params });
 export const retryAITask = (id: number) => api.post<AITask>(`ai-tasks/${id}/retry/`);

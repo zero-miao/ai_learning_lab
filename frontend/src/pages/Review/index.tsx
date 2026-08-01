@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Button, Card, Empty, List, Space, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Empty, Form, Input, List, Modal, Space, Tag, Typography, message } from 'antd';
 import { ArrowRightOutlined, CheckOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { completeReview, createReviewPrompt, getReviews } from '../../api';
+import { createReviewPrompt, getReviews, submitReview } from '../../api';
 import type { AITask, ReviewRecord } from '../../api';
 import { useAITaskPolling } from '../../hooks/useAITaskPolling';
 
@@ -13,8 +13,10 @@ const formatDateTime = (value: string) => new Date(value).toLocaleString();
 const ReviewPage: React.FC = () => {
   const [reviews, setReviews] = useState<ReviewRecord[]>([]);
   const [loading, setLoading] = useState(false);
-  const [completingId, setCompletingId] = useState<number | null>(null);
   const [promptTaskId, setPromptTaskId] = useState<number | null>(null);
+  const [gradeTaskId, setGradeTaskId] = useState<number | null>(null);
+  const [reviewForSubmission, setReviewForSubmission] = useState<ReviewRecord | null>(null);
+  const [submissionForm] = Form.useForm<{ response_text: string }>();
   const navigate = useNavigate();
 
   const fetchReviews = async () => {
@@ -46,17 +48,32 @@ const ReviewPage: React.FC = () => {
     },
   });
 
-  const handleComplete = async (review: ReviewRecord) => {
+  const gradeTask = useAITaskPolling(gradeTaskId, {
+    onSucceeded: () => {
+      message.success('复盘反馈已生成，下次复习已安排');
+      setGradeTaskId(null);
+      setReviewForSubmission(null);
+      submissionForm.resetFields();
+      void fetchReviews();
+    },
+    onFailed: (task: AITask) => {
+      message.error(task.error_message || '复盘反馈生成失败');
+      setGradeTaskId(null);
+    },
+  });
+
+  const handleSubmitReview = async (values: { response_text: string }) => {
+    if (!reviewForSubmission) return;
     try {
-      setCompletingId(review.id);
-      await completeReview(review.id);
-      message.success('已记录本次复习完成');
-      await fetchReviews();
+      const response = await submitReview(
+        reviewForSubmission.id,
+        values.response_text,
+      );
+      setGradeTaskId(response.data.task.id);
+      message.info('已提交复盘反馈任务');
     } catch (error) {
-      console.error('Failed to complete review:', error);
-      message.error('更新复习记录失败');
-    } finally {
-      setCompletingId(null);
+      console.error('Failed to submit review:', error);
+      message.error('提交复盘失败');
     }
   };
 
@@ -102,13 +119,18 @@ const ReviewPage: React.FC = () => {
         </Button>,
         canComplete ? (
           <Button
-            key="complete"
+            key="submit"
             type="primary"
             icon={<CheckOutlined />}
-            loading={completingId === review.id}
-            onClick={() => void handleComplete(review)}
+            disabled={gradeTaskId !== null}
+            onClick={() => {
+              setReviewForSubmission(review);
+              submissionForm.setFieldsValue({
+                response_text: review.response_text,
+              });
+            }}
           >
-            完成本次复习
+            提交复盘
           </Button>
         ) : null,
       ]}
@@ -137,6 +159,17 @@ const ReviewPage: React.FC = () => {
               <Text type="secondary">
                 下次复习：{formatDateTime(review.next_due_at)}
               </Text>
+            )}
+            {review.score !== null && (
+              <Text type="secondary">本次复盘得分：{review.score} 分</Text>
+            )}
+            {review.feedback && (
+              <div style={{ marginTop: 12 }}>
+                <Text strong>AI 复盘反馈</Text>
+                <Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
+                  {review.feedback}
+                </Paragraph>
+              </div>
             )}
             {review.review_prompt && (
               <div style={{ marginTop: 12 }}>
@@ -202,6 +235,18 @@ const ReviewPage: React.FC = () => {
           style={{ marginBottom: 16 }}
         />
       )}
+      {gradeTaskId && (
+        <Alert
+          type="info"
+          showIcon
+          message={
+            gradeTask?.status === 'running'
+              ? 'AI 正在分析复盘回答并安排下一次复习。'
+              : '复盘反馈任务已提交，正在等待执行。'
+          }
+          style={{ marginBottom: 16 }}
+        />
+      )}
 
       {renderSection(
         '待复习',
@@ -216,6 +261,57 @@ const ReviewPage: React.FC = () => {
         false,
       )}
       {renderSection('已完成', '保留完成记录，便于回顾学习节奏。', completedReviews, false)}
+
+      <Modal
+        title="提交复盘"
+        open={Boolean(reviewForSubmission)}
+        onCancel={() => {
+          if (gradeTaskId) return;
+          setReviewForSubmission(null);
+          submissionForm.resetFields();
+        }}
+        onOk={() => submissionForm.submit()}
+        confirmLoading={gradeTaskId !== null}
+        okText="获取 AI 反馈"
+        cancelButtonProps={{ disabled: gradeTaskId !== null }}
+        closable={gradeTaskId === null}
+        maskClosable={gradeTaskId === null}
+        width={720}
+      >
+        {reviewForSubmission?.review_prompt ? (
+          <Alert
+            type="info"
+            showIcon
+            message="复习提示"
+            description={
+              <div style={{ whiteSpace: 'pre-wrap' }}>
+                {reviewForSubmission.review_prompt}
+              </div>
+            }
+            style={{ marginBottom: 16 }}
+          />
+        ) : (
+          <Alert
+            type="warning"
+            showIcon
+            message="尚未生成复习提示"
+            description="可以直接写下主动回忆和应用过程，或关闭弹窗后先生成提示。"
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        <Form form={submissionForm} layout="vertical" onFinish={handleSubmitReview}>
+          <Form.Item
+            name="response_text"
+            label="本次复盘回答"
+            rules={[{ required: true, message: '请写下你的主动回忆或应用回答' }]}
+          >
+            <Input.TextArea
+              rows={10}
+              placeholder="例如：先解释关键概念，再说明它在一个具体场景中如何使用，以及仍不确定的部分。"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };

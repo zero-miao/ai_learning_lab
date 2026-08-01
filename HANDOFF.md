@@ -82,8 +82,8 @@ LLM_API_KEY=ollama
 - 异步 AI 交互：阅读前导、问答、出题和阅卷都通过 `AITask` 后台执行。
 - 结构化笔记：基于已处理材料异步生成 Markdown 草稿，用户确认后保存为 `Note`；
   支持编辑、删除和携带用户要求的再次生成。
-- 复习工作流：复习计划页按待复习、后续计划和已完成展示 `ReviewRecord`；用户可进入
-  主题回顾后标记完成，并异步生成可持久化的 Markdown 复习提示。
+- 复习工作流：复习计划页按待复习、后续计划和已完成展示 `ReviewRecord`；用户可异步生成
+  Markdown 复习提示，提交主动回忆/应用回答后获得 AI 反馈和下一轮复习安排。
 
 ## 5. 异步任务架构
 
@@ -125,6 +125,7 @@ pending -> running -> succeeded
 | 考试生成 | `POST /api/exams/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 阅卷 | `POST /api/exams/{id}/submit/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 复习提示 | `POST /api/reviews/{id}/prompt/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
+| 复盘提交 | `POST /api/reviews/{id}/submit/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 失败重试 | `POST /api/ai-tasks/{id}/retry/` | `202`，任务重置为 `pending` | - |
 
 不要让前端等待 LLM 的完成响应。页面应先显示任务提交状态，再通过轮询展示成功、失败或重试入口。
@@ -133,6 +134,7 @@ pending -> running -> succeeded
 
 - `GET /api/reviews/`：按应复习时间返回记录，可传 `result=pending|completed` 过滤。
 - `POST /api/reviews/{id}/complete/`：将待复习记录标记为完成并写入 `completed_at`。
+- `POST /api/reviews/{id}/submit/`：保存复盘回答，异步生成反馈并创建下一条复习记录。
 - `POST /api/reviews/{id}/prompt/`：基于处理成功的材料、结构化笔记及最近测验反馈创建
   `review_prompt` 任务；同一记录的 `pending/running` 任务会复用。
 
@@ -200,7 +202,7 @@ cd /Users/meiao/ai_workspace/ai-learning-lab
 (cd frontend && npm run build)
 ```
 
-当前已通过 Ruff、Django API 测试（18 项）、Django check、TypeScript `tsc -b` 与
+当前已通过 Ruff、Django API 测试（19 项）、Django check、TypeScript `tsc -b` 与
 Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超过 500 kB，
 后续可通过代码分割优化。
 
@@ -216,7 +218,7 @@ Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超�
 当前进入 V1-alpha 的阶段化开发。完整范围、原型和验收标准见
 [docs/V1-ALPHA.md](file:///Users/meiao/ai_workspace/ai-learning-lab/docs/V1-ALPHA.md)。
 
-阶段 1 至阶段 5 已完成：
+阶段 1 至阶段 6 已完成：
 
 1. `api.0010_material_source_type_topic_type` 已应用，`Topic.type` 和
    `Material.source_type` 已贯穿 API 与 Django Admin。
@@ -233,9 +235,12 @@ Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超�
 7. `api.0015_topic_discussion_outcome_topic_discussion_rationale_and_more` 已应用。讨论型 Topic
    自动生成 AI 开场；材料处理完成后可快速评估，支持持续对话、学习路线、结论沉淀和转换为
    学习型话题，所有 AI 操作均通过 `AITask` 异步执行。
+8. `api.0016_reviewrecord_feedback_reviewrecord_graded_at_and_more` 已应用。复盘回答由
+   `grade_review` 异步反馈；原记录保存得分、反馈与完成时间，并按服务端规则创建下一条记录：
+   `>=85` 分 14 天、`>=60` 分 7 天、其余 2 天。
 
-下一步实施阶段 6：强化验证与复习闭环，结合主图、概念和沉淀问答更新复习内容与下次复习时间。
-AI 关系推荐和阶段总结按 V1-alpha 后续阶段推进。所有长耗时 AI 能力继续走
+V1-alpha 六个阶段均已完成。后续优先项为 AI 关系推荐、阶段总结和更丰富的学习内容类型。
+所有长耗时 AI 能力继续走
 `AITask` 异步任务和前端轮询，不能退回为阻塞请求。
 
 ## 11. 接手原则

@@ -516,6 +516,14 @@ class ReviewRecord(models.Model):
         blank=True,
         verbose_name="关联考试",
     )
+    previous_review = models.ForeignKey(
+        "self",
+        related_name="follow_up_reviews",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="上一轮复习",
+    )
     due_at = models.DateTimeField(db_index=True, verbose_name="应复习时间")
     completed_at = models.DateTimeField(null=True, blank=True, verbose_name="完成时间")
     result = models.CharField(
@@ -531,6 +539,12 @@ class ReviewRecord(models.Model):
     review_prompt_generated_at = models.DateTimeField(
         null=True, blank=True, verbose_name="复习提示生成时间"
     )
+    response_text = models.TextField(blank=True, verbose_name="复盘回答")
+    feedback = models.TextField(blank=True, verbose_name="复盘反馈")
+    score = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="复盘得分"
+    )
+    graded_at = models.DateTimeField(null=True, blank=True, verbose_name="反馈生成时间")
 
     class Meta:
         verbose_name = "复习记录"
@@ -579,6 +593,7 @@ class AITask(models.Model):
         ("grade_exam", "阅卷评分"),
         ("note_draft", "笔记草稿"),
         ("review_prompt", "复习提示"),
+        ("grade_review", "复盘反馈"),
         ("discussion_opening", "讨论开场"),
         ("discussion_assessment", "快速评估"),
         ("discussion_reply", "讨论回复"),

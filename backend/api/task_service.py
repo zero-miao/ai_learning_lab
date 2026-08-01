@@ -170,6 +170,8 @@ def _run_task(task):
         return _grade_exam(task)
     if task.task_type == "review_prompt":
         return _generate_review_prompt(task)
+    if task.task_type == "grade_review":
+        return _grade_review(task)
     raise ValueError(f"不支持的 AI 任务类型：{task.task_type}")
 
 
@@ -434,6 +436,68 @@ def _generate_review_prompt(task):
     if not updated:
         raise ValueError("复习记录已完成，无法写入新的复习提示。")
     return {"review_id": review.id, "content": content}
+
+
+def _review_interval_days(score):
+    if score >= 85:
+        return 14
+    if score >= 60:
+        return 7
+    return 2
+
+
+def _grade_review(task):
+    review = task.review
+    if review is None:
+        raise ValueError("复习记录不存在。")
+    context = str(task.input_json.get("context", "")).strip()
+    response_text = str(task.input_json.get("response_text", "")).strip()
+    if not context or not response_text:
+        raise ValueError("复盘反馈缺少学习上下文或用户回答。")
+
+    grading = AIGateway.grade_review(review.topic.title, context, response_text)
+    completed_at = timezone.now()
+    with transaction.atomic():
+        review = ReviewRecord.objects.select_for_update().get(pk=review.id)
+        if review.result == "completed":
+            raise ValueError("该复习记录已经完成。")
+        interval_days = _review_interval_days(grading["score"])
+        next_due_at = completed_at + timedelta(days=interval_days)
+        review.response_text = response_text
+        review.feedback = grading["feedback"]
+        review.score = grading["score"]
+        review.result = "completed"
+        review.completed_at = completed_at
+        review.graded_at = completed_at
+        review.next_due_at = next_due_at
+        review.save(
+            update_fields=[
+                "response_text",
+                "feedback",
+                "score",
+                "result",
+                "completed_at",
+                "graded_at",
+                "next_due_at",
+            ]
+        )
+        next_review, created = ReviewRecord.objects.get_or_create(
+            previous_review=review,
+            defaults={
+                "topic": review.topic,
+                "exam": review.exam,
+                "due_at": next_due_at,
+            },
+        )
+        if not created and next_review.due_at != next_due_at:
+            next_review.due_at = next_due_at
+            next_review.save(update_fields=["due_at"])
+    return {
+        "review_id": review.id,
+        "score": grading["score"],
+        "next_review_id": next_review.id,
+        "next_due_at": next_due_at.isoformat(),
+    }
 
 
 def _handle_failure(task_id, error):

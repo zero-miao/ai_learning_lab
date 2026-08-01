@@ -52,8 +52,29 @@ def _build_review_context(review):
     note_context = "\n\n".join(
         f"结构化笔记：{note.title}\n{note.content}" for note in review.topic.notes.all()
     )
+    concept_context = "\n\n".join(
+        (
+            f"概念：{concept.title}\n定义：{concept.definition}\n"
+            f"原理：{concept.principle}\n易错点：{concept.pitfalls}"
+        )
+        for concept in review.topic.concepts.all()
+    )
+    question_context = "\n\n".join(
+        (
+            f"已沉淀问答：{question.question_text}\n"
+            f"回答：{question.ai_responses.first().content if question.ai_responses.exists() else ''}"
+        )
+        for question in review.topic.questions.filter(is_saved=True)
+    )
     return "\n\n".join(
-        section for section in (material_context, note_context) if section
+        section
+        for section in (
+            material_context,
+            note_context,
+            concept_context,
+            question_context,
+        )
+        if section
     )[:12000]
 
 
@@ -647,6 +668,41 @@ class ReviewRecordViewSet(viewsets.ReadOnlyModelViewSet):
             topic=review.topic,
             review=review,
             input_json={"review_id": review.id, "context": context},
+        )
+        return Response(
+            {"task": AITaskSerializer(task).data}, status=status.HTTP_202_ACCEPTED
+        )
+
+    @action(detail=True, methods=["post"], url_path="submit")
+    def submit_review(self, request, pk=None):
+        review = self.get_object()
+        if review.result == "completed":
+            return Response(
+                {"detail": "该复习记录已完成。"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        response_text = str(request.data.get("response_text", "")).strip()
+        if not response_text:
+            return Response(
+                {"detail": "请先写下本次复盘回答。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        context = _build_review_context(review)
+        if not context:
+            return Response(
+                {"detail": "请先保留至少一份学习材料、概念、问答或笔记。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        review.response_text = response_text
+        review.save(update_fields=["response_text"])
+        task, _ = enqueue_or_reuse(
+            "grade_review",
+            topic=review.topic,
+            review=review,
+            input_json={
+                "review_id": review.id,
+                "context": context,
+                "response_text": response_text,
+            },
         )
         return Response(
             {"task": AITaskSerializer(task).data}, status=status.HTTP_202_ACCEPTED

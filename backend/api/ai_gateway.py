@@ -294,6 +294,42 @@ class AIGateway:
         return provider.generate_response(messages)
 
     @classmethod
+    def grade_review(
+        cls, topic_title: str, context: str, response_text: str
+    ) -> dict[str, Any]:
+        provider = cls.get_provider()
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是严格但有帮助的复习教练。只输出合法 JSON，不要 Markdown。"
+                    "根据学习上下文评价用户的主动回忆与应用回答，不能因为文笔而给分。"
+                    '输出格式为 {"score":0,"feedback":"具体反馈"}。'
+                    "score 为 0 到 100 的整数；feedback 要指出掌握点、缺口和下一步复盘重点。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"学习主题：{topic_title}\n学习上下文：\n{context}\n\n"
+                    f"用户复盘回答：\n{response_text}"
+                ),
+            },
+        ]
+        content = provider.generate_response(
+            messages, response_format={"type": "json_object"}
+        )
+        parsed = json.loads(content)
+        try:
+            score = int(parsed["score"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("AI 复盘反馈结果格式不正确") from error
+        feedback = str(parsed.get("feedback", "")).strip()
+        if not 0 <= score <= 100 or not feedback:
+            raise ValueError("AI 复盘反馈结果格式不正确")
+        return {"score": score, "feedback": feedback}
+
+    @classmethod
     def grade_exam(
         cls,
         topic_title: str,

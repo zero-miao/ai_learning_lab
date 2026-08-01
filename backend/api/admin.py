@@ -188,10 +188,13 @@ class ReviewRecordAdmin(admin.ModelAdmin):
     list_display = (
         "topic",
         "exam",
+        "previous_review",
         "due_at",
         "result",
+        "score",
+        "graded_at",
         "review_prompt_generated_at",
         "completed_at",
     )
     list_filter = ("result",)
-    search_fields = ("topic__title",)
+    search_fields = ("topic__title", "response_text", "feedback")

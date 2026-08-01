@@ -628,6 +628,38 @@ class AsyncTaskApiTests(TestCase):
         self.assertEqual(review.review_prompt, generate_review_prompt.return_value)
         self.assertIsNotNone(review.review_prompt_generated_at)
 
+    @patch("api.task_service.AIGateway.grade_review")
+    def test_review_submission_creates_follow_up_schedule(self, grade_review):
+        grade_review.return_value = {
+            "score": 72,
+            "feedback": "能说明核心概念，但应继续练习在新场景中的应用。",
+        }
+        review = ReviewRecord.objects.create(
+            topic=self.topic,
+            due_at=timezone.now(),
+        )
+        response = self.client.post(
+            f"/api/reviews/{review.id}/submit/",
+            {"response_text": "QuerySet 可以组合查询条件，并延迟到需要结果时执行。"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 202)
+        task = AITask.objects.get(pk=response.data["task"]["id"])
+        self.assertEqual(task.task_type, "grade_review")
+        task.status = "running"
+        task.attempt_count = 1
+        task.save()
+        execute_task(task.id)
+
+        review.refresh_from_db()
+        self.assertEqual(review.result, "completed")
+        self.assertEqual(review.score, 72)
+        self.assertEqual(review.feedback, grade_review.return_value["feedback"])
+        self.assertIsNotNone(review.next_due_at)
+        follow_up = ReviewRecord.objects.get(previous_review=review)
+        self.assertEqual(follow_up.topic_id, self.topic.id)
+        self.assertEqual(follow_up.due_at.date(), review.next_due_at.date())
+
     @patch(
         "api.task_service.AIGateway.generate_briefing",
         side_effect=RuntimeError("模型不可用"),

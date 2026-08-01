@@ -402,6 +402,7 @@ class ReviewRecordSerializer(serializers.ModelSerializer):
             "topic_mastery_level_display",
             "exam",
             "exam_score",
+            "previous_review",
             "due_at",
             "completed_at",
             "result",
@@ -409,6 +410,10 @@ class ReviewRecordSerializer(serializers.ModelSerializer):
             "next_due_at",
             "review_prompt",
             "review_prompt_generated_at",
+            "response_text",
+            "feedback",
+            "score",
+            "graded_at",
         ]
         read_only_fields = fields
 
