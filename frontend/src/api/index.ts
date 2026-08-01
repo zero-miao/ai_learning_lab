@@ -184,8 +184,14 @@ export interface Question {
   topic: number;
   material: number | null;
   chunk: number | null;
+  concept: number | null;
+  concept_title: string;
   selected_text: string;
+  start_offset: number | null;
+  end_offset: number | null;
   question_text: string;
+  is_saved: boolean;
+  saved_at: string | null;
   created_at: string;
   ai_responses: AIResponse[];
 }
@@ -215,6 +221,8 @@ export const deleteNote = (id: number) => api.delete(`notes/${id}/`);
 export const checkHealth = () => api.get('health/');
 export const getQuestion = (id: number) => api.get<Question>(`questions/${id}/`);
 export const createQuestion = (data: Partial<Question>) => api.post<{ question: Question; task: AITask }>('questions/', data);
+export const saveQuestion = (id: number, concept?: number) =>
+  api.post<Question>(`questions/${id}/save/`, concept ? { concept } : {});
 export const createConcept = (
   topicId: number,
   data: {
@@ -231,6 +239,7 @@ export const createHighlight = (
   topicId: number,
   data: { material: number; start_offset: number; end_offset: number },
 ) => api.post<{ highlight: number; created: boolean }>(`topics/${topicId}/highlights/`, data);
+export const deleteHighlight = (id: number) => api.delete(`highlights/${id}/`);
 export const getExam = (id: number) => api.get<Exam>(`exams/${id}/`);
 export const createExam = (topic: number) => api.post<TaskResponse>('exams/', { topic });
 export const submitExam = (id: number, answers: Array<{ id: number; answer_text: string }>) =>

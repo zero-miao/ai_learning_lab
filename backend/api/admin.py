@@ -54,8 +54,15 @@ class MaterialChunkAdmin(admin.ModelAdmin):
 
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):
-    list_display = ("topic", "material", "question_text", "created_at")
-    list_filter = ("topic", "material")
+    list_display = (
+        "topic",
+        "material",
+        "concept",
+        "is_saved",
+        "question_text",
+        "created_at",
+    )
+    list_filter = ("topic", "material", "concept", "is_saved")
     search_fields = ("question_text", "selected_text")
 
 

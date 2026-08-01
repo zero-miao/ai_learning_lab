@@ -4,6 +4,7 @@ import {
   Alert,
   Button,
   Divider,
+  Dropdown,
   Drawer,
   FloatButton,
   Form,
@@ -12,6 +13,7 @@ import {
   List,
   message,
   Modal,
+  Popconfirm,
   Space,
   Spin,
   Typography,
@@ -19,6 +21,7 @@ import {
 import {
   ArrowLeftOutlined,
   CommentOutlined,
+  HighlightOutlined,
   ReloadOutlined,
   SendOutlined,
 } from '@ant-design/icons';
@@ -26,11 +29,13 @@ import {
   createConcept,
   createHighlight,
   createQuestion,
+  deleteHighlight,
   getConcept,
   getQuestion,
   getTopic,
   listAITasks,
   retryAITask,
+  saveQuestion,
   updateConcept,
 } from '../../api';
 import type { AITask, Concept, Material, Topic } from '../../api';
@@ -47,6 +52,8 @@ type ChatItem = {
   selection?: string;
   type?: string;
   task?: AITask;
+  questionId?: number;
+  isSaved?: boolean;
 };
 
 interface ConceptFormValues {
@@ -66,6 +73,8 @@ const MaterialReader: React.FC = () => {
   const [material, setMaterial] = useState<Material | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedText, setSelectedText] = useState('');
+  const [selectedAnchor, setSelectedAnchor] =
+    useState<TextSelectionAnchor | null>(null);
   const [chatVisible, setChatVisible] = useState(false);
   const [question, setQuestion] = useState('');
   const [chatHistory, setChatHistory] = useState<ChatItem[]>([]);
@@ -79,6 +88,7 @@ const MaterialReader: React.FC = () => {
   const [conceptTaskId, setConceptTaskId] = useState<number | null>(null);
   const [conceptSaving, setConceptSaving] = useState(false);
   const [conceptForm] = Form.useForm<ConceptFormValues>();
+  const [highlightsVisible, setHighlightsVisible] = useState(false);
   const navigate = useNavigate();
 
   const loadData = useCallback(async () => {
@@ -118,7 +128,12 @@ const MaterialReader: React.FC = () => {
           setChatHistory((current) =>
             current.map((item) =>
               item.task?.id === task.id
-                ? { role: 'ai', content: answer.content }
+                ? {
+                    role: 'ai',
+                    content: answer.content,
+                    questionId: response.data.id,
+                    isSaved: response.data.is_saved,
+                  }
                 : item,
             ),
           );
@@ -201,6 +216,7 @@ const MaterialReader: React.FC = () => {
 
   const handleAskSelection = (selection: TextSelectionAnchor) => {
     setSelectedText(selection.text);
+    setSelectedAnchor(selection);
     setChatVisible(true);
   };
 
@@ -208,8 +224,10 @@ const MaterialReader: React.FC = () => {
     if (!question.trim() || !topic || !material) return;
     const currentQuestion = question;
     const currentSelection = selectedText;
+    const currentAnchor = selectedAnchor;
     setQuestion('');
     setSelectedText('');
+    setSelectedAnchor(null);
     setChatHistory((current) => [
       ...current,
       { role: 'user', content: currentQuestion, selection: currentSelection },
@@ -219,12 +237,20 @@ const MaterialReader: React.FC = () => {
         topic: topic.id,
         material: material.id,
         selected_text: currentSelection,
+        start_offset: currentAnchor?.startOffset,
+        end_offset: currentAnchor?.endOffset,
         question_text: currentQuestion,
       });
       const task = response.data.task;
       setChatHistory((current) => [
         ...current,
-        { role: 'ai', content: 'AI 正在思考...', task },
+        {
+          role: 'ai',
+          content: 'AI 正在思考...',
+          task,
+          questionId: response.data.question.id,
+          isSaved: response.data.question.is_saved,
+        },
       ]);
       setActiveTaskId(task.id);
       setActiveTaskType(task.task_type);
@@ -306,6 +332,49 @@ const MaterialReader: React.FC = () => {
     } catch (error) {
       console.error('Failed to create highlight:', error);
       message.error('添加高亮失败');
+    }
+  };
+
+  const handleSaveQuestion = async (questionId: number, conceptId?: number) => {
+    try {
+      const response = await saveQuestion(questionId, conceptId);
+      setChatHistory((current) =>
+        current.map((item) =>
+          item.questionId === questionId
+            ? { ...item, isSaved: response.data.is_saved }
+            : item,
+        ),
+      );
+      message.success(
+        conceptId ? '问答已沉淀到概念卡片' : '问答已保存到材料记录',
+      );
+    } catch (error) {
+      console.error('Failed to save question:', error);
+      message.error('保存问答失败');
+    }
+  };
+
+  const handleJumpToHighlight = (highlightId: number) => {
+    const highlight = topic?.highlights.find((item) => item.id === highlightId);
+    if (!highlight) return;
+    const targetId = highlight.chunk
+      ? `reader-chunk-${highlight.chunk}`
+      : `reader-chunk-0`;
+    document.getElementById(targetId)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    });
+    setHighlightsVisible(false);
+  };
+
+  const handleDeleteHighlight = async (highlightId: number) => {
+    try {
+      await deleteHighlight(highlightId);
+      message.success('高亮已删除');
+      await loadData();
+    } catch (error) {
+      console.error('Failed to delete highlight:', error);
+      message.error('删除高亮失败');
     }
   };
 
@@ -431,6 +500,44 @@ const MaterialReader: React.FC = () => {
                           重试
                         </Button>
                       )}
+                      {item.role === 'ai' &&
+                        item.questionId &&
+                        (item.isSaved ? (
+                          <Text
+                            type="secondary"
+                            style={{ display: 'block', marginTop: 8 }}
+                          >
+                            已沉淀
+                          </Text>
+                        ) : (
+                          <Dropdown
+                            menu={{
+                              items: [
+                                {
+                                  key: 'material',
+                                  label: '保存到材料问答',
+                                },
+                                ...((topic?.concepts ?? []).map((concept) => ({
+                                  key: `concept-${concept.id}`,
+                                  label: `保存到概念：${concept.title}`,
+                                }))),
+                              ],
+                              onClick: ({ key }) => {
+                                const conceptId = key.startsWith('concept-')
+                                  ? Number(key.replace('concept-', ''))
+                                  : undefined;
+                                void handleSaveQuestion(
+                                  item.questionId!,
+                                  conceptId,
+                                );
+                              },
+                            }}
+                          >
+                            <Button size="small" style={{ marginTop: 8 }}>
+                              沉淀问答
+                            </Button>
+                          </Dropdown>
+                        ))}
                     </div>
                   </div>
                 </List.Item>
@@ -458,7 +565,10 @@ const MaterialReader: React.FC = () => {
                   <Button
                     type="link"
                     size="small"
-                    onClick={() => setSelectedText('')}
+                    onClick={() => {
+                      setSelectedText('');
+                      setSelectedAnchor(null);
+                    }}
                   >
                     取消引用
                   </Button>
@@ -481,6 +591,55 @@ const MaterialReader: React.FC = () => {
             />
           </Space.Compact>
         </div>
+      </Drawer>
+
+      <Drawer
+        title="高亮片段"
+        placement="right"
+        width={400}
+        onClose={() => setHighlightsVisible(false)}
+        open={highlightsVisible}
+      >
+        <List
+          dataSource={(topic?.highlights ?? []).filter(
+            (highlight) => highlight.material === material.id,
+          )}
+          locale={{ emptyText: '当前材料还没有高亮片段' }}
+          renderItem={(highlight) => (
+            <List.Item
+              actions={[
+                <Button
+                  key="jump"
+                  type="link"
+                  onClick={() => handleJumpToHighlight(highlight.id)}
+                >
+                  查看原文
+                </Button>,
+                <Popconfirm
+                  key="delete"
+                  title="删除这条高亮？"
+                  okText="删除"
+                  okButtonProps={{ danger: true }}
+                  cancelText="取消"
+                  onConfirm={() => void handleDeleteHighlight(highlight.id)}
+                >
+                  <Button type="link" danger>
+                    删除
+                  </Button>
+                </Popconfirm>,
+              ]}
+            >
+              <List.Item.Meta
+                title={`高亮于 ${new Date(highlight.created_at).toLocaleString()}`}
+                description={
+                  <Typography.Paragraph ellipsis={{ rows: 3 }}>
+                    {highlight.source_text}
+                  </Typography.Paragraph>
+                }
+              />
+            </List.Item>
+          )}
+        />
       </Drawer>
 
       <Modal
@@ -541,6 +700,11 @@ const MaterialReader: React.FC = () => {
         </Form>
       </Modal>
 
+      <FloatButton
+        icon={<HighlightOutlined />}
+        style={{ right: 24, bottom: 94 }}
+        onClick={() => setHighlightsVisible(true)}
+      />
       <FloatButton
         icon={<CommentOutlined />}
         type="primary"

@@ -15,6 +15,7 @@ from .models import (
     Material,
     MaterialChunk,
     Note,
+    Question,
     ReviewRecord,
     Topic,
 )
@@ -49,6 +50,49 @@ class AsyncTaskApiTests(TestCase):
         self.assertEqual(second.status_code, 202)
         self.assertEqual(first.data["task"]["status"], "pending")
         self.assertNotEqual(first.data["question"]["id"], second.data["question"]["id"])
+
+    def test_question_anchor_and_save_to_concept(self):
+        MaterialChunk.objects.create(
+            material=self.material,
+            chunk_index=0,
+            content=self.material.clean_text,
+            start_offset=0,
+            end_offset=len(self.material.clean_text),
+        )
+        concept = Concept.objects.create(topic=self.topic, title="QuerySet")
+        start_offset = self.material.clean_text.index("QuerySet")
+        end_offset = start_offset + len("QuerySet")
+
+        response = self.client.post(
+            "/api/questions/",
+            {
+                "topic": self.topic.id,
+                "material": self.material.id,
+                "selected_text": "伪造内容",
+                "start_offset": start_offset,
+                "end_offset": end_offset,
+                "question_text": "为什么可以组合？",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 202)
+        question = Question.objects.get(pk=response.data["question"]["id"])
+        self.assertEqual(question.selected_text, "QuerySet")
+        self.assertEqual(question.start_offset, start_offset)
+        self.assertEqual(question.end_offset, end_offset)
+        self.assertIsNotNone(question.chunk)
+        self.assertFalse(question.is_saved)
+
+        save_response = self.client.post(
+            f"/api/questions/{question.id}/save/",
+            {"concept": concept.id},
+            format="json",
+        )
+        self.assertEqual(save_response.status_code, 200)
+        question.refresh_from_db()
+        self.assertTrue(question.is_saved)
+        self.assertEqual(question.concept_id, concept.id)
+        self.assertIsNotNone(question.saved_at)
 
     def test_topic_type_and_material_source_type_are_exposed(self):
         topic_response = self.client.post(
@@ -184,6 +228,18 @@ class AsyncTaskApiTests(TestCase):
             format="json",
         )
         self.assertEqual(invalid_response.status_code, 400)
+
+    def test_highlight_can_be_deleted(self):
+        highlight = Highlight.objects.create(
+            topic=self.topic,
+            material=self.material,
+            source_text="Django ORM",
+            start_offset=0,
+            end_offset=10,
+        )
+        response = self.client.delete(f"/api/highlights/{highlight.id}/")
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Highlight.objects.filter(pk=highlight.id).exists())
 
     def test_exam_request_returns_reused_pending_task(self):
         first = self.client.post("/api/exams/", {"topic": self.topic.id}, format="json")

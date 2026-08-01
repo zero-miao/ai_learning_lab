@@ -145,8 +145,24 @@ class Question(models.Model):
         blank=True,
         verbose_name="关联片段",
     )
+    concept = models.ForeignKey(
+        "Concept",
+        related_name="questions",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="关联概念",
+    )
     selected_text = models.TextField(blank=True, verbose_name="选中文本")
+    start_offset = models.PositiveIntegerField(
+        null=True, blank=True, verbose_name="起始偏移"
+    )
+    end_offset = models.PositiveIntegerField(
+        null=True, blank=True, verbose_name="结束偏移"
+    )
     question_text = models.TextField(verbose_name="问题内容")
+    is_saved = models.BooleanField(default=False, verbose_name="已沉淀")
+    saved_at = models.DateTimeField(null=True, blank=True, verbose_name="沉淀时间")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="提问时间")
 
     class Meta:

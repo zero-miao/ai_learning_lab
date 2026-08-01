@@ -70,6 +70,8 @@ LLM_API_KEY=ollama
   AI 侧边助手；选中文本菜单支持概念、问答和高亮。
 - 概念卡片：`Concept` 草稿由 `AITask` 异步补全定义、原理、易错点与适用场景；用户编辑确认
   后保存。`ConceptAnchor` 和 `Highlight` 均以材料 `clean_text` offset 保存可回跳来源。
+- 问答沉淀：划词问答同样保存来源 offset；回答完成后可沉淀为材料问答记录或关联到概念卡片。
+  高亮侧栏支持查看原文和删除。
 - Assessment 闭环：迁移性题目生成、作答、AI 阅卷、掌握度更新和首次复习记录。
 - Django Admin：所有核心模型均已注册。
 - LLM 网关：支持 OpenAI-compatible Provider 与本地 Ollama。
@@ -190,7 +192,7 @@ cd /Users/meiao/ai_workspace/ai-learning-lab
 (cd frontend && npm run build)
 ```
 
-当前已通过 Ruff、Django API 测试（13 项）、Django check、TypeScript `tsc -b` 与
+当前已通过 Ruff、Django API 测试（15 项）、Django check、TypeScript `tsc -b` 与
 Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超过 500 kB，
 后续可通过代码分割优化。
 
@@ -206,7 +208,7 @@ Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超�
 当前进入 V1-alpha 的阶段化开发。完整范围、原型和验收标准见
 [docs/V1-ALPHA.md](file:///Users/meiao/ai_workspace/ai-learning-lab/docs/V1-ALPHA.md)。
 
-阶段 1 和阶段 2 已完成：
+阶段 1 至阶段 3 已完成：
 
 1. `api.0010_material_source_type_topic_type` 已应用，`Topic.type` 和
    `Material.source_type` 已贯穿 API 与 Django Admin。
@@ -216,9 +218,11 @@ Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超�
 4. `api.0011_concept_highlight_conceptanchor_aitask_concept_and_more` 和
    `api.0012_alter_aitask_task_type` 已应用。阅读选区按 `MaterialChunk` 的 offset 持久化；
    用户可发起概念草稿、编辑并确认概念卡片，或创建不调用 AI 的高亮。
+5. `api.0013_question_concept_question_end_offset_and_more` 已应用。问答保留来源锚点，并可
+   沉淀到材料问答记录或当前 Topic 的概念卡片；高亮侧栏支持原文定位和删除。
 
-下一步实施阶段 3：为问答补充位置锚点和可保存的沉淀入口，并提供高亮列表。讨论型 AI
-对话、知识图谱和阶段总结按 V1-alpha 后续阶段推进。所有长耗时 AI 能力继续走
+下一步实施阶段 4：建立概念关系、Topic 主思维导图和学习产出展示。讨论型 AI 对话和阶段总结
+按 V1-alpha 后续阶段推进。所有长耗时 AI 能力继续走
 `AITask` 异步任务和前端轮询，不能退回为阻塞请求。
 
 ## 11. 接手原则

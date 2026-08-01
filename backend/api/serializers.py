@@ -37,6 +37,7 @@ class AIResponseSerializer(serializers.ModelSerializer):
 
 class QuestionSerializer(serializers.ModelSerializer):
     ai_responses = AIResponseSerializer(many=True, read_only=True)
+    concept_title = serializers.CharField(source="concept.title", read_only=True)
 
     class Meta:
         model = Question
@@ -45,12 +46,25 @@ class QuestionSerializer(serializers.ModelSerializer):
             "topic",
             "material",
             "chunk",
+            "concept",
+            "concept_title",
             "selected_text",
+            "start_offset",
+            "end_offset",
             "question_text",
+            "is_saved",
+            "saved_at",
             "created_at",
             "ai_responses",
         ]
-        read_only_fields = ["created_at"]
+        read_only_fields = [
+            "selected_text",
+            "start_offset",
+            "end_offset",
+            "is_saved",
+            "saved_at",
+            "created_at",
+        ]
 
 
 class ConceptAnchorSerializer(serializers.ModelSerializer):

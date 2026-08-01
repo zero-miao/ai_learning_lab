@@ -22,6 +22,7 @@ from .serializers import (
     AITaskSerializer,
     ConceptSerializer,
     ExamSerializer,
+    HighlightSerializer,
     MaterialSerializer,
     NoteSerializer,
     QuestionSerializer,
@@ -219,9 +220,30 @@ class QuestionViewSet(viewsets.ModelViewSet):
     serializer_class = QuestionSerializer
 
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        topic_id = request.data.get("topic")
+        try:
+            topic = Topic.objects.get(pk=topic_id)
+        except (Topic.DoesNotExist, TypeError, ValueError):
+            return Response(
+                {"detail": "学习主题不存在。"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        request_data = request.data.copy()
+        anchor_fields = {}
+        if "start_offset" in request_data or "end_offset" in request_data:
+            material, chunk, source_text, start_offset, end_offset = _get_anchor_data(
+                topic, request_data
+            )
+            request_data["material"] = material.id
+            request_data["chunk"] = chunk.id if chunk else None
+            anchor_fields = {
+                "selected_text": source_text,
+                "start_offset": start_offset,
+                "end_offset": end_offset,
+            }
+        serializer = self.get_serializer(data=request_data)
         serializer.is_valid(raise_exception=True)
-        question = serializer.save()
+        question = serializer.save(**anchor_fields)
         context = ""
         if question.material:
             context = question.material.clean_text
@@ -241,6 +263,26 @@ class QuestionViewSet(viewsets.ModelViewSet):
             status=status.HTTP_202_ACCEPTED,
         )
 
+    @action(detail=True, methods=["post"], url_path="save")
+    def save_question(self, request, pk=None):
+        question = self.get_object()
+        concept_id = request.data.get("concept")
+        concept = None
+        if concept_id is not None:
+            concept = Concept.objects.filter(
+                pk=concept_id, topic=question.topic
+            ).first()
+            if concept is None:
+                return Response(
+                    {"detail": "概念不存在或不属于当前话题。"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        question.concept = concept
+        question.is_saved = True
+        question.saved_at = timezone.now()
+        question.save(update_fields=["concept", "is_saved", "saved_at"])
+        return Response(QuestionSerializer(question).data)
+
 
 class ConceptViewSet(viewsets.ModelViewSet):
     queryset = Concept.objects.select_related("topic", "source_task").prefetch_related(
@@ -258,6 +300,26 @@ class ConceptViewSet(viewsets.ModelViewSet):
             {"detail": "请从话题阅读上下文创建概念。"},
             status=status.HTTP_405_METHOD_NOT_ALLOWED,
         )
+
+
+class HighlightViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Highlight.objects.select_related("topic", "material", "chunk")
+    serializer_class = HighlightSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        topic_id = self.request.query_params.get("topic")
+        material_id = self.request.query_params.get("material")
+        if topic_id:
+            queryset = queryset.filter(topic_id=topic_id)
+        if material_id:
+            queryset = queryset.filter(material_id=material_id)
+        return queryset
+
+    def destroy(self, request, *args, **kwargs):
+        highlight = self.get_object()
+        highlight.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class NoteViewSet(viewsets.ModelViewSet):
