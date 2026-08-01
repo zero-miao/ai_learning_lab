@@ -252,6 +252,52 @@ class ConceptAnchor(models.Model):
         ]
 
 
+class ConceptRelation(models.Model):
+    topic = models.ForeignKey(
+        Topic,
+        related_name="concept_relations",
+        on_delete=models.CASCADE,
+        verbose_name="所属主题",
+    )
+    from_concept = models.ForeignKey(
+        Concept,
+        related_name="outgoing_relations",
+        on_delete=models.CASCADE,
+        verbose_name="起始概念",
+    )
+    to_concept = models.ForeignKey(
+        Concept,
+        related_name="incoming_relations",
+        on_delete=models.CASCADE,
+        verbose_name="目标概念",
+    )
+    relation_type = models.CharField(
+        max_length=100,
+        default="关联",
+        verbose_name="关系类型",
+    )
+    description = models.TextField(blank=True, verbose_name="关系说明")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "概念关系"
+        verbose_name_plural = "概念关系"
+        ordering = ["created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["from_concept", "to_concept"],
+                name="unique_concept_relation_direction",
+            )
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.from_concept.title} -[{self.relation_type}]-> "
+            f"{self.to_concept.title}"
+        )
+
+
 class Highlight(models.Model):
     topic = models.ForeignKey(
         Topic,

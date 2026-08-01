@@ -10,6 +10,7 @@ from .models import (
     AITask,
     Concept,
     ConceptAnchor,
+    ConceptRelation,
     Exam,
     Highlight,
     Material,
@@ -93,6 +94,46 @@ class AsyncTaskApiTests(TestCase):
         self.assertTrue(question.is_saved)
         self.assertEqual(question.concept_id, concept.id)
         self.assertIsNotNone(question.saved_at)
+
+    def test_concept_relation_requires_concepts_from_same_topic(self):
+        query_set = Concept.objects.create(topic=self.topic, title="QuerySet")
+        lazy_evaluation = Concept.objects.create(topic=self.topic, title="惰性求值")
+        relation_response = self.client.post(
+            "/api/concept-relations/",
+            {
+                "topic": self.topic.id,
+                "from_concept": query_set.id,
+                "to_concept": lazy_evaluation.id,
+                "relation_type": "依赖于",
+                "description": "QuerySet 在实际求值前保持惰性。",
+            },
+            format="json",
+        )
+        self.assertEqual(relation_response.status_code, 201)
+        relation = ConceptRelation.objects.get(pk=relation_response.data["id"])
+        self.assertEqual(relation.topic_id, self.topic.id)
+        self.assertEqual(relation.relation_type, "依赖于")
+
+        topic_response = self.client.get(f"/api/topics/{self.topic.id}/")
+        self.assertEqual(len(topic_response.data["concept_relations"]), 1)
+        self.assertEqual(
+            topic_response.data["concept_relations"][0]["to_concept_title"],
+            "惰性求值",
+        )
+
+        other_topic = Topic.objects.create(title="Python 基础")
+        other_concept = Concept.objects.create(topic=other_topic, title="迭代器")
+        invalid_response = self.client.post(
+            "/api/concept-relations/",
+            {
+                "topic": self.topic.id,
+                "from_concept": query_set.id,
+                "to_concept": other_concept.id,
+                "relation_type": "关联",
+            },
+            format="json",
+        )
+        self.assertEqual(invalid_response.status_code, 400)
 
     def test_topic_type_and_material_source_type_are_exposed(self):
         topic_response = self.client.post(

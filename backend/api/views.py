@@ -8,6 +8,7 @@ from .models import (
     AITask,
     Concept,
     ConceptAnchor,
+    ConceptRelation,
     Exam,
     Highlight,
     Material,
@@ -20,6 +21,7 @@ from .models import (
 from .note_service import build_note_source
 from .serializers import (
     AITaskSerializer,
+    ConceptRelationSerializer,
     ConceptSerializer,
     ExamSerializer,
     HighlightSerializer,
@@ -300,6 +302,18 @@ class ConceptViewSet(viewsets.ModelViewSet):
             {"detail": "请从话题阅读上下文创建概念。"},
             status=status.HTTP_405_METHOD_NOT_ALLOWED,
         )
+
+
+class ConceptRelationViewSet(viewsets.ModelViewSet):
+    queryset = ConceptRelation.objects.select_related("from_concept", "to_concept")
+    serializer_class = ConceptRelationSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        topic_id = self.request.query_params.get("topic")
+        if topic_id:
+            queryset = queryset.filter(topic_id=topic_id)
+        return queryset
 
 
 class HighlightViewSet(viewsets.ReadOnlyModelViewSet):

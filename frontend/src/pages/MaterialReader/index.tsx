@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
   Button,
@@ -90,6 +90,7 @@ const MaterialReader: React.FC = () => {
   const [conceptForm] = Form.useForm<ConceptFormValues>();
   const [highlightsVisible, setHighlightsVisible] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
   const loadData = useCallback(async () => {
     if (!topicId || !materialId) return;
@@ -200,6 +201,19 @@ const MaterialReader: React.FC = () => {
       })
       .finally(() => setLoading(false));
   }, [loadData]);
+
+  useEffect(() => {
+    if (!material) return;
+    const anchor = Number(new URLSearchParams(location.search).get('anchor'));
+    if (!Number.isInteger(anchor) || anchor < 0) return;
+    const chunk = material.chunks.find(
+      (item) => item.start_offset <= anchor && anchor < item.end_offset,
+    );
+    const element = document.getElementById(
+      `reader-chunk-${chunk?.id ?? 0}`,
+    );
+    element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [location.search, material]);
 
   useEffect(() => {
     if (!material || activeTaskId) return;

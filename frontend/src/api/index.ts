@@ -56,8 +56,17 @@ export interface Topic {
   materials: Material[];
   notes: Note[];
   concepts: Concept[];
+  concept_relations: ConceptRelation[];
   highlights: Highlight[];
+  learning_output: LearningOutput;
   has_current_note: boolean;
+}
+
+export interface LearningOutput {
+  concept_count: number;
+  saved_question_count: number;
+  summary_count: number;
+  map_node_count: number;
 }
 
 export interface ConceptAnchor {
@@ -83,6 +92,19 @@ export interface Concept {
   status_display: string;
   source_task: number | null;
   anchors: ConceptAnchor[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConceptRelation {
+  id: number;
+  topic: number;
+  from_concept: number;
+  from_concept_title: string;
+  to_concept: number;
+  to_concept_title: string;
+  relation_type: string;
+  description: string;
   created_at: string;
   updated_at: string;
 }
@@ -235,6 +257,18 @@ export const createConcept = (
 export const getConcept = (id: number) => api.get<Concept>(`concepts/${id}/`);
 export const updateConcept = (id: number, data: Partial<Concept>) =>
   api.patch<Concept>(`concepts/${id}/`, data);
+export const createConceptRelation = (
+  data: Pick<
+    ConceptRelation,
+    'topic' | 'from_concept' | 'to_concept' | 'relation_type' | 'description'
+  >,
+) => api.post<ConceptRelation>('concept-relations/', data);
+export const updateConceptRelation = (
+  id: number,
+  data: Partial<ConceptRelation>,
+) => api.patch<ConceptRelation>(`concept-relations/${id}/`, data);
+export const deleteConceptRelation = (id: number) =>
+  api.delete(`concept-relations/${id}/`);
 export const createHighlight = (
   topicId: number,
   data: { material: number; start_offset: number; end_offset: number },

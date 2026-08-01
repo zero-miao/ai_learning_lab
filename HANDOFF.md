@@ -72,6 +72,8 @@ LLM_API_KEY=ollama
   后保存。`ConceptAnchor` 和 `Highlight` 均以材料 `clean_text` offset 保存可回跳来源。
 - 问答沉淀：划词问答同样保存来源 offset；回答完成后可沉淀为材料问答记录或关联到概念卡片。
   高亮侧栏支持查看原文和删除。
+- 话题主图：单 Topic 的 `ConceptRelation` 支持创建、编辑和删除；主图节点可编辑概念卡片并
+  从来源锚点回到材料。关系当前由用户维护，尚未接入 AI 自动推荐。
 - Assessment 闭环：迁移性题目生成、作答、AI 阅卷、掌握度更新和首次复习记录。
 - Django Admin：所有核心模型均已注册。
 - LLM 网关：支持 OpenAI-compatible Provider 与本地 Ollama。
@@ -86,7 +88,7 @@ LLM_API_KEY=ollama
 核心文件：
 
 - [api/models.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/models.py)：`AITask`、`Concept`、
-  `ConceptAnchor`、`Highlight`、`Note`、`Exam`、`ExamQuestion`、`ReviewRecord`。
+  `ConceptAnchor`、`ConceptRelation`、`Highlight`、`Note`、`Exam`、`ExamQuestion`、`ReviewRecord`。
 - [api/task_service.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/task_service.py)：入队、去重、任务执行、三次重试和结果写回。
 - [api/note_service.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/note_service.py)：笔记材料上下文和内容指纹计算。
 - [api/scheduler.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/scheduler.py)：APScheduler 单 worker 调度器。
@@ -192,7 +194,7 @@ cd /Users/meiao/ai_workspace/ai-learning-lab
 (cd frontend && npm run build)
 ```
 
-当前已通过 Ruff、Django API 测试（15 项）、Django check、TypeScript `tsc -b` 与
+当前已通过 Ruff、Django API 测试（16 项）、Django check、TypeScript `tsc -b` 与
 Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超过 500 kB，
 后续可通过代码分割优化。
 
@@ -208,7 +210,7 @@ Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超�
 当前进入 V1-alpha 的阶段化开发。完整范围、原型和验收标准见
 [docs/V1-ALPHA.md](file:///Users/meiao/ai_workspace/ai-learning-lab/docs/V1-ALPHA.md)。
 
-阶段 1 至阶段 3 已完成：
+阶段 1 至阶段 4 已完成：
 
 1. `api.0010_material_source_type_topic_type` 已应用，`Topic.type` 和
    `Material.source_type` 已贯穿 API 与 Django Admin。
@@ -220,9 +222,11 @@ Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超�
    用户可发起概念草稿、编辑并确认概念卡片，或创建不调用 AI 的高亮。
 5. `api.0013_question_concept_question_end_offset_and_more` 已应用。问答保留来源锚点，并可
    沉淀到材料问答记录或当前 Topic 的概念卡片；高亮侧栏支持原文定位和删除。
+6. `api.0014_conceptrelation_and_more` 已应用。每个 Topic 有一张主思维导图，可维护概念关系、
+   编辑节点并从来源锚点回到材料；Topic 详情展示概念、已沉淀问答、总结和主图节点数量。
 
-下一步实施阶段 4：建立概念关系、Topic 主思维导图和学习产出展示。讨论型 AI 对话和阶段总结
-按 V1-alpha 后续阶段推进。所有长耗时 AI 能力继续走
+下一步实施阶段 5：讨论型话题、快速评估与学习路线。AI 关系推荐和阶段总结按 V1-alpha 后续
+阶段推进。所有长耗时 AI 能力继续走
 `AITask` 异步任务和前端轮询，不能退回为阻塞请求。
 
 ## 11. 接手原则

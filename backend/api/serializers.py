@@ -5,6 +5,7 @@ from .models import (
     AITask,
     Concept,
     ConceptAnchor,
+    ConceptRelation,
     Exam,
     ExamQuestion,
     Highlight,
@@ -115,6 +116,53 @@ class ConceptSerializer(serializers.ModelSerializer):
         ]
 
 
+class ConceptRelationSerializer(serializers.ModelSerializer):
+    from_concept_title = serializers.CharField(
+        source="from_concept.title", read_only=True
+    )
+    to_concept_title = serializers.CharField(source="to_concept.title", read_only=True)
+
+    class Meta:
+        model = ConceptRelation
+        fields = [
+            "id",
+            "topic",
+            "from_concept",
+            "from_concept_title",
+            "to_concept",
+            "to_concept_title",
+            "relation_type",
+            "description",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "from_concept_title",
+            "to_concept_title",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate(self, attrs):
+        from_concept = attrs.get(
+            "from_concept",
+            self.instance.from_concept if self.instance else None,
+        )
+        to_concept = attrs.get(
+            "to_concept",
+            self.instance.to_concept if self.instance else None,
+        )
+        if from_concept == to_concept:
+            raise serializers.ValidationError("概念不能关联自身。")
+        topic = attrs.get("topic", self.instance.topic if self.instance else None)
+        if (
+            from_concept.topic_id != to_concept.topic_id
+            or topic.id != from_concept.topic_id
+        ):
+            raise serializers.ValidationError("概念关系必须位于同一学习话题。")
+        return attrs
+
+
 class HighlightSerializer(serializers.ModelSerializer):
     class Meta:
         model = Highlight
@@ -200,8 +248,18 @@ class TopicSerializer(serializers.ModelSerializer):
     materials = MaterialSerializer(many=True, read_only=True)
     notes = NoteSerializer(many=True, read_only=True)
     concepts = ConceptSerializer(many=True, read_only=True)
+    concept_relations = ConceptRelationSerializer(many=True, read_only=True)
     highlights = HighlightSerializer(many=True, read_only=True)
+    learning_output = serializers.SerializerMethodField()
     has_current_note = serializers.SerializerMethodField()
+
+    def get_learning_output(self, topic):
+        return {
+            "concept_count": topic.concepts.count(),
+            "saved_question_count": topic.questions.filter(is_saved=True).count(),
+            "summary_count": topic.notes.count(),
+            "map_node_count": topic.concepts.count(),
+        }
 
     def get_has_current_note(self, topic):
         _, fingerprint = build_note_source(topic)
@@ -225,7 +283,9 @@ class TopicSerializer(serializers.ModelSerializer):
             "materials",
             "notes",
             "concepts",
+            "concept_relations",
             "highlights",
+            "learning_output",
             "has_current_note",
         ]
         read_only_fields = ["created_at", "updated_at"]

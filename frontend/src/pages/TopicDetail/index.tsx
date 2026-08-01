@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
-  Alert,
   Layout,
   Typography,
   Button,
@@ -15,10 +14,12 @@ import {
   Input,
   Popconfirm,
   Radio,
+  Statistic,
   message,
 } from 'antd';
 import {
   ArrowLeftOutlined,
+  ApartmentOutlined,
   BookOutlined,
   DeleteOutlined,
   EditOutlined,
@@ -27,25 +28,16 @@ import {
 } from '@ant-design/icons';
 import {
   createMaterial,
-  createNote,
-  createNoteDraft,
   deleteMaterial,
   deleteNote,
   getTopic,
   listAITasks,
   updateNote,
 } from '../../api';
-import type { AITask, Note, Topic } from '../../api';
-import { useAITaskPolling } from '../../hooks/useAITaskPolling';
+import type { Note, Topic } from '../../api';
 
 const { Title } = Typography;
 const { Content } = Layout;
-
-interface NoteDraft {
-  taskId: number;
-  title: string;
-  content: string;
-}
 
 const TopicDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -53,14 +45,9 @@ const TopicDetail: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [briefingMaterialIds, setBriefingMaterialIds] = useState<number[]>([]);
-  const [noteTaskId, setNoteTaskId] = useState<number | null>(null);
-  const [noteDraft, setNoteDraft] = useState<NoteDraft | null>(null);
   const [noteSubmitting, setNoteSubmitting] = useState(false);
-  const [isRegenerateVisible, setIsRegenerateVisible] = useState(false);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [form] = Form.useForm();
-  const [noteForm] = Form.useForm();
-  const [regenerateForm] = Form.useForm();
   const [editNoteForm] = Form.useForm();
   const navigate = useNavigate();
 
@@ -75,12 +62,6 @@ const TopicDetail: React.FC = () => {
         .filter((task) => task.task_type === 'briefing' && (task.status === 'pending' || task.status === 'running'))
         .map((task) => task.material)
         .filter((materialId): materialId is number => materialId !== null));
-      const pendingNoteTask = tasksResponse.data.find(
-        (task) =>
-          task.task_type === 'note_draft' &&
-          (task.status === 'pending' || task.status === 'running'),
-      );
-      setNoteTaskId(pendingNoteTask?.id ?? null);
     } catch (error) {
       console.error('Failed to fetch topic:', error);
       message.error('获取主题详情失败');
@@ -92,20 +73,6 @@ const TopicDetail: React.FC = () => {
   useEffect(() => {
     fetchTopic();
   }, [id]);
-
-  const noteTask = useAITaskPolling(noteTaskId, {
-    onSucceeded: (task: AITask) => {
-      const title = String(task.result_json.title ?? `${topic?.title ?? '学习'} 学习笔记`);
-      const content = String(task.result_json.content ?? '');
-      setNoteDraft({ taskId: task.id, title, content });
-      noteForm.setFieldsValue({ title, content });
-      setNoteTaskId(null);
-    },
-    onFailed: (task: AITask) => {
-      message.error(task.error_message || '笔记草稿生成失败');
-      setNoteTaskId(null);
-    },
-  });
 
   const handleImport = async (values: any) => {
     if (!topic) return;
@@ -135,54 +102,6 @@ const TopicDetail: React.FC = () => {
     } catch (error) {
       console.error('Failed to delete material:', error);
       message.error('删除材料失败');
-    }
-  };
-
-  const handleGenerateNoteDraft = async (instructions = '') => {
-    if (!topic) return;
-    try {
-      const response = await createNoteDraft(topic.id, instructions);
-      setNoteTaskId(response.data.task.id);
-      message.info('已提交笔记草稿生成任务');
-    } catch (error) {
-      console.error('Failed to create note draft:', error);
-      message.error('提交笔记草稿任务失败');
-    }
-  };
-
-  const handleGenerateButton = () => {
-    if (topic?.has_current_note) {
-      setIsRegenerateVisible(true);
-      return;
-    }
-    void handleGenerateNoteDraft();
-  };
-
-  const handleRegenerate = (values: { instructions: string }) => {
-    setIsRegenerateVisible(false);
-    regenerateForm.resetFields();
-    void handleGenerateNoteDraft(values.instructions);
-  };
-
-  const handleConfirmNote = async (values: { title: string; content: string }) => {
-    if (!topic || !noteDraft) return;
-    try {
-      setNoteSubmitting(true);
-      await createNote({
-        topic: topic.id,
-        title: values.title,
-        content: values.content,
-        source_task: noteDraft.taskId,
-      });
-      message.success('结构化笔记已保存');
-      setNoteDraft(null);
-      noteForm.resetFields();
-      fetchTopic();
-    } catch (error) {
-      console.error('Failed to save note:', error);
-      message.error('保存结构化笔记失败');
-    } finally {
-      setNoteSubmitting(false);
     }
   };
 
@@ -239,14 +158,10 @@ const TopicDetail: React.FC = () => {
               <Tag color="blue">{topic.status_display}</Tag>
               <Tag color="green">掌握度: {topic.mastery_level_display}</Tag>
               <Button
-                onClick={handleGenerateButton}
-                disabled={!topic.materials.some((material) => material.import_status === 'success') || Boolean(noteTask)}
+                icon={<ApartmentOutlined />}
+                onClick={() => navigate(`/topics/${topic.id}/map`)}
               >
-                {topic.has_current_note
-                  ? '按要求再生成'
-                  : topic.notes.length
-                    ? '更新结构化笔记'
-                    : '生成结构化笔记'}
+                查看主图
               </Button>
               <Button
                 type="primary"
@@ -267,15 +182,39 @@ const TopicDetail: React.FC = () => {
           </Descriptions>
         </Card>
 
-        <Card title="结构化笔记">
-          {noteTask && (
-            <Alert
-              type="info"
-              showIcon
-              message="AI 正在根据学习材料生成笔记草稿，可继续浏览其他内容。"
-              style={{ marginBottom: 16 }}
+        <Card
+          title="学习产出"
+          extra={
+            <Button type="link" onClick={() => navigate(`/topics/${topic.id}/map`)}>
+              打开思维导图
+            </Button>
+          }
+        >
+          <Space size="large" wrap>
+            <Statistic
+              title="概念"
+              value={topic.learning_output.concept_count}
+              suffix="个"
             />
-          )}
+            <Statistic
+              title="已沉淀问答"
+              value={topic.learning_output.saved_question_count}
+              suffix="条"
+            />
+            <Statistic
+              title="总结"
+              value={topic.learning_output.summary_count}
+              suffix="篇"
+            />
+            <Statistic
+              title="主图节点"
+              value={topic.learning_output.map_node_count}
+              suffix="个"
+            />
+          </Space>
+        </Card>
+
+        <Card title="结构化笔记">
           <List
             dataSource={topic.notes}
             renderItem={(item) => (
@@ -398,56 +337,6 @@ const TopicDetail: React.FC = () => {
                 </Form.Item>
               )
             }
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal
-        title="确认结构化笔记"
-        open={Boolean(noteDraft)}
-        onCancel={() => {
-          setNoteDraft(null);
-          noteForm.resetFields();
-        }}
-        onOk={() => noteForm.submit()}
-        confirmLoading={noteSubmitting}
-        width={760}
-      >
-        <Alert
-          type="info"
-          showIcon
-          message="这是 AI 草稿。请检查、修改后再保存为正式笔记。"
-          style={{ marginBottom: 16 }}
-        />
-        <Form form={noteForm} layout="vertical" onFinish={handleConfirmNote}>
-          <Form.Item name="title" label="笔记标题" rules={[{ required: true, message: '请输入笔记标题' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="content" label="笔记内容" rules={[{ required: true, message: '请输入笔记内容' }]}>
-            <Input.TextArea rows={16} />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal
-        title="按要求重新生成笔记"
-        open={isRegenerateVisible}
-        onCancel={() => {
-          setIsRegenerateVisible(false);
-          regenerateForm.resetFields();
-        }}
-        onOk={() => regenerateForm.submit()}
-      >
-        <Form form={regenerateForm} layout="vertical" onFinish={handleRegenerate}>
-          <Form.Item
-            name="instructions"
-            label="新的生成要求"
-            rules={[{ required: true, message: '请说明本次希望如何调整笔记' }]}
-          >
-            <Input.TextArea
-              rows={5}
-              placeholder="例如：重点梳理 Django ORM 的查询优化，并补充常见误区。"
-            />
           </Form.Item>
         </Form>
       </Modal>

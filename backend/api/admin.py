@@ -5,6 +5,7 @@ from .models import (
     AITask,
     Concept,
     ConceptAnchor,
+    ConceptRelation,
     Exam,
     ExamQuestion,
     Highlight,
@@ -86,6 +87,17 @@ class ConceptAnchorAdmin(admin.ModelAdmin):
     )
     list_filter = ("material",)
     search_fields = ("concept__title", "source_text", "material__title")
+
+
+@admin.register(ConceptRelation)
+class ConceptRelationAdmin(admin.ModelAdmin):
+    list_display = ("from_concept", "relation_type", "to_concept", "updated_at")
+    list_filter = ("relation_type",)
+    search_fields = (
+        "from_concept__title",
+        "to_concept__title",
+        "description",
+    )
 
 
 @admin.register(Highlight)
