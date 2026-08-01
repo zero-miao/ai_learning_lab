@@ -357,10 +357,12 @@ const MaterialReader: React.FC = () => {
   const handleJumpToHighlight = (highlightId: number) => {
     const highlight = topic?.highlights.find((item) => item.id === highlightId);
     if (!highlight) return;
-    const targetId = highlight.chunk
-      ? `reader-chunk-${highlight.chunk}`
-      : `reader-chunk-0`;
-    document.getElementById(targetId)?.scrollIntoView({
+    const target =
+      document.getElementById(`reader-highlight-${highlight.id}`) ??
+      document.getElementById(
+        highlight.chunk ? `reader-chunk-${highlight.chunk}` : 'reader-chunk-0',
+      );
+    target?.scrollIntoView({
       behavior: 'smooth',
       block: 'center',
     });

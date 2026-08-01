@@ -113,6 +113,9 @@ function renderChunk(
       start: Math.max(0, highlight.start_offset - chunk.startOffset),
       end: Math.min(chunk.content.length, highlight.end_offset - chunk.startOffset),
       id: highlight.id,
+      isAnchor:
+        highlight.start_offset >= chunk.startOffset &&
+        highlight.start_offset < chunk.endOffset,
     }))
     .sort((left, right) => left.start - right.start);
 
@@ -125,7 +128,11 @@ function renderChunk(
       fragments.push(chunk.content.slice(position, start));
     }
     fragments.push(
-      <mark key={range.id} className="universal-reader__highlight">
+      <mark
+        id={range.isAnchor ? `reader-highlight-${range.id}` : undefined}
+        key={range.id}
+        className="universal-reader__highlight"
+      >
         {chunk.content.slice(start, range.end)}
       </mark>,
     );
