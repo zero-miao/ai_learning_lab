@@ -1,0 +1,46 @@
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { Layout, Typography } from 'antd';
+import TopicList from './pages/TopicList';
+import TopicDetail from './pages/TopicDetail';
+import MaterialReader from './pages/MaterialReader';
+import ExamPage from './pages/Exam';
+
+const { Header, Content, Footer } = Layout;
+const { Title } = Typography;
+
+function App() {
+  return (
+    <Router>
+      <Layout style={{ minHeight: '100vh' }}>
+        <Header style={{
+          display: 'flex',
+          alignItems: 'center',
+          background: '#fff',
+          borderBottom: '1px solid #f0f0f0',
+          position: 'sticky',
+          top: 0,
+          zIndex: 1,
+          width: '100%'
+        }}>
+          <Title level={3} style={{ margin: 0, cursor: 'pointer' }} onClick={() => window.location.href = '/'}>
+            AI Learning Lab
+          </Title>
+        </Header>
+        <Content style={{ background: '#f5f7fa' }}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/topics" replace />} />
+            <Route path="/topics" element={<TopicList />} />
+            <Route path="/topics/:id" element={<TopicDetail />} />
+            <Route path="/topics/:topicId/materials/:materialId" element={<MaterialReader />} />
+            <Route path="/topics/:topicId/exam" element={<ExamPage />} />
+          </Routes>
+        </Content>
+        <Footer style={{ textAlign: 'center' }}>
+          AI Learning Lab ©{new Date().getFullYear()} Created for Personal Learning
+        </Footer>
+      </Layout>
+    </Router>
+  );
+}
+
+export default App;

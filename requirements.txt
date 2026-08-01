@@ -1,0 +1,12 @@
+Django>=4.2,<5.0
+djangorestframework>=3.14
+trafilatura>=1.8
+readability-lxml>=0.8
+pydantic>=2.0
+APScheduler>=3.10
+pytest>=7.0
+pytest-django>=4.5
+django-cors-headers>=4.0.0
+python-dotenv>=1.0.0
+openai>=1.0.0
+ruff>=0.12.0
