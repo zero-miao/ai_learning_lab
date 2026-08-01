@@ -33,7 +33,7 @@ const ExamPage: React.FC = () => {
   const task = useAITaskPolling(taskId, {
     onSucceeded: (nextTask) => {
       const examId = nextTask.result_json.exam_id;
-      if (examId) void loadExam(examId);
+      if (typeof examId === 'number') void loadExam(examId);
       void loadTopic();
       setTaskId(null);
       setTaskKind(null);

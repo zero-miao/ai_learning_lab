@@ -7,9 +7,11 @@ from .models import (
     ExamQuestion,
     Material,
     MaterialChunk,
+    Note,
     Question,
     Topic,
 )
+from .note_service import build_note_source
 
 
 class AIResponseSerializer(serializers.ModelSerializer):
@@ -81,12 +83,39 @@ class MaterialSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at", "clean_text", "import_status"]
 
 
+class NoteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Note
+        fields = [
+            "id",
+            "topic",
+            "title",
+            "content",
+            "material_fingerprint",
+            "source_task",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "material_fingerprint",
+            "source_task",
+            "created_at",
+            "updated_at",
+        ]
+
+
 class TopicSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     mastery_level_display = serializers.CharField(
         source="get_mastery_level_display", read_only=True
     )
     materials = MaterialSerializer(many=True, read_only=True)
+    notes = NoteSerializer(many=True, read_only=True)
+    has_current_note = serializers.SerializerMethodField()
+
+    def get_has_current_note(self, topic):
+        _, fingerprint = build_note_source(topic)
+        return topic.notes.filter(material_fingerprint=fingerprint).exists()
 
     class Meta:
         model = Topic
@@ -102,6 +131,8 @@ class TopicSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "materials",
+            "notes",
+            "has_current_note",
         ]
         read_only_fields = ["created_at", "updated_at"]
 

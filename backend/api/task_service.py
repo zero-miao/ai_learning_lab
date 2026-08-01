@@ -120,6 +120,8 @@ def _run_task(task):
         return _generate_briefing(task)
     if task.task_type == "answer_question":
         return _answer_question(task)
+    if task.task_type == "note_draft":
+        return _generate_note_draft(task)
     if task.task_type == "generate_exam":
         return _generate_exam(task)
     if task.task_type == "grade_exam":
@@ -158,6 +160,30 @@ def _answer_question(task):
         model=task.model,
     )
     return {"ai_response_id": response.id, "question_id": question.id}
+
+
+def _generate_note_draft(task):
+    topic = task.topic
+    if topic is None:
+        raise ValueError("学习主题不存在。")
+    context = task.input_json.get("context", "")
+    if not context:
+        raise ValueError("学习主题没有可用于生成笔记的材料。")
+
+    content = AIGateway.generate_note_draft(
+        topic.title,
+        topic.goal,
+        context,
+        str(task.input_json.get("instructions", "")),
+    )
+    if not content.strip():
+        raise ValueError("AI 未生成笔记草稿。")
+    return {
+        "topic_id": topic.id,
+        "title": f"{topic.title} 学习笔记",
+        "content": content,
+        "material_fingerprint": task.input_json.get("material_fingerprint", ""),
+    }
 
 
 def _generate_exam(task):

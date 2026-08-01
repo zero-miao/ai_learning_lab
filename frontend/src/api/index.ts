@@ -42,6 +42,19 @@ export interface Topic {
   created_at: string;
   updated_at: string;
   materials: Material[];
+  notes: Note[];
+  has_current_note: boolean;
+}
+
+export interface Note {
+  id: number;
+  topic: number;
+  title: string;
+  content: string;
+  material_fingerprint: string;
+  source_task: number | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ExamQuestion {
@@ -82,7 +95,7 @@ export interface AITask {
   material: number | null;
   question: number | null;
   exam: number | null;
-  result_json: Record<string, number>;
+  result_json: Record<string, unknown>;
   error_message: string;
   attempt_count: number;
   max_attempts: number;
@@ -117,6 +130,12 @@ export const updateTopic = (id: number, data: Partial<Topic>) => api.patch<Topic
 export const deleteTopic = (id: number) => api.delete(`topics/${id}/`);
 export const createMaterial = (data: Partial<Material>) => api.post<Material>('materials/', data);
 export const deleteMaterial = (id: number) => api.delete(`materials/${id}/`);
+export const createNoteDraft = (topicId: number, instructions = '') =>
+  api.post<TaskResponse>(`topics/${topicId}/note-drafts/`, { instructions });
+export const createNote = (data: Partial<Note>) => api.post<Note>('notes/', data);
+export const updateNote = (id: number, data: Partial<Note>) =>
+  api.patch<Note>(`notes/${id}/`, data);
+export const deleteNote = (id: number) => api.delete(`notes/${id}/`);
 export const checkHealth = () => api.get('health/');
 export const getQuestion = (id: number) => api.get<Question>(`questions/${id}/`);
 export const createQuestion = (data: Partial<Question>) => api.post<{ question: Question; task: AITask }>('questions/', data);

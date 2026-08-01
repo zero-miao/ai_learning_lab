@@ -79,6 +79,32 @@ class AIGateway:
         return provider.generate_response(messages)
 
     @classmethod
+    def generate_note_draft(
+        cls, topic_title: str, goal: str, context: str, instructions: str = ""
+    ) -> str:
+        provider = cls.get_provider()
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是学习笔记助手。基于给定材料生成简洁、可编辑的 Markdown "
+                    "结构化笔记。必须区分材料明确陈述的内容和需要继续确认的推断，"
+                    "避免虚构材料中没有的事实。建议包含：核心结论、关键概念与关系、"
+                    "适用边界、待确认问题。不要添加标题。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"学习主题：{topic_title}\n学习目标：{goal or '未提供'}\n"
+                    f"学习材料：\n{context}\n\n"
+                    f"用户的额外要求：{instructions or '无'}"
+                ),
+            },
+        ]
+        return provider.generate_response(messages)
+
+    @classmethod
     def generate_exam(
         cls, topic_title: str, goal: str, context: str
     ) -> list[dict[str, Any]]:
