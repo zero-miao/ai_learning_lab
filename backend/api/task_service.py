@@ -5,7 +5,14 @@ from django.db import transaction
 from django.utils import timezone
 
 from .ai_gateway import PROMPT_VERSION, AIGateway
-from .models import AIResponse, AITask, Exam, ExamQuestion, ReviewRecord
+from .models import (
+    AIResponse,
+    AITask,
+    DiscussionMessage,
+    Exam,
+    ExamQuestion,
+    ReviewRecord,
+)
 
 RETRY_DELAYS_SECONDS = (5, 15, 45)
 
@@ -17,6 +24,7 @@ def enqueue_or_reuse(
     material=None,
     question=None,
     concept=None,
+    discussion_message=None,
     exam=None,
     review=None,
     input_json=None,
@@ -30,6 +38,8 @@ def enqueue_or_reuse(
         filters["question"] = question
     if concept is not None:
         filters["concept"] = concept
+    if discussion_message is not None:
+        filters["discussion_message"] = discussion_message
     if exam is not None:
         filters["exam"] = exam
     if review is not None:
@@ -46,6 +56,7 @@ def enqueue_or_reuse(
             material=material,
             question=question,
             concept=concept,
+            discussion_message=discussion_message,
             exam=exam,
             review=review,
             input_json=input_json or {},
@@ -117,6 +128,7 @@ def execute_task(task_id):
         "material",
         "question",
         "concept__topic",
+        "discussion_message__topic",
         "exam__topic",
         "review__topic",
         "review__exam",
@@ -142,6 +154,14 @@ def _run_task(task):
         return _answer_question(task)
     if task.task_type == "concept_draft":
         return _generate_concept_draft(task)
+    if task.task_type == "discussion_opening":
+        return _generate_discussion_opening(task)
+    if task.task_type == "discussion_assessment":
+        return _generate_discussion_assessment(task)
+    if task.task_type == "discussion_reply":
+        return _generate_discussion_reply(task)
+    if task.task_type == "learning_path":
+        return _generate_learning_path(task)
     if task.task_type == "note_draft":
         return _generate_note_draft(task)
     if task.task_type == "generate_exam":
@@ -214,6 +234,71 @@ def _generate_concept_draft(task):
         ]
     )
     return {"concept_id": concept.id, **draft}
+
+
+def _create_discussion_message(task, content, message_type):
+    topic = task.topic
+    if topic is None:
+        raise ValueError("讨论话题不存在。")
+    message = DiscussionMessage.objects.create(
+        topic=topic,
+        role="assistant",
+        message_type=message_type,
+        content=content.strip(),
+        source_task=task,
+    )
+    return {"discussion_message_id": message.id, "topic_id": topic.id}
+
+
+def _generate_discussion_opening(task):
+    topic = task.topic
+    if topic is None:
+        raise ValueError("讨论话题不存在。")
+    content = AIGateway.generate_discussion_opening(topic.title, topic.goal)
+    return _create_discussion_message(task, content, "opening")
+
+
+def _generate_discussion_assessment(task):
+    topic = task.topic
+    if topic is None:
+        raise ValueError("讨论话题不存在。")
+    material_context = str(task.input_json.get("material_context", "")).strip()
+    if not material_context:
+        raise ValueError("快速评估缺少可用材料。")
+    content = AIGateway.assess_discussion_material(
+        topic.title, topic.goal, material_context
+    )
+    topic.discussion_rationale = content
+    topic.save(update_fields=["discussion_rationale", "updated_at"])
+    return _create_discussion_message(task, content, "assessment")
+
+
+def _generate_discussion_reply(task):
+    topic = task.topic
+    user_message = task.discussion_message
+    if topic is None or user_message is None:
+        raise ValueError("讨论消息不存在。")
+    content = AIGateway.reply_to_discussion(
+        topic.title,
+        topic.goal,
+        str(task.input_json.get("material_context", "")).strip(),
+        str(task.input_json.get("history", "")).strip(),
+        user_message.content,
+    )
+    return _create_discussion_message(task, content, "discussion")
+
+
+def _generate_learning_path(task):
+    topic = task.topic
+    if topic is None:
+        raise ValueError("讨论话题不存在。")
+    content = AIGateway.generate_learning_path(
+        topic.title,
+        topic.goal,
+        str(task.input_json.get("material_context", "")).strip(),
+        str(task.input_json.get("history", "")).strip(),
+    )
+    return _create_discussion_message(task, content, "learning_path")
 
 
 def _generate_note_draft(task):

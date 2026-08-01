@@ -20,6 +20,11 @@ class Topic(models.Model):
         ("pass", "掌握"),
         ("strong", "熟练"),
     ]
+    DISCUSSION_OUTCOME_CHOICES = [
+        ("pending", "待定"),
+        ("learn", "学习"),
+        ("not_learn", "暂不学习"),
+    ]
 
     title = models.CharField(max_length=255, verbose_name="标题")
     type = models.CharField(
@@ -40,6 +45,13 @@ class Topic(models.Model):
         default="unknown",
         verbose_name="掌握程度",
     )
+    discussion_outcome = models.CharField(
+        max_length=20,
+        choices=DISCUSSION_OUTCOME_CHOICES,
+        default="pending",
+        verbose_name="讨论结论",
+    )
+    discussion_rationale = models.TextField(blank=True, verbose_name="判断依据")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
 
@@ -120,6 +132,48 @@ class MaterialChunk(models.Model):
         verbose_name = "材料片段"
         verbose_name_plural = "材料片段"
         ordering = ["chunk_index"]
+
+
+class DiscussionMessage(models.Model):
+    ROLE_CHOICES = [
+        ("user", "用户"),
+        ("assistant", "AI 助手"),
+    ]
+    TYPE_CHOICES = [
+        ("opening", "主动开场"),
+        ("assessment", "快速评估"),
+        ("discussion", "讨论"),
+        ("learning_path", "学习路线"),
+    ]
+
+    topic = models.ForeignKey(
+        Topic,
+        related_name="discussion_messages",
+        on_delete=models.CASCADE,
+        verbose_name="所属主题",
+    )
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, verbose_name="角色")
+    message_type = models.CharField(
+        max_length=30,
+        choices=TYPE_CHOICES,
+        default="discussion",
+        verbose_name="消息类型",
+    )
+    content = models.TextField(verbose_name="消息内容")
+    source_task = models.ForeignKey(
+        "AITask",
+        related_name="generated_discussion_messages",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="来源任务",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "讨论消息"
+        verbose_name_plural = "讨论消息"
+        ordering = ["created_at", "id"]
 
 
 class Question(models.Model):
@@ -525,6 +579,10 @@ class AITask(models.Model):
         ("grade_exam", "阅卷评分"),
         ("note_draft", "笔记草稿"),
         ("review_prompt", "复习提示"),
+        ("discussion_opening", "讨论开场"),
+        ("discussion_assessment", "快速评估"),
+        ("discussion_reply", "讨论回复"),
+        ("learning_path", "学习路线"),
     ]
     STATUS_CHOICES = [
         ("pending", "等待执行"),
@@ -575,6 +633,14 @@ class AITask(models.Model):
         null=True,
         blank=True,
         verbose_name="关联概念",
+    )
+    discussion_message = models.ForeignKey(
+        DiscussionMessage,
+        related_name="ai_tasks",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        verbose_name="关联讨论消息",
     )
     exam = models.ForeignKey(
         Exam,

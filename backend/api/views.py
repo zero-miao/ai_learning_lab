@@ -9,6 +9,7 @@ from .models import (
     Concept,
     ConceptAnchor,
     ConceptRelation,
+    DiscussionMessage,
     Exam,
     Highlight,
     Material,
@@ -23,6 +24,7 @@ from .serializers import (
     AITaskSerializer,
     ConceptRelationSerializer,
     ConceptSerializer,
+    DiscussionMessageSerializer,
     ExamSerializer,
     HighlightSerializer,
     MaterialSerializer,
@@ -53,6 +55,21 @@ def _build_review_context(review):
     return "\n\n".join(
         section for section in (material_context, note_context) if section
     )[:12000]
+
+
+def _build_discussion_material_context(topic):
+    materials = topic.materials.filter(import_status="success").exclude(clean_text="")
+    return "\n\n".join(
+        f"材料：{material.title}\n{material.clean_text}" for material in materials
+    )[:12000]
+
+
+def _build_discussion_history(topic):
+    messages = topic.discussion_messages.order_by("-created_at", "-id")[:10]
+    return "\n".join(
+        f"{message.get_role_display()}：{message.content}"
+        for message in reversed(list(messages))
+    )[:8000]
 
 
 def _get_anchor_data(topic, data):
@@ -89,6 +106,15 @@ def _get_anchor_data(topic, data):
 class TopicViewSet(viewsets.ModelViewSet):
     queryset = Topic.objects.all()
     serializer_class = TopicSerializer
+
+    def perform_create(self, serializer):
+        topic = serializer.save()
+        if topic.type == "discussion":
+            enqueue_or_reuse(
+                "discussion_opening",
+                topic=topic,
+                input_json={"topic_id": topic.id},
+            )
 
     @action(detail=True, methods=["post"], url_path="note-drafts")
     def create_note_draft(self, request, pk=None):
@@ -200,6 +226,119 @@ class TopicViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 
+    @action(detail=True, methods=["get"], url_path="discussion")
+    def discussion(self, request, pk=None):
+        topic = self.get_object()
+        if topic.type != "discussion":
+            return Response(
+                {"detail": "该话题不是讨论型话题。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        messages = topic.discussion_messages.all()
+        return Response(
+            {
+                "topic": TopicSerializer(topic).data,
+                "messages": DiscussionMessageSerializer(messages, many=True).data,
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="discussion-messages")
+    def create_discussion_message(self, request, pk=None):
+        topic = self.get_object()
+        if topic.type != "discussion":
+            return Response(
+                {"detail": "该话题不是讨论型话题。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        content = str(request.data.get("content", "")).strip()
+        if not content:
+            return Response(
+                {"detail": "请输入讨论内容。"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        message = DiscussionMessage.objects.create(
+            topic=topic,
+            role="user",
+            message_type="discussion",
+            content=content,
+        )
+        task, _ = enqueue_or_reuse(
+            "discussion_reply",
+            topic=topic,
+            discussion_message=message,
+            input_json={
+                "message_id": message.id,
+                "material_context": _build_discussion_material_context(topic),
+                "history": _build_discussion_history(topic),
+            },
+        )
+        return Response(
+            {
+                "message": DiscussionMessageSerializer(message).data,
+                "task": AITaskSerializer(task).data,
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="discussion-assessment")
+    def create_discussion_assessment(self, request, pk=None):
+        topic = self.get_object()
+        if topic.type != "discussion":
+            return Response(
+                {"detail": "该话题不是讨论型话题。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        material_context = _build_discussion_material_context(topic)
+        if not material_context:
+            return Response(
+                {"detail": "请先导入至少一份处理成功的材料。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        task, _ = enqueue_or_reuse(
+            "discussion_assessment",
+            topic=topic,
+            input_json={"material_context": material_context},
+        )
+        return Response(
+            {"task": AITaskSerializer(task).data}, status=status.HTTP_202_ACCEPTED
+        )
+
+    @action(detail=True, methods=["post"], url_path="learning-path")
+    def create_learning_path(self, request, pk=None):
+        topic = self.get_object()
+        history = _build_discussion_history(topic)
+        task, _ = enqueue_or_reuse(
+            "learning_path",
+            topic=topic,
+            input_json={
+                "material_context": _build_discussion_material_context(topic),
+                "history": history,
+            },
+        )
+        return Response(
+            {"task": AITaskSerializer(task).data}, status=status.HTTP_202_ACCEPTED
+        )
+
+    @action(detail=True, methods=["post"], url_path="convert-to-learning")
+    def convert_to_learning(self, request, pk=None):
+        topic = self.get_object()
+        if topic.type != "discussion":
+            return Response(
+                {"detail": "该话题已经是学习型话题。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        topic.type = "learning"
+        topic.status = "learning"
+        topic.discussion_outcome = "learn"
+        topic.save(
+            update_fields=[
+                "type",
+                "status",
+                "discussion_outcome",
+                "updated_at",
+            ]
+        )
+        return Response(TopicSerializer(topic).data)
+
 
 class MaterialViewSet(viewsets.ModelViewSet):
     queryset = Material.objects.all()
@@ -215,6 +354,17 @@ class MaterialViewSet(viewsets.ModelViewSet):
                 material=material,
                 input_json={"material_id": material.id},
             )
+            if material.topic.type == "discussion":
+                enqueue_or_reuse(
+                    "discussion_assessment",
+                    topic=material.topic,
+                    material=material,
+                    input_json={
+                        "material_context": _build_discussion_material_context(
+                            material.topic
+                        )
+                    },
+                )
 
 
 class QuestionViewSet(viewsets.ModelViewSet):
@@ -505,13 +655,27 @@ class ReviewRecordViewSet(viewsets.ReadOnlyModelViewSet):
 
 class AITaskViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AITask.objects.select_related(
-        "topic", "material", "question", "concept", "exam", "review"
+        "topic",
+        "material",
+        "question",
+        "concept",
+        "discussion_message",
+        "exam",
+        "review",
     )
     serializer_class = AITaskSerializer
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        for field in ("topic", "material", "question", "concept", "exam", "review"):
+        for field in (
+            "topic",
+            "material",
+            "question",
+            "concept",
+            "discussion_message",
+            "exam",
+            "review",
+        ):
             value = self.request.query_params.get(field)
             if value:
                 queryset = queryset.filter(**{f"{field}_id": value})

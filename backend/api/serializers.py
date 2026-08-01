@@ -6,6 +6,7 @@ from .models import (
     Concept,
     ConceptAnchor,
     ConceptRelation,
+    DiscussionMessage,
     Exam,
     ExamQuestion,
     Highlight,
@@ -64,6 +65,34 @@ class QuestionSerializer(serializers.ModelSerializer):
             "end_offset",
             "is_saved",
             "saved_at",
+            "created_at",
+        ]
+
+
+class DiscussionMessageSerializer(serializers.ModelSerializer):
+    role_display = serializers.CharField(source="get_role_display", read_only=True)
+    message_type_display = serializers.CharField(
+        source="get_message_type_display", read_only=True
+    )
+
+    class Meta:
+        model = DiscussionMessage
+        fields = [
+            "id",
+            "topic",
+            "role",
+            "role_display",
+            "message_type",
+            "message_type_display",
+            "content",
+            "source_task",
+            "created_at",
+        ]
+        read_only_fields = [
+            "topic",
+            "role",
+            "message_type",
+            "source_task",
             "created_at",
         ]
 
@@ -241,6 +270,9 @@ class NoteSerializer(serializers.ModelSerializer):
 
 class TopicSerializer(serializers.ModelSerializer):
     type_display = serializers.CharField(source="get_type_display", read_only=True)
+    discussion_outcome_display = serializers.CharField(
+        source="get_discussion_outcome_display", read_only=True
+    )
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     mastery_level_display = serializers.CharField(
         source="get_mastery_level_display", read_only=True
@@ -272,6 +304,9 @@ class TopicSerializer(serializers.ModelSerializer):
             "title",
             "type",
             "type_display",
+            "discussion_outcome",
+            "discussion_outcome_display",
+            "discussion_rationale",
             "goal",
             "scope",
             "status",
@@ -396,6 +431,7 @@ class AITaskSerializer(serializers.ModelSerializer):
             "material",
             "question",
             "concept",
+            "discussion_message",
             "exam",
             "review",
             "result_json",

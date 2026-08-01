@@ -74,6 +74,8 @@ LLM_API_KEY=ollama
   高亮侧栏支持查看原文和删除。
 - 话题主图：单 Topic 的 `ConceptRelation` 支持创建、编辑和删除；主图节点可编辑概念卡片并
   从来源锚点回到材料。关系当前由用户维护，尚未接入 AI 自动推荐。
+- 讨论型话题：`DiscussionMessage` 持久化开场、材料快速评估、用户追问和学习路线；页面采用
+  左侧对话、右侧可折叠材料面板。讨论可随时转为学习型话题，并保留材料、对话和判断依据。
 - Assessment 闭环：迁移性题目生成、作答、AI 阅卷、掌握度更新和首次复习记录。
 - Django Admin：所有核心模型均已注册。
 - LLM 网关：支持 OpenAI-compatible Provider 与本地 Ollama。
@@ -115,6 +117,10 @@ pending -> running -> succeeded
 | 阅读前导 | 材料导入成功后自动入队 | 材料 CRUD 响应 | `GET /api/ai-tasks/?material={id}` |
 | 划词问答 | `POST /api/questions/` | `202`，`{question, task}` | `GET /api/ai-tasks/{id}/` |
 | 概念草稿 | `POST /api/topics/{id}/concepts/` | `202`，`{concept, task}` | `GET /api/ai-tasks/{id}/` |
+| 讨论开场 | 创建讨论型 Topic 后自动入队 | Topic CRUD 响应 | `GET /api/ai-tasks/?topic={id}` |
+| 讨论评估 | `POST /api/topics/{id}/discussion-assessment/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
+| 讨论追问 | `POST /api/topics/{id}/discussion-messages/` | `202`，`{message, task}` | `GET /api/ai-tasks/{id}/` |
+| 学习路线 | `POST /api/topics/{id}/learning-path/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 笔记草稿 | `POST /api/topics/{id}/note-drafts/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 考试生成 | `POST /api/exams/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 阅卷 | `POST /api/exams/{id}/submit/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
@@ -194,7 +200,7 @@ cd /Users/meiao/ai_workspace/ai-learning-lab
 (cd frontend && npm run build)
 ```
 
-当前已通过 Ruff、Django API 测试（16 项）、Django check、TypeScript `tsc -b` 与
+当前已通过 Ruff、Django API 测试（18 项）、Django check、TypeScript `tsc -b` 与
 Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超过 500 kB，
 后续可通过代码分割优化。
 
@@ -210,7 +216,7 @@ Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超�
 当前进入 V1-alpha 的阶段化开发。完整范围、原型和验收标准见
 [docs/V1-ALPHA.md](file:///Users/meiao/ai_workspace/ai-learning-lab/docs/V1-ALPHA.md)。
 
-阶段 1 至阶段 4 已完成：
+阶段 1 至阶段 5 已完成：
 
 1. `api.0010_material_source_type_topic_type` 已应用，`Topic.type` 和
    `Material.source_type` 已贯穿 API 与 Django Admin。
@@ -224,9 +230,12 @@ Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超�
    沉淀到材料问答记录或当前 Topic 的概念卡片；高亮侧栏支持原文定位和删除。
 6. `api.0014_conceptrelation_and_more` 已应用。每个 Topic 有一张主思维导图，可维护概念关系、
    编辑节点并从来源锚点回到材料；Topic 详情展示概念、已沉淀问答、总结和主图节点数量。
+7. `api.0015_topic_discussion_outcome_topic_discussion_rationale_and_more` 已应用。讨论型 Topic
+   自动生成 AI 开场；材料处理完成后可快速评估，支持持续对话、学习路线、结论沉淀和转换为
+   学习型话题，所有 AI 操作均通过 `AITask` 异步执行。
 
-下一步实施阶段 5：讨论型话题、快速评估与学习路线。AI 关系推荐和阶段总结按 V1-alpha 后续
-阶段推进。所有长耗时 AI 能力继续走
+下一步实施阶段 6：强化验证与复习闭环，结合主图、概念和沉淀问答更新复习内容与下次复习时间。
+AI 关系推荐和阶段总结按 V1-alpha 后续阶段推进。所有长耗时 AI 能力继续走
 `AITask` 异步任务和前端轮询，不能退回为阻塞请求。
 
 ## 11. 接手原则

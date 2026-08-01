@@ -189,7 +189,13 @@ const TopicList: React.FC = () => {
                   {item.type_display}
                 </Tag>
               }
-              onClick={() => navigate(`/topics/${item.id}`)}
+              onClick={() =>
+                navigate(
+                  item.type === 'discussion'
+                    ? `/topics/${item.id}/discussion`
+                    : `/topics/${item.id}`,
+                )
+              }
             >
               <Paragraph ellipsis={{ rows: 2 }}>
                 {item.goal || '还没有学习目标'}

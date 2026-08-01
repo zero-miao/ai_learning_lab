@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { Navigate, useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Layout,
   Typography,
@@ -140,6 +140,9 @@ const TopicDetail: React.FC = () => {
 
   if (loading && !topic) return <div style={{ padding: '24px' }}>加载中...</div>;
   if (!topic) return <div style={{ padding: '24px' }}>未找到主题</div>;
+  if (topic.type === 'discussion') {
+    return <Navigate to={`/topics/${topic.id}/discussion`} replace />;
+  }
 
   return (
     <Content style={{ padding: '24px' }}>

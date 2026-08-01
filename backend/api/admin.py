@@ -6,6 +6,7 @@ from .models import (
     Concept,
     ConceptAnchor,
     ConceptRelation,
+    DiscussionMessage,
     Exam,
     ExamQuestion,
     Highlight,
@@ -24,11 +25,12 @@ class TopicAdmin(admin.ModelAdmin):
         "title",
         "type",
         "status",
+        "discussion_outcome",
         "mastery_level",
         "created_at",
         "updated_at",
     )
-    list_filter = ("type", "status", "mastery_level")
+    list_filter = ("type", "status", "mastery_level", "discussion_outcome")
     search_fields = ("title", "goal", "scope")
 
 
@@ -100,6 +102,14 @@ class ConceptRelationAdmin(admin.ModelAdmin):
     )
 
 
+@admin.register(DiscussionMessage)
+class DiscussionMessageAdmin(admin.ModelAdmin):
+    list_display = ("topic", "role", "message_type", "source_task", "created_at")
+    list_filter = ("role", "message_type")
+    search_fields = ("topic__title", "content")
+    readonly_fields = ("source_task", "created_at")
+
+
 @admin.register(Highlight)
 class HighlightAdmin(admin.ModelAdmin):
     list_display = (
@@ -139,6 +149,7 @@ class AITaskAdmin(admin.ModelAdmin):
         "material",
         "question",
         "concept",
+        "discussion_message",
         "exam",
         "review",
         "attempt_count",

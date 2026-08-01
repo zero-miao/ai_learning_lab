@@ -11,6 +11,7 @@ from .models import (
     Concept,
     ConceptAnchor,
     ConceptRelation,
+    DiscussionMessage,
     Exam,
     Highlight,
     Material,
@@ -134,6 +135,94 @@ class AsyncTaskApiTests(TestCase):
             format="json",
         )
         self.assertEqual(invalid_response.status_code, 400)
+
+    @patch("api.task_service.AIGateway.reply_to_discussion")
+    @patch("api.task_service.AIGateway.generate_discussion_opening")
+    def test_discussion_workflow_persists_messages_and_converts_topic(
+        self, generate_discussion_opening, reply_to_discussion
+    ):
+        generate_discussion_opening.return_value = "你为什么想在现在了解向量数据库？"
+        topic_response = self.client.post(
+            "/api/topics/",
+            {
+                "title": "向量数据库",
+                "type": "discussion",
+                "goal": "判断是否值得系统学习。",
+            },
+            format="json",
+        )
+        self.assertEqual(topic_response.status_code, 201)
+        topic = Topic.objects.get(pk=topic_response.data["id"])
+        opening_task = AITask.objects.get(topic=topic, task_type="discussion_opening")
+        opening_task.status = "running"
+        opening_task.attempt_count = 1
+        opening_task.save()
+        execute_task(opening_task.id)
+        self.assertEqual(
+            DiscussionMessage.objects.get(topic=topic, role="assistant").content,
+            generate_discussion_opening.return_value,
+        )
+
+        reply_to_discussion.return_value = "先从你的检索需求和数据规模判断。"
+        message_response = self.client.post(
+            f"/api/topics/{topic.id}/discussion-messages/",
+            {"content": "我需要为本地知识库做检索。"},
+            format="json",
+        )
+        self.assertEqual(message_response.status_code, 202)
+        reply_task = AITask.objects.get(pk=message_response.data["task"]["id"])
+        reply_task.status = "running"
+        reply_task.attempt_count = 1
+        reply_task.save()
+        execute_task(reply_task.id)
+        self.assertEqual(
+            DiscussionMessage.objects.filter(topic=topic, role="assistant").count(),
+            2,
+        )
+
+        convert_response = self.client.post(
+            f"/api/topics/{topic.id}/convert-to-learning/", format="json"
+        )
+        self.assertEqual(convert_response.status_code, 200)
+        topic.refresh_from_db()
+        self.assertEqual(topic.type, "learning")
+        self.assertEqual(topic.discussion_outcome, "learn")
+        self.assertEqual(topic.discussion_messages.count(), 3)
+
+    @patch("api.task_service.AIGateway.assess_discussion_material")
+    def test_discussion_assessment_updates_rationale(self, assess_discussion_material):
+        assess_discussion_material.return_value = (
+            "材料关联度：高。它直接说明了向量相似度检索的核心用途。"
+        )
+        topic = Topic.objects.create(
+            title="向量检索", type="discussion", goal="判断是否学习"
+        )
+        Material.objects.create(
+            topic=topic,
+            type="text",
+            title="向量检索简介",
+            raw_text="向量检索通过相似度查找相关内容。",
+            clean_text="向量检索通过相似度查找相关内容。",
+            import_status="success",
+        )
+        response = self.client.post(
+            f"/api/topics/{topic.id}/discussion-assessment/", format="json"
+        )
+        self.assertEqual(response.status_code, 202)
+        task = AITask.objects.get(pk=response.data["task"]["id"])
+        task.status = "running"
+        task.attempt_count = 1
+        task.save()
+        execute_task(task.id)
+        topic.refresh_from_db()
+        self.assertEqual(
+            topic.discussion_rationale, assess_discussion_material.return_value
+        )
+        self.assertTrue(
+            DiscussionMessage.objects.filter(
+                topic=topic, message_type="assessment"
+            ).exists()
+        )
 
     def test_topic_type_and_material_source_type_are_exposed(self):
         topic_response = self.client.post(

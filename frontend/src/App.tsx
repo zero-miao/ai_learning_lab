@@ -6,6 +6,7 @@ import MaterialReader from './pages/MaterialReader';
 import ExamPage from './pages/Exam';
 import ReviewPage from './pages/Review';
 import TopicMap from './pages/TopicMap';
+import DiscussionTopic from './pages/DiscussionTopic';
 
 const { Header, Content, Footer } = Layout;
 const { Title } = Typography;
@@ -36,6 +37,7 @@ function App() {
             <Route path="/" element={<Navigate to="/topics" replace />} />
             <Route path="/topics" element={<TopicList />} />
             <Route path="/topics/:id" element={<TopicDetail />} />
+            <Route path="/topics/:id/discussion" element={<DiscussionTopic />} />
             <Route path="/topics/:id/map" element={<TopicMap />} />
             <Route path="/topics/:topicId/materials/:materialId" element={<MaterialReader />} />
             <Route path="/topics/:topicId/exam" element={<ExamPage />} />

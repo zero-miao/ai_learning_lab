@@ -79,6 +79,104 @@ class AIGateway:
         return provider.generate_response(messages)
 
     @classmethod
+    def generate_discussion_opening(cls, topic_title: str, goal: str) -> str:
+        provider = cls.get_provider()
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是学习决策助手。帮助用户判断一个话题是否值得现在系统学习。"
+                    "先说明该话题的核心价值和潜在适用范围，再提出一个开放问题了解用户动机。"
+                    "不要虚构用户已有知识或外部资料。保持简洁、可继续对话。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"讨论话题：{topic_title}\n学习目标：{goal or '未提供'}",
+            },
+        ]
+        return provider.generate_response(messages)
+
+    @classmethod
+    def assess_discussion_material(
+        cls, topic_title: str, goal: str, material_context: str
+    ) -> str:
+        provider = cls.get_provider()
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是学习决策助手。基于给定材料进行快速评估："
+                    "1. 用简洁语言概括材料；2. 判断它对当前学习目标的关联度（高/中/低）并说明理由；"
+                    "3. 指出投入系统学习前应澄清的一个问题。"
+                    "不要假装知道用户未提供的背景，也不要推荐外部链接。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"讨论话题：{topic_title}\n学习目标：{goal or '未提供'}\n"
+                    f"材料：\n{material_context}"
+                ),
+            },
+        ]
+        return provider.generate_response(messages)
+
+    @classmethod
+    def reply_to_discussion(
+        cls,
+        topic_title: str,
+        goal: str,
+        material_context: str,
+        history: str,
+        user_message: str,
+    ) -> str:
+        provider = cls.get_provider()
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是学习决策助手。讨论始终围绕“是否应该学、为什么现在学、如何开始”推进。"
+                    "结合提供的材料和对话回应用户；区分材料事实与建议，不要把讨论直接扩写成课程。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"讨论话题：{topic_title}\n学习目标：{goal or '未提供'}\n"
+                    f"材料上下文：{material_context or '暂无材料'}\n"
+                    f"最近对话：\n{history or '暂无'}\n\n用户新消息：{user_message}"
+                ),
+            },
+        ]
+        return provider.generate_response(messages)
+
+    @classmethod
+    def generate_learning_path(
+        cls, topic_title: str, goal: str, material_context: str, history: str
+    ) -> str:
+        provider = cls.get_provider()
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是学习规划助手。为已经决定学习的话题给出一个可执行的起步路线："
+                    "包含 3 到 5 个递进步骤、每步要解决的问题、优先阅读的现有材料（如有）"
+                    "以及一个第一天可完成的小行动。不要虚构外部链接或资料。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"话题：{topic_title}\n学习目标：{goal or '未提供'}\n"
+                    f"现有材料：{material_context or '暂无'}\n"
+                    f"讨论上下文：\n{history or '暂无'}"
+                ),
+            },
+        ]
+        return provider.generate_response(messages)
+
+    @classmethod
     def generate_concept_draft(
         cls, concept_title: str, source_text: str, context: str
     ) -> dict[str, str]:
