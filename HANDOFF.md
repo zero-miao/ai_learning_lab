@@ -44,9 +44,14 @@
 - Python 3.12.13，虚拟环境为项目根目录 `.venv`
 - 本地 Ollama
 
-前端构建需要 Node.js 20.x。当前 shell 实际仅安装 Node.js v18.20.8，因此
-Vite/Rolldown 构建会因缺少 `node:util.styleText` 失败；安装或切换 Node 20 后，再
-执行 `npm run build`。
+前端构建需要 Node.js 20.x。本机已通过 nvm 安装 Node.js v20.20.2，但 Trae Agent
+的非交互 shell 默认将 Node.js v18.20.8 放在 `PATH` 前面。执行前端命令前显式切换：
+
+```bash
+export NVM_DIR="$HOME/.nvm"
+. "$NVM_DIR/nvm.sh"
+nvm use 20
+```
 
 根目录 `.env` 是实际运行配置，后端 [api/ai_gateway.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/ai_gateway.py) 会固定从项目根目录加载。当前默认配置为：
 
@@ -169,8 +174,9 @@ cd /Users/meiao/ai_workspace/ai-learning-lab
 (cd frontend && npm run build)
 ```
 
-当前已通过 Ruff、Django API 测试（8 项）、Django check 与 TypeScript `tsc -b`。
-完整 Vite 构建待 Node 20 环境恢复后执行。
+当前已通过 Ruff、Django API 测试（8 项）、Django check、TypeScript `tsc -b` 与
+Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超过 500 kB，
+后续可通过代码分割优化。
 
 ## 9. 代码规范
 
