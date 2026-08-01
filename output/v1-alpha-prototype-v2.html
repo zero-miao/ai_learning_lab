@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Learning Lab · V1-alpha Prototype V2</title>
+<style>
+  :root{
+    --primary:#1677ff;--primary-bg:#e6f4ff;--primary-border:#91caff;
+    --change:#fa8c16;--change-bg:#fff7e6;--change-border:#ffd591;
+    --success:#52c41a;--warning:#faad14;--error:#ff4d4f;
+    --text:#262626;--text-secondary:#595959;--text-tertiary:#8c8c8c;
+    --border:#f0f0f0;--border-strong:#d9d9d9;--bg:#f5f7fa;--paper:#fff;
+    --shadow:0 2px 12px rgba(0,0,0,.05);--radius:8px;--radius-sm:6px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Roboto','Helvetica Neue','PingFang SC','Microsoft YaHei',sans-serif;font-size:14px;line-height:1.5715;-webkit-font-smoothing:antialiased}
+  .app{min-height:100vh;display:flex;flex-direction:column}
+  .topbar{height:64px;background:var(--paper);border-bottom:1px solid var(--border);display:flex;align-items:center;position:sticky;top:0;z-index:10;padding:0 50px;gap:16px}
+  .brand{font-size:24px;font-weight:600;margin:0;cursor:pointer;line-height:1.25}.top-spacer{flex:1}.footer{text-align:center;color:var(--text-tertiary);padding:24px 50px;background:var(--bg)}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:4px 15px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:#fff;color:var(--text);font-size:14px;white-space:nowrap}.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}.btn.text{border:0;background:transparent;color:var(--text-secondary);padding:4px 8px}.btn.link{border:0;background:transparent;color:var(--primary);padding:4px 0}.btn.dashed{border-style:dashed;color:var(--text-secondary)}.btn.large{height:40px;padding:6px 20px}.btn.orange{background:var(--change);border-color:var(--change);color:#fff}
+  .content{flex:1;padding:24px}.page{max-width:1280px;margin:0 auto}.section{margin-bottom:32px}.section-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}.section-title h2{font-size:30px;line-height:1.25;font-weight:600;margin:0}.section-title p{margin:8px 0 0;color:var(--text-secondary)}
+  .card{background:var(--paper);border:1px solid var(--border);border-radius:var(--radius);box-shadow:none;padding:24px}.card.hover{transition:.2s}.card.hover:hover{box-shadow:0 4px 14px rgba(0,0,0,.08);border-color:#e6e6e6}.card-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px}.card-title{font-size:16px;font-weight:600;margin:0}.card-sub{color:var(--text-secondary);margin:6px 0 0}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.layout2{display:grid;grid-template-columns:1fr 360px;gap:24px}.discussion-layout{display:grid;grid-template-columns:1fr 260px;gap:16px}.material-panel{background:#fff;border:1px solid var(--border);border-radius:8px;padding:16px;align-self:start;position:sticky;top:88px}.panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.collapse-pill{font-size:12px;color:var(--text-tertiary);border:1px solid var(--border);border-radius:12px;padding:1px 8px}.highlight-list{border:1px solid var(--border);border-radius:8px;background:#fafafa;padding:12px}.highlight-item{border-left:3px solid #faad14;background:#fffbe6;padding:8px 10px;margin-top:8px;border-radius:4px;color:#5c3b00}.briefing-preview{margin-top:10px;color:var(--text-secondary);max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.briefing-card{border:1px solid var(--primary-border);background:#f7fbff;border-radius:10px;padding:18px;margin:0 0 32px}.briefing-card h3{margin:0;font-size:18px}.briefing-card p{font-size:14px;line-height:1.65;text-align:left;letter-spacing:0;margin:8px 0;color:var(--text-secondary)}.skeleton{height:10px;background:linear-gradient(90deg,#f0f0f0,#fafafa,#f0f0f0);border-radius:8px;margin-top:10px}.layout-reader{display:grid;grid-template-columns:1fr 360px;gap:24px;align-items:start}.stack>*+*{margin-top:16px}.row{display:flex;align-items:center;gap:12px}.space-between{display:flex;align-items:center;justify-content:space-between;gap:16px}.muted{color:var(--text-tertiary)}
+  .tag{display:inline-flex;align-items:center;height:22px;border-radius:4px;border:1px solid var(--border-strong);background:#fafafa;color:var(--text-secondary);font-size:12px;padding:0 8px;gap:4px}.tag.blue{color:#0958d9;background:var(--primary-bg);border-color:var(--primary-border)}.tag.orange{color:#d46b08;background:var(--change-bg);border-color:var(--change-border)}.tag.green{color:#389e0d;background:#f6ffed;border-color:#b7eb8f}.tag.gold{color:#d48806;background:#fffbe6;border-color:#ffe58f}.tag.red{color:#cf1322;background:#fff1f0;border-color:#ffa39e}.tag.gray{color:var(--text-secondary);background:#fafafa;border-color:#d9d9d9}.legend{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.new-mark{color:#0958d9;background:var(--primary-bg);border:1px solid var(--primary-border);border-radius:4px;padding:1px 6px;font-size:12px}.change-mark{color:#d46b08;background:var(--change-bg);border:1px solid var(--change-border);border-radius:4px;padding:1px 6px;font-size:12px}
+  .input,.textarea,.select{border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:#fff;color:var(--text-tertiary);padding:6px 11px;min-height:32px}.textarea{min-height:72px}.search{width:360px;display:flex;align-items:center;gap:8px}.search .input{flex:1}.label{font-size:14px;color:var(--text);margin-bottom:8px}.form-item{margin-bottom:18px}.segmented{display:flex;padding:2px;background:#f5f5f5;border-radius:6px;width:max-content}.segmented span{padding:5px 16px;border-radius:5px;color:var(--text-secondary)}.segmented .active{background:#fff;color:var(--primary);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .modal{background:#fff;border-radius:8px;box-shadow:0 6px 16px rgba(0,0,0,.08),0 3px 6px rgba(0,0,0,.12),0 9px 28px rgba(0,0,0,.05);overflow:hidden}.modal-head{padding:16px 24px;border-bottom:1px solid var(--border);font-weight:600;font-size:16px}.modal-body{padding:24px}.modal-foot{padding:10px 16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}.list-item{padding:16px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:16px}.list-item:last-child{border-bottom:0}.list-title{font-weight:500;margin-bottom:6px}.list-desc{color:var(--text-secondary);font-size:13px}.desc{border:1px solid var(--border);border-radius:6px;overflow:hidden}.desc-row{display:flex;border-bottom:1px solid var(--border)}.desc-row:last-child{border-bottom:0}.desc-k{width:112px;background:#fafafa;color:var(--text-secondary);padding:10px 16px;border-right:1px solid var(--border)}.desc-v{flex:1;padding:10px 16px;color:var(--text-secondary)}.alert{border:1px solid #91caff;background:#e6f4ff;border-radius:6px;padding:10px 12px;color:#0958d9}.alert.orange{border-color:#ffd591;background:#fff7e6;color:#d46b08}.divider{height:1px;background:var(--border);margin:16px 0}
+  .mock-frame{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff;box-shadow:var(--shadow)}.mock-url{height:38px;background:#fafafa;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;padding:0 14px}.dot{width:10px;height:10px;border-radius:50%;border:1px solid #d9d9d9}.urlbox{flex:1;height:22px;border:1px solid #e5e5e5;background:#fff;border-radius:20px;color:#bfbfbf;font-size:12px;display:flex;align-items:center;padding:0 12px}.mock-body{background:var(--bg);padding:24px}.app-header{height:64px;background:#fff;border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;padding:0 24px;margin-bottom:24px}.app-header h3{font-size:24px;margin:0;font-weight:600}.topic-card{min-height:162px;display:flex;flex-direction:column}.topic-card .goal{color:var(--text-secondary);min-height:44px}.topic-card .bottom{margin-top:auto;padding-top:16px}.topic-type{border:1px solid var(--border);border-radius:8px;padding:16px;background:#fff}.topic-type.active-blue{border-color:#91caff;background:#f0f7ff}.topic-type.active-orange{border-color:#ffd591;background:#fff9f0}
+  .tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:16px}.tab{padding:10px 16px;color:var(--text-secondary)}.tab.active{color:var(--primary);border-bottom:2px solid var(--primary)}.pill-tabs{display:flex;gap:4px;margin:0 0 18px}.pill-tabs span{padding:6px 16px;border-radius:6px;color:var(--text-secondary)}.pill-tabs .active{background:#fff;color:var(--primary);box-shadow:0 1px 3px rgba(0,0,0,.08);border:1px solid var(--primary-border)}.output-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.output-card{border:1px solid var(--border);border-radius:8px;padding:14px;background:#fff}.output-num{font-size:22px;font-weight:600;color:var(--primary)}.inputbar{border:1px solid var(--primary-border);background:#fff;border-radius:10px;padding:14px;box-shadow:0 4px 12px rgba(22,119,255,.08)}.inputbar .placeholder{color:var(--text-tertiary)}.select-menu{position:absolute;left:360px;top:248px;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 16px rgba(0,0,0,.12);padding:6px;z-index:3}.select-menu button{display:block;width:128px;text-align:left;margin:2px 0}.timeline{position:relative;padding-left:22px}.timeline:before{content:"";position:absolute;left:7px;top:7px;bottom:7px;width:2px;background:#f0f0f0}.tl{position:relative;margin-bottom:18px}.tl:before{content:"";position:absolute;left:-20px;top:4px;width:10px;height:10px;border-radius:50%;background:var(--primary)}.chat{display:flex;flex-direction:column;gap:12px}.bubble{max-width:86%;padding:9px 12px;border-radius:8px;white-space:pre-wrap}.bubble.ai{background:#f0f0f0;color:#333;align-self:flex-start}.bubble.user{background:var(--primary);color:#fff;align-self:flex-end}.quote{font-size:12px;color:var(--text-tertiary);background:#f5f5f5;border-radius:4px;padding:4px 8px;margin-bottom:4px}.reader-shell{height:auto;background:#fdfdfd;border:1px solid var(--border);border-radius:10px;overflow:hidden}.reader-content{padding:40px 24px;background:#fdfdfd}.article{max-width:760px;margin:0 auto;background:#fff;padding:56px 72px;box-shadow:var(--shadow);border-radius:8px;min-height:640px}.article h1{font-size:32px;line-height:1.25;font-weight:600;margin:0 0 40px}.article p{font-size:18px;line-height:1.8;margin:0 0 1.5em;color:#2c3e50;text-align:justify;letter-spacing:.02em}.highlight-blue{background:#e6f4ff;border-bottom:2px solid #1677ff;border-radius:2px}.highlight-orange{background:#fff7e6;border-bottom:2px solid #fa8c16;border-radius:2px}.drawer{background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);overflow:hidden}.drawer-head{height:56px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-weight:600}.drawer-body{padding:16px}.concept-card{border:1px solid var(--border);border-radius:8px;padding:14px;background:#fff}.concept-title{display:flex;justify-content:space-between;align-items:center;font-weight:600;margin-bottom:8px}.anchor{font-size:12px;color:#0958d9;background:#e6f4ff;border-radius:4px;padding:2px 6px}.mindmap{height:220px;border:1px dashed #91caff;background:linear-gradient(180deg,#f7fbff,#fff);border-radius:8px;position:relative;overflow:hidden}.node{position:absolute;padding:7px 12px;border-radius:18px;border:1px solid #91caff;background:#fff;color:#0958d9;font-size:13px;box-shadow:0 2px 6px rgba(22,119,255,.08)}.node.center{left:50%;top:50%;transform:translate(-50%,-50%);background:#1677ff;color:#fff}.line{position:absolute;height:1px;background:#91caff;transform-origin:left center}.float{position:absolute;right:24px;bottom:24px;width:44px;height:44px;border-radius:50%;background:#1677ff;color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 6px 16px rgba(22,119,255,.28)}.side-nav{position:sticky;top:88px}.mini-title{font-size:13px;color:var(--text-tertiary);margin-bottom:8px}.toc a{display:block;color:var(--text-secondary);padding:6px 0;text-decoration:none}.toc a.active{color:var(--primary);font-weight:500}
+  @media(max-width:1100px){.grid4{grid-template-columns:repeat(2,1fr)}.layout2,.layout-reader{grid-template-columns:1fr}.side-nav{display:none}.topbar{padding:0 24px}.article{padding:40px 36px}.search{width:260px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <h1 class="brand">AI Learning Lab</h1>
+    <span class="tag blue">V1-alpha 原型 V2</span>
+    <span class="tag gray">基于当前 React + Ant Design 实现风格</span>
+    <div class="top-spacer"></div>
+    <button class="btn">复习计划</button>
+  </header>
+  <main class="content">
+    <div class="page">
+      <section class="section">
+        <div class="section-title">
+          <div>
+            <h2>原型说明</h2>
+            <p>本版沿用现有前端的白底卡片、浅灰页面背景、Ant Design 按钮/Tag/Modal/List/Drawer 视觉语言；蓝色表示新增功能，橙色表示对现有能力的变更。</p>
+          </div>
+          <div class="legend"><span class="new-mark">新增</span><span class="change-mark">变更</span><span class="tag gray">复用现有样式</span></div>
+        </div>
+      </section>
+
+      <section id="home" class="section">
+        <div class="section-title"><div><h2>1. 主页：话题列表 + 搜索 + 新建话题</h2><p>主页回到最小入口：搜索话题、查看话题列表、通过一个主按钮新建话题。</p></div></div>
+        <div class="mock-frame">
+          <div class="mock-url"><span class="dot"></span><span class="dot"></span><span class="dot"></span><div class="urlbox">/topics</div></div>
+          <div class="mock-body">
+            <div class="app-header"><h3>AI Learning Lab</h3><div class="top-spacer"></div><button class="btn">复习计划</button></div>
+            <div class="space-between" style="margin-bottom:24px">
+              <div><h2 style="margin:0;font-size:30px">学习话题</h2><p class="muted" style="margin:6px 0 0">所有学习资产都回到 Topic：材料、对话、概念、笔记、考试和复习。</p></div>
+              <div class="row"><div class="search"><span class="muted">🔍</span><div class="input">搜索话题 / 材料 / 概念</div></div><button class="btn primary">＋ 新建话题</button></div>
+            </div>
+            <div class="pill-tabs"><span class="active">全部</span><span>学习</span><span>讨论</span></div>
+            <div class="grid4">
+              <div class="card hover topic-card"><div class="card-head"><h3 class="card-title">深入理解 Django ORM</h3><span class="tag blue">学习型</span></div><p class="goal">掌握 QuerySet、事务、查询优化，能独立定位慢查询。</p><div class="bottom"><span class="tag blue">掌握度: 通过</span> <span class="tag green">3 份材料</span></div></div>
+              <div class="card hover topic-card"><div class="card-head"><h3 class="card-title">AI Agent 记忆系统是否值得学</h3><span class="tag orange">讨论型</span></div><p class="goal">先判断这块知识是否值得投入系统学习。</p><div class="bottom"><span class="tag orange">对话中</span> <span class="tag gray">无材料</span></div></div>
+              <div class="card hover topic-card"><div class="card-head"><h3 class="card-title">主机管理平台建模</h3><span class="tag blue">学习型</span></div><p class="goal">围绕主机、特征、策略、治理建立稳定知识结构。</p><div class="bottom"><span class="tag blue">掌握度: 强</span> <span class="tag green">8 个概念</span></div></div>
+              <div class="card hover topic-card"><div class="card-head"><h3 class="card-title">LLM 推理优化是否要学</h3><span class="tag orange">讨论型</span></div><p class="goal">基于话题名称和目标先判断投入价值。</p><div class="bottom"><span class="tag orange">待讨论</span> <span class="tag gray">无材料</span></div></div>
+            </div>
+            <div style="max-width:560px;margin:28px auto 0">
+              <div class="modal">
+                <div class="modal-head">新建话题 <span class="new-mark">新增字段</span></div>
+                <div class="modal-body">
+                  <div class="form-item"><div class="label">话题标题</div><div class="input">例如：深入理解 UniversalReader</div></div>
+                  <div class="form-item"><div class="label">话题类型</div><div class="grid2"><div class="topic-type active-blue"><b>学习型</b><p class="muted">有明确学习目标，进入阅读、概念、思维导图闭环。</p></div><div class="topic-type active-orange"><b>讨论型</b><p class="muted">先和 AI 判断应不应该学，可稍后转为学习型。</p></div></div></div>
+                  <div class="form-item"><div class="label">初始材料（可选）</div><div class="segmented"><span class="active">URL</span><span>文件</span><span>暂不添加</span></div><div class="input" style="margin-top:8px">https://example.com/article</div></div>
+                  <div class="form-item"><div class="label">目标</div><div class="textarea">我希望判断这份材料是否值得系统学习，并形成可复习的概念结构。</div></div>
+                </div>
+                <div class="modal-foot"><button class="btn">取消</button><button class="btn primary">创建话题</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="topic" class="section">
+        <div class="section-title"><div><h2>2. 话题详情页：讨论型 vs 学习型差异展示</h2><p>复用现有详情页的返回按钮、Card、Descriptions、List 结构，在话题类型上展示不同主行动线。</p></div></div>
+        <div class="grid2">
+          <div class="mock-frame"><div class="mock-url"><span class="dot"></span><span class="dot"></span><span class="dot"></span><div class="urlbox">/topics/24 · 讨论型</div></div><div class="mock-body"><button class="btn text">← 返回列表</button><div class="card" style="margin-top:16px"><div class="card-head"><div><h2 style="margin:0">AI Agent 记忆系统是否值得学</h2><p class="muted">讨论型话题把“要不要学”放进对话本身，材料面板固定在右侧。</p></div><div class="row"><span class="tag orange">讨论型</span><span class="change-mark">方案 A</span></div></div></div><div class="discussion-layout" style="margin-top:16px"><div><div class="card"><div class="card-head"><h3 class="card-title">对话</h3><span class="tag orange">评估融入对话流</span></div><div class="chat"><div class="bubble ai"><b>AI 开场评估：</b>这份材料值得先投入 30 分钟学习。摘要：它主要讲 Agent 长期记忆的写入、检索和评估。与现有知识关联度：高，和“个人知识库设计”“SEP 经验沉淀”都有直接关系。</div><div class="bubble ai"><b>如果没有材料：</b>我会先基于“AI Agent 记忆系统是否值得学”这个话题问你：近期是否要做知识沉淀、是否需要跨会话复用经验、是否已有检索质量问题？</div><div class="bubble user">我主要想知道它对个人知识库设计有没有帮助。</div><div class="bubble ai">建议学习，但范围要收窄到“记忆写入边界、检索质量评估、人工确认机制”。先不展开复杂 Agent 框架。</div></div><div class="divider"></div><div class="inputbar"><div class="placeholder">输入你的判断、问题或补充材料线索...</div><div class="space-between" style="margin-top:12px"><span class="muted">Enter 发送 · 支持粘贴 URL 或文本片段</span><button class="btn primary">发送</button></div></div></div><div style="margin-top:16px;text-align:center"><button class="btn orange large">转为学习型话题</button></div></div><aside class="material-panel"><div class="panel-head"><b>材料</b><span class="collapse-pill">可折叠 ‹</span></div><button class="btn primary" style="width:100%;margin-bottom:12px">＋ 导入材料</button><div class="list-item" style="align-items:flex-start"><div><div class="list-title">Agent Memory Survey</div><div class="list-desc">来源：URL<br/>导入：2026-08-01 21:12</div></div></div><div class="list-item" style="align-items:flex-start"><div><div class="list-title">个人知识库设计笔记</div><div class="list-desc">来源：人工文本<br/>导入：2026-08-01 21:18</div></div></div><div class="alert orange" style="margin-top:12px">折叠后只保留材料入口，不影响左侧对话。</div></aside></div></div></div>
+          <div class="mock-frame"><div class="mock-url"><span class="dot"></span><span class="dot"></span><span class="dot"></span><div class="urlbox">/topics/18 · 学习型</div></div><div class="mock-body"><button class="btn text">← 返回列表</button><div class="card" style="margin-top:16px"><div class="card-head"><div><h2 style="margin:0">深入理解 Django ORM</h2><p class="muted">学习型话题承载完整学习闭环。</p></div><div class="row"><span class="tag blue">学习型</span><span class="tag green">掌握度: 通过</span><button class="btn primary">掌握度评估</button></div></div><div class="desc"><div class="desc-row"><div class="desc-k">学习目标</div><div class="desc-v">掌握 QuerySet、事务、查询优化。</div></div><div class="desc-row"><div class="desc-k">学习范围</div><div class="desc-v">材料、概念、问答、思维导图、考试统一归属 Topic。</div></div></div></div><div class="card" style="margin-top:16px"><div class="card-head"><h3 class="card-title">学习材料</h3><button class="btn primary">＋ 导入材料</button></div><div class="list-item"><div><div class="list-title">Django 官方 QuerySet 文档</div><div class="row"><span class="tag">网页链接</span><span class="tag blue">人工添加</span><span class="tag green">导入成功</span><span class="tag blue">AI 前导已生成</span></div><div class="briefing-preview">前导：本文重点解释 QuerySet 惰性求值、执行时机与查询优化，建议关注 N+1 查询。</div></div><button class="btn link">展开前导</button><button class="btn link">📖 开始学习</button></div><div class="list-item"><div><div class="list-title">事务与锁机制实践笔记</div><div class="row"><span class="tag">纯文本</span><span class="tag orange">AI 推荐</span><span class="tag green">导入成功</span><span class="tag gold">AI 前导生成中...</span></div><div class="briefing-preview"><span class="skeleton" style="display:block;width:280px"></span><span class="skeleton" style="display:block;width:220px"></span></div></div><button class="btn link">展开前导</button><button class="btn link">📖 开始学习</button></div></div><div class="card" style="margin-top:16px"><div class="card-head"><h3 class="card-title">话题学习产出</h3><span class="new-mark">新增入口</span></div><div class="output-grid"><div class="output-card"><div class="output-num">8</div><div>概念</div><button class="btn link">进入思维导图</button></div><div class="output-card"><div class="output-num">12</div><div>问答</div><span class="muted">已沉淀 5 条</span></div><div class="output-card"><div class="output-num">3</div><div>阶段总结</div><span class="tag green">全局总结已生成</span></div><div class="output-card"><div class="output-num">18</div><div>思维导图节点</div><button class="btn link">查看</button></div></div></div></div></div>
+        </div>
+      </section>
+
+      <section id="reader" class="section">
+        <div class="section-title"><div><h2>3. 学习型话题：UniversalReader + 概念发现 + 概念卡片侧栏</h2><p>以当前 MaterialReader 的沉浸式白纸阅读、右侧 Drawer、FloatButton 为基础，补上概念高亮、卡片和思维导图入口。</p></div></div>
+        <div class="mock-frame">
+          <div class="mock-url"><span class="dot"></span><span class="dot"></span><span class="dot"></span><div class="urlbox">/topics/18/materials/6</div></div>
+          <div class="mock-body" style="padding:0;background:#fdfdfd;position:relative">
+            <div class="layout-reader" style="padding:24px;background:#fdfdfd">
+              <div class="reader-shell">
+                <div class="reader-content">
+                  <article class="article">
+                    <button class="btn text" style="margin-bottom:40px;color:#999">← 返回主题</button>
+                    <div class="briefing-card">
+                      <div class="space-between"><h3>读前准备</h3><button class="btn link">折叠</button></div>
+                      <p><b>核心内容摘要：</b>本文围绕 Django QuerySet 的惰性求值、查询触发时机和常见查询优化方式展开。</p>
+                      <p><b>与话题的关联：</b>它直接服务于“深入理解 Django ORM”的学习目标，是理解 ORM 性能问题的入口材料。</p>
+                      <p><b>建议关注重点：</b>重点看 QuerySet 何时真正访问数据库，以及 select_related / prefetch_related 分别解决什么问题。</p>
+                      <div class="divider"></div>
+                      <div class="muted">生成中状态示例：</div><div class="skeleton" style="width:92%"></div><div class="skeleton" style="width:74%"></div>
+                    </div>
+                    <h1>Django QuerySet 的惰性求值与查询优化</h1>
+                    <p>QuerySet 是 Django ORM 中最核心的抽象。它看起来像一个普通列表，但在大多数情况下并不会立即访问数据库，而是保存一组可组合的查询描述。</p>
+                    <p>当代码真正迭代 QuerySet、切片、序列化或调用 list() 时，查询才会被执行。这种 <span class="highlight-blue">惰性求值</span> 让开发者可以通过链式调用逐步构造查询。</p>
+                    <p>不过，如果在循环中反复访问关联对象，就可能触发 <span class="highlight-orange">N+1 查询问题</span>。常见优化方式包括 select_related 和 prefetch_related，它们分别适合单值关系和多值关系。</p>
+                    <p>阅读器需要保留原文位置锚点。用户选中片段后，浮出操作菜单提供“高亮”“标记为概念”和“发起问答”；其中高亮只是纯视觉标记，不触发 AI。</p>
+                  </article>
+                </div>
+              </div>
+              <aside class="drawer">
+                <div class="drawer-head"><span>AI 学习助手</span><span class="tag blue">UniversalReader</span></div>
+                <div class="drawer-body">
+                  <div class="alert">已选中：“惰性求值” · 可高亮、标记概念或发起问答。</div>
+                  <div class="select-menu"><button class="btn">高亮</button><button class="btn primary">标记为概念</button><button class="btn">发起问答</button></div>
+                  <div class="divider"></div>
+                  <div class="tabs"><div class="tab active">概念</div><div class="tab">问答</div></div>
+                  <div class="stack">
+                    <div class="concept-card"><div class="concept-title"><span>惰性求值</span><span class="new-mark">新增</span></div><p class="muted">定义：只有在真正需要结果时才执行数据库查询。</p><p class="muted">原理：QuerySet 保存查询描述，链式调用返回新的 QuerySet。</p><div class="row"><span class="anchor">来源锚点 #chunk-12:88-92</span><button class="btn link">回到原文</button><button class="btn primary">加入思维导图</button></div></div>
+                    <div class="concept-card"><div class="concept-title"><span>N+1 查询问题</span><span class="change-mark">变更</span></div><p class="muted">易错点：列表页循环访问关联对象时，可能产生大量额外 SQL。</p><div class="row"><span class="anchor">来源锚点 #chunk-13:32-39</span><button class="btn link">合并到已有概念</button><button class="btn primary">加入思维导图</button></div></div>
+                  </div>
+                  <div class="divider"></div>
+                  <div class="highlight-list"><b>高亮列表</b><span class="new-mark" style="margin-left:8px">纯视觉标记</span><div class="highlight-item">惰性求值让开发者可以通过链式调用逐步构造查询。</div><div class="highlight-item">N+1 查询问题常见于循环访问关联对象。</div></div>
+                  <div class="divider"></div>
+                  <div class="space-between"><b>话题思维导图</b><button class="btn primary">打开</button></div>
+                  <p class="muted">一个 Topic 只有一张主图，节点对应概念，边对应关系。</p>
+                  <div class="mindmap">
+                    <div class="line" style="left:48%;top:50%;width:130px;transform:rotate(-28deg)"></div><div class="line" style="left:36%;top:52%;width:130px;transform:rotate(155deg)"></div><div class="line" style="left:49%;top:54%;width:130px;transform:rotate(36deg)"></div>
+                    <div class="node center">Django ORM</div><div class="node" style="left:60%;top:20%">惰性求值</div><div class="node" style="left:14%;top:60%">QuerySet</div><div class="node" style="left:62%;top:70%">N+1 查询</div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+            <div class="float">💬</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="summary" class="section">
+        <div class="layout2">
+          <div class="card">
+            <div class="card-head"><h2 style="margin:0;font-size:22px">V1-alpha 关键变化落点</h2><span class="tag blue">实现映射</span></div>
+            <div class="list-item"><div><div class="list-title">主页最小入口</div><div class="list-desc">保留话题列表和新建主按钮，新增搜索；导入材料回到话题内部。</div></div><span class="change-mark">变更</span></div>
+            <div class="list-item"><div><div class="list-title">讨论型话题</div><div class="list-desc">帮助判断是否值得学，支持有材料/无材料，支持一键转学习型。</div></div><span class="new-mark">新增</span></div>
+            <div class="list-item"><div><div class="list-title">学习型话题</div><div class="list-desc">以阅读为地基，连接概念、问答、笔记、思维导图、考试和复习。</div></div><span class="change-mark">变更</span></div>
+            <div class="list-item"><div><div class="list-title">UniversalReader</div><div class="list-desc">复用现有 MaterialReader 阅读宽度、行距、Drawer 交互，扩展类型分发和锚点能力。</div></div><span class="new-mark">新增</span></div>
+            <div class="list-item"><div><div class="list-title">概念与思维导图</div><div class="list-desc">高亮创建概念卡片，同 Topic 内复用概念节点，主图可回跳原文。</div></div><span class="new-mark">新增</span></div>
+          </div>
+          <aside class="card side-nav">
+            <div class="mini-title">页面索引</div>
+            <div class="toc"><a class="active" href="#home">1. 主页</a><a href="#topic">2. 话题详情</a><a href="#reader">3. 学习阅读器</a><a href="#summary">4. 变化落点</a></div>
+            <div class="divider"></div>
+            <div class="mini-title">样式来源</div>
+            <p class="muted">Header / Content / Footer、Card、List、Modal、Drawer、FloatButton、Descriptions、Tag、Button 均按当前前端实现的 Ant Design 视觉方式还原。</p>
+          </aside>
+        </div>
+      </section>
+    </div>
+  </main>
+  <footer class="footer">AI Learning Lab ©2026 Created for Personal Learning · Prototype only</footer>
+</div>
+</body>
+</html>

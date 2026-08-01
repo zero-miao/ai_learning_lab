@@ -16,12 +16,14 @@
 
 1. [HANDOFF.md](file:///Users/meiao/ai_workspace/ai-learning-lab/HANDOFF.md)
 2. [DEV.md](file:///Users/meiao/ai_workspace/ai-learning-lab/DEV.md)
-3. [docs/PRD.md](file:///Users/meiao/ai_workspace/ai-learning-lab/docs/PRD.md)
-4. [docs/TECH.md](file:///Users/meiao/ai_workspace/ai-learning-lab/docs/TECH.md)
-5. [requirements.txt](file:///Users/meiao/ai_workspace/ai-learning-lab/requirements.txt)
-6. [pyproject.toml](file:///Users/meiao/ai_workspace/ai-learning-lab/pyproject.toml)
+3. [docs/V1-ALPHA.md](file:///Users/meiao/ai_workspace/ai-learning-lab/docs/V1-ALPHA.md)
+4. [docs/PRD.md](file:///Users/meiao/ai_workspace/ai-learning-lab/docs/PRD.md)
+5. [docs/MVP.md](file:///Users/meiao/ai_workspace/ai-learning-lab/docs/MVP.md)
+6. [requirements.txt](file:///Users/meiao/ai_workspace/ai-learning-lab/requirements.txt)
+7. [pyproject.toml](file:///Users/meiao/ai_workspace/ai-learning-lab/pyproject.toml)
 
-若文档与代码冲突，以当前可运行代码、迁移和 `DEV.md` 的环境基线为准，再修正文档。
+`docs/V1-ALPHA.md` 是当前产品和分阶段开发范围的准绳。若文档与代码冲突，以当前可运行
+代码、迁移和 `DEV.md` 的环境基线为准，再修正文档。
 
 ## 3. 技术栈与环境
 
@@ -42,16 +44,11 @@
 本机已验证环境：
 
 - Python 3.12.13，虚拟环境为项目根目录 `.venv`
+- Node.js v20.20.2，npm 10.8.2
 - 本地 Ollama
 
-前端构建需要 Node.js 20.x。本机已通过 nvm 安装 Node.js v20.20.2，但 Trae Agent
-的非交互 shell 默认将 Node.js v18.20.8 放在 `PATH` 前面。执行前端命令前显式切换：
-
-```bash
-export NVM_DIR="$HOME/.nvm"
-. "$NVM_DIR/nvm.sh"
-nvm use 20
-```
+Node.js 通过 nvm 管理，默认版本为 v20.20.2。`~/.zshenv` 已将其 bin 目录置于
+`PATH` 首位，因此 Trae Agent 的交互和非交互 zsh 都会自动使用 Node 20。
 
 根目录 `.env` 是实际运行配置，后端 [api/ai_gateway.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/ai_gateway.py) 会固定从项目根目录加载。当前默认配置为：
 
@@ -75,6 +72,8 @@ LLM_API_KEY=ollama
 - 异步 AI 交互：阅读前导、问答、出题和阅卷都通过 `AITask` 后台执行。
 - 结构化笔记：基于已处理材料异步生成 Markdown 草稿，用户确认后保存为 `Note`；
   支持编辑、删除和携带用户要求的再次生成。
+- 复习工作流：复习计划页按待复习、后续计划和已完成展示 `ReviewRecord`；用户可进入
+  主题回顾后标记完成，并异步生成可持久化的 Markdown 复习提示。
 
 ## 5. 异步任务架构
 
@@ -109,9 +108,17 @@ pending -> running -> succeeded
 | 笔记草稿 | `POST /api/topics/{id}/note-drafts/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 考试生成 | `POST /api/exams/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 阅卷 | `POST /api/exams/{id}/submit/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
+| 复习提示 | `POST /api/reviews/{id}/prompt/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 失败重试 | `POST /api/ai-tasks/{id}/retry/` | `202`，任务重置为 `pending` | - |
 
 不要让前端等待 LLM 的完成响应。页面应先显示任务提交状态，再通过轮询展示成功、失败或重试入口。
+
+复习 API：
+
+- `GET /api/reviews/`：按应复习时间返回记录，可传 `result=pending|completed` 过滤。
+- `POST /api/reviews/{id}/complete/`：将待复习记录标记为完成并写入 `completed_at`。
+- `POST /api/reviews/{id}/prompt/`：基于处理成功的材料、结构化笔记及最近测验反馈创建
+  `review_prompt` 任务；同一记录的 `pending/running` 任务会复用。
 
 ## 6. 结构化笔记
 
@@ -125,6 +132,9 @@ pending -> running -> succeeded
   `instructions`，该要求会传入笔记 Prompt。
 - `NoteViewSet` 提供 `/api/notes/` CRUD；创建时只允许关联已成功的同主题
   `note_draft` 任务。
+- 复习提示已应用 `api.0008_review_prompt_task` 和
+  `api.0009_alter_aitask_task_type` 迁移：`ReviewRecord` 保存提示正文与生成时间，
+  `AITask` 通过 `review` 外键关联复习记录，并新增 `review_prompt` 任务类型。
 
 ## 7. 数据模型与业务状态
 
@@ -133,7 +143,8 @@ pending -> running -> succeeded
 - `Question` / `AIResponse`：用户问题及回答、阅读前导。
 - `Note`：用户确认的结构化笔记、来源任务和材料指纹。
 - `Exam` / `ExamQuestion`：主题综合测验、作答和评分。
-- `ReviewRecord`：Assessment 后的首次复习时间。
+- `ReviewRecord`：Assessment 后的首次复习时间、完成状态、可持久化的 AI 复习提示及其
+  生成时间。
 - `AITask`：所有长耗时 AI 工作的状态、输入摘要、结构化结果、错误和重试信息。
 
 掌握度规则：
@@ -159,7 +170,6 @@ python manage.py runserver 127.0.0.1:8000
 
 ```bash
 cd /Users/meiao/ai_workspace/ai-learning-lab/frontend
-nvm use 20
 npm run dev
 ```
 
@@ -174,7 +184,7 @@ cd /Users/meiao/ai_workspace/ai-learning-lab
 (cd frontend && npm run build)
 ```
 
-当前已通过 Ruff、Django API 测试（8 项）、Django check、TypeScript `tsc -b` 与
+当前已通过 Ruff、Django API 测试（10 项）、Django check、TypeScript `tsc -b` 与
 Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超过 500 kB，
 后续可通过代码分割优化。
 
@@ -187,10 +197,19 @@ Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超�
 
 ## 10. 后续优先级
 
-1. 复习工作流：展示待复习记录，并生成复习题或提示。
-2. 阅读体验：继续优化长文排版和任务状态的可见性。
-3. Assessment 质量：迭代 Prompt、输出校验与题目/评分质量。
-4. 结构化笔记：纳入 AI 对话上下文，并迭代草稿质量与结构模板。
+当前进入 V1-alpha 的阶段化开发。完整范围、原型和验收标准见
+[docs/V1-ALPHA.md](file:///Users/meiao/ai_workspace/ai-learning-lab/docs/V1-ALPHA.md)。
+
+第一个实现迭代聚焦阶段 1 及其必要数据契约：
+
+1. 为 `Topic` 增加学习型 / 讨论型类型，为 `Material` 增加人工添加 / AI 推荐来源标记。
+2. 重构主页为话题列表、搜索、全部 / 学习 / 讨论筛选和“新建话题”入口。
+3. 新建话题的初始材料首版支持 URL 与粘贴文本，复用既有材料处理链路。
+4. 建立 `UniversalReader` 外壳，优先优化已支持的 HTML 正文阅读；不在本阶段伪支持
+   PDF、音视频或文件上传。
+
+讨论型 AI 对话、概念卡片、高亮、知识图谱和阶段总结按 V1-alpha 后续阶段推进。所有长耗时
+AI 能力继续走 `AITask` 异步任务和前端轮询，不能退回为阻塞请求。
 
 ## 11. 接手原则
 

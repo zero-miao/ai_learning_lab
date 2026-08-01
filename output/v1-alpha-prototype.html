@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Learning Lab · V1-alpha 交互原型（线框）</title>
+<style>
+  :root{
+    /* 黑白线框调色板 —— 仅灰阶 */
+    --ink:#141414; --ink-2:#262626; --t1:#1f1f1f; --t2:#595959; --t3:#8c8c8c; --t4:#bfbfbf;
+    --line:#d9d9d9; --line-2:#e8e8e8; --fill:#fafafa; --fill-2:#f0f0f0; --paper:#ffffff; --bg:#f0f2f5;
+    /* 批注专用色（叠加在灰阶线框之上，用于区分“新增/变更”） */
+    --new:#1677ff; --new-bg:#e6f0ff; --chg:#d46b08; --chg-bg:#fff3e0; --keep:#8c8c8c;
+    --radius:8px; --radius-sm:6px;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0; background:var(--bg); color:var(--t1);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Roboto','Helvetica Neue','PingFang SC','Microsoft YaHei',sans-serif;
+    font-size:14px; line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--new); text-decoration:none;}
+
+  /* ---------- 顶部条 ---------- */
+  .topbar{
+    position:sticky; top:0; z-index:50; background:var(--paper);
+    border-bottom:1px solid var(--line); height:56px; display:flex; align-items:center;
+    padding:0 24px; gap:14px;
+  }
+  .topbar .logo{width:26px;height:26px;border:1.5px solid var(--ink);border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;}
+  .topbar h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.2px;}
+  .topbar .ver{font-size:12px;color:var(--t3);border:1px solid var(--line);border-radius:4px;padding:1px 8px;}
+  .topbar .spacer{flex:1;}
+  .topbar .meta{font-size:12px;color:var(--t3);}
+
+  /* ---------- 布局 ---------- */
+  .shell{display:flex; max-width:1360px; margin:0 auto; align-items:flex-start;}
+  .nav{
+    position:sticky; top:56px; align-self:flex-start; width:236px; flex:0 0 236px;
+    height:calc(100vh - 56px); overflow-y:auto; padding:20px 12px 40px; border-right:1px solid var(--line-2);
+  }
+  .nav .grp{font-size:11px;letter-spacing:.6px;color:var(--t3);text-transform:uppercase;margin:16px 10px 6px;}
+  .nav a{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;color:var(--t2);font-size:13px;}
+  .nav a:hover{background:var(--fill-2);color:var(--t1);}
+  .nav a .dot{width:16px;text-align:center;font-size:11px;}
+  .main{flex:1; min-width:0; padding:28px 40px 100px;}
+
+  /* ---------- 通用排版 ---------- */
+  section{margin-bottom:64px; scroll-margin-top:72px;}
+  .sec-head{margin-bottom:16px;}
+  .sec-head .k{font-size:12px;color:var(--t3);letter-spacing:1px;}
+  .sec-head h2{font-size:22px;margin:2px 0 6px;font-weight:600;}
+  .sec-head p{margin:0;color:var(--t2);max-width:820px;}
+  .badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  .b{font-size:12px;padding:2px 10px;border-radius:20px;border:1px solid var(--line);color:var(--t2);background:var(--paper);}
+  .b.new{color:var(--new);border-color:#91caff;background:var(--new-bg);}
+  .b.chg{color:var(--chg);border-color:#ffbb96;background:var(--chg-bg);}
+  .b.keep{color:var(--keep);}
+
+  /* ---------- 浏览器窗框（承载线框） ---------- */
+  .browser{background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.04);}
+  .browser-bar{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--fill);border-bottom:1px solid var(--line-2);}
+  .browser-bar .dots{display:flex;gap:6px;}
+  .browser-bar .dots i{width:10px;height:10px;border-radius:50%;border:1px solid var(--line);display:inline-block;}
+  .browser-bar .url{flex:1;background:var(--paper);border:1px solid var(--line);border-radius:14px;font-size:12px;color:var(--t3);padding:3px 12px;font-family:ui-monospace,Menlo,Consolas,monospace;}
+  .canvas{padding:22px;background:var(--bg);}
+
+  /* app header inside mock */
+  .app-head{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);height:52px;display:flex;align-items:center;padding:0 18px;gap:12px;margin-bottom:18px;}
+  .app-head .title{font-weight:600;font-size:15px;}
+  .app-head .sp{flex:1;}
+
+  /* wire primitives */
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:18px;}
+  .card + .card{margin-top:16px;}
+  .card-title{font-weight:600;font-size:15px;display:flex;align-items:center;gap:8px;margin-bottom:4px;}
+  .card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line-2);}
+  .muted{color:var(--t3);}
+  .row{display:flex;gap:16px;}
+  .col{flex:1;min-width:0;}
+  .stack>*+*{margin-top:12px;}
+
+  .btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--paper);color:var(--t1);border-radius:var(--radius-sm);padding:5px 14px;font-size:13px;white-space:nowrap;}
+  .btn.primary{background:var(--ink);border-color:var(--ink);color:#fff;}
+  .btn.sm{padding:2px 10px;font-size:12px;}
+  .btn.link{border:none;background:none;color:var(--new);padding:2px 4px;}
+  .btn.ghost{border-style:dashed;color:var(--t2);}
+
+  .tag{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:4px;padding:0 8px;font-size:12px;color:var(--t2);background:var(--fill);height:22px;}
+  .tag.solid{background:var(--fill-2);}
+  .tag.line-new{border-color:#91caff;color:var(--new);background:var(--new-bg);}
+
+  .input{border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--paper);color:var(--t4);padding:6px 12px;font-size:13px;}
+  .textarea{border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--paper);color:var(--t4);padding:10px 12px;min-height:64px;font-size:13px;}
+  .ph{height:10px;background:var(--fill-2);border-radius:4px;}
+  .ph.w90{width:90%}.ph.w80{width:80%}.ph.w70{width:70%}.ph.w60{width:60%}.ph.w50{width:50%}.ph.w40{width:40%}.ph.w30{width:30%}
+  .ph-lines>*+*{margin-top:8px;}
+
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;}
+  .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;}
+  .desc{border:1px solid var(--line-2);border-radius:6px;overflow:hidden;}
+  .desc .drow{display:flex;border-bottom:1px solid var(--line-2);}
+  .desc .drow:last-child{border-bottom:none;}
+  .desc .dk{width:110px;flex:0 0 110px;background:var(--fill);padding:8px 12px;color:var(--t2);font-size:13px;border-right:1px solid var(--line-2);}
+  .desc .dv{padding:8px 12px;color:var(--t2);font-size:13px;flex:1;}
+
+  /* list item */
+  .li{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line-2);}
+  .li:last-child{border-bottom:none;}
+  .li .li-main{flex:1;min-width:0;}
+  .li .li-title{font-weight:500;margin-bottom:6px;}
+  .li .li-actions{display:flex;gap:6px;align-items:center;}
+
+  /* alert / callout inside mock */
+  .alert{border:1px solid var(--line);border-radius:6px;padding:10px 12px;background:var(--fill);font-size:13px;color:var(--t2);display:flex;gap:8px;}
+  .alert .ic{flex:0 0 auto;}
+
+  /* stage progress (topic overview) */
+  .steps{display:flex;align-items:center;gap:0;flex-wrap:wrap;}
+  .step{display:flex;align-items:center;gap:8px;}
+  .step .num{width:26px;height:26px;border-radius:50%;border:1.5px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--t3);background:var(--paper);}
+  .step.done .num{background:var(--ink);border-color:var(--ink);color:#fff;}
+  .step.active .num{border-color:var(--ink);color:var(--ink);border-width:2px;}
+  .step .lb{font-size:12px;color:var(--t2);}
+  .step.active .lb{color:var(--ink);font-weight:600;}
+  .step .bar{width:34px;height:1px;background:var(--line);margin:0 8px;}
+
+  /* task status chip */
+  .status{display:inline-flex;align-items:center;gap:6px;font-size:12px;border:1px solid var(--line);border-radius:20px;padding:2px 10px;background:var(--paper);color:var(--t2);}
+  .status .sd{width:8px;height:8px;border-radius:50%;background:var(--t4);}
+  .status.run .sd{background:var(--t2);animation:blink 1.1s infinite;}
+  .status.ok .sd{background:var(--ink);}
+  .status.err{border-style:dashed;}
+  @keyframes blink{50%{opacity:.25;}}
+
+  /* annotation marker */
+  .mk{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 4px;border-radius:9px;font-size:11px;font-weight:700;color:#fff;background:var(--new);vertical-align:middle;margin-left:6px;}
+  .mk.c{background:var(--chg);}
+  .anno{margin-top:16px;border:1px dashed var(--line);border-radius:8px;padding:14px 16px;background:var(--paper);}
+  .anno h4{margin:0 0 10px;font-size:13px;color:var(--t2);letter-spacing:.5px;}
+  .anno ul{margin:0;padding:0;list-style:none;}
+  .anno li{display:flex;gap:10px;padding:6px 0;border-top:1px dashed var(--line-2);font-size:13px;color:var(--t2);}
+  .anno li:first-child{border-top:none;}
+  .anno .n{flex:0 0 auto;width:20px;height:20px;border-radius:10px;background:var(--new);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+  .anno .n.c{background:var(--chg);}
+  .anno b{color:var(--t1);}
+
+  /* diff summary table */
+  .table{width:100%;border-collapse:collapse;background:var(--paper);border:1px solid var(--line);border-radius:8px;overflow:hidden;font-size:13px;}
+  .table th,.table td{border-bottom:1px solid var(--line-2);border-right:1px solid var(--line-2);padding:10px 12px;text-align:left;vertical-align:top;}
+  .table th{background:var(--fill);color:var(--t2);font-weight:600;}
+  .table tr:last-child td{border-bottom:none;}
+  .table th:last-child,.table td:last-child{border-right:none;}
+  .pill{font-size:11px;padding:1px 8px;border-radius:12px;border:1px solid var(--line);white-space:nowrap;}
+  .pill.p0{border-color:#b7eb8f;color:#389e0d;background:#f6ffed;}
+  .pill.p1{border-color:#ffd591;color:#d46b08;background:#fff7e6;}
+  .pill.n{border-color:#91caff;color:var(--new);background:var(--new-bg);}
+  .pill.c{border-color:#ffbb96;color:var(--chg);background:var(--chg-bg);}
+
+  /* legend / intro cards */
+  .legend{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:18px 0;}
+  .legend .lg{border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--paper);}
+  .legend .lg .h{display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:6px;}
+  .legend .lg p{margin:0;color:var(--t3);font-size:12.5px;}
+  .swatch{width:14px;height:14px;border-radius:4px;display:inline-block;}
+
+  .flow{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:13px;color:var(--t2);margin-top:10px;}
+  .flow .n{border:1px solid var(--line);border-radius:16px;padding:3px 12px;background:var(--paper);}
+  .flow .n.hi{border-color:#91caff;color:var(--new);background:var(--new-bg);}
+  .flow .ar{color:var(--t4);}
+
+  .note{font-size:12px;color:var(--t3);margin-top:10px;}
+  hr.soft{border:none;border-top:1px solid var(--line-2);margin:22px 0;}
+
+  @media(max-width:980px){.nav{display:none;} .main{padding:20px;} .legend,.grid3{grid-template-columns:1fr;} .grid2{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">AL</div>
+  <h1>AI Learning Lab</h1>
+  <span class="ver">V1-alpha 原型</span>
+  <div class="spacer"></div>
+  <span class="meta">黑白线框 · Ant Design 风格 · 相对 MVP 的差异标注</span>
+</div>
+
+<div class="shell">
+  <!-- 侧边导航 -->
+  <aside class="nav">
+    <div class="grp">总览</div>
+    <a href="#intro"><span class="dot">◆</span> 说明与图例</a>
+    <a href="#diff"><span class="dot">▤</span> 差异总表</a>
+    <div class="grp">页面原型</div>
+    <a href="#s1"><span class="dot" style="color:var(--keep)">●</span> 主题列表</a>
+    <a href="#s2"><span class="dot" style="color:var(--chg)">●</span> 主题总览（详情）</a>
+    <a href="#s3"><span class="dot" style="color:var(--chg)">●</span> 材料阅读页</a>
+    <a href="#s4"><span class="dot" style="color:var(--new)">●</span> 查资料与补证</a>
+    <a href="#s5"><span class="dot" style="color:var(--new)">●</span> 结构化笔记模板</a>
+    <a href="#s6"><span class="dot" style="color:var(--new)">●</span> 微应用练习</a>
+    <a href="#s7"><span class="dot" style="color:var(--chg)">●</span> 掌握度评估（考试）</a>
+    <a href="#s8"><span class="dot" style="color:var(--chg)">●</span> 复习闭环</a>
+    <a href="#s9"><span class="dot" style="color:var(--new)">●</span> 任务状态组件</a>
+  </aside>
+
+  <main class="main">
+
+    <!-- ========== 说明与图例 ========== -->
+    <section id="intro">
+      <div class="sec-head">
+        <div class="k">PROTOTYPE OVERVIEW</div>
+        <h2>V1-alpha 做完之后，界面会变成什么样</h2>
+        <p>这是一份<b>黑白线框原型</b>，用于预览 V1-alpha 完成后的界面形态。线框沿用 MVP 的 Ant Design 布局语言（Layout / Card / List / Tag / Descriptions / Drawer / Result 等），仅用灰阶表达；<b>蓝色</b>标注代表相对 MVP 的<b>新增</b>，<b>橙色</b>标注代表<b>变更</b>。真实实现仍是 React + TypeScript + Vite + Ant Design 本地单页应用，接口沿用 AITask「发起→轮询」异步契约。</p>
+      </div>
+
+      <div class="legend">
+        <div class="lg">
+          <div class="h"><span class="swatch" style="background:var(--new)"></span> 新增 New</div>
+          <p>MVP 中不存在的页面或组件。例如查资料与补证、微应用练习、笔记模板选择、统一任务状态组件。</p>
+        </div>
+        <div class="lg">
+          <div class="h"><span class="swatch" style="background:var(--chg)"></span> 变更 Changed</div>
+          <p>MVP 已有、但本轮结构或交互被改造。例如主题详情加阶段总览、阅读页前导前置、考试草稿保存、复习先答后评。</p>
+        </div>
+        <div class="lg">
+          <div class="h"><span class="swatch" style="background:var(--keep)"></span> 沿用 Keep</div>
+          <p>基本保持 MVP 形态，仅做细节适配。例如主题列表、顶部导航、整体路由结构。</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">学习主线：从「单材料闭环」升级为「多材料 + 应用检验」</div>
+        <div class="flow">
+          <span class="n">进入主题</span><span class="ar">→</span>
+          <span class="n">导入主线材料</span><span class="ar">→</span>
+          <span class="n hi">前导前置阅读</span><span class="ar">→</span>
+          <span class="n hi">划词提问 · 发起补证</span><span class="ar">→</span>
+          <span class="n hi">模板化结构笔记</span><span class="ar">→</span>
+          <span class="n hi">微应用作答</span><span class="ar">→</span>
+          <span class="n hi">综合考试（可暂存）</span><span class="ar">→</span>
+          <span class="n hi">复习先答后评</span>
+        </div>
+        <p class="note">高亮环节即 V1-alpha 新增 / 变更的关键触点，所有 AI 产物都回流到「主题」对象，而不是散落在页面局部。</p>
+      </div>
+    </section>
+
+    <!-- ========== 差异总表 ========== -->
+    <section id="diff">
+      <div class="sec-head">
+        <div class="k">CHANGE MAP</div>
+        <h2>差异总表：本版改了哪些页面/组件</h2>
+        <p>下表对应 V1-alpha 方案的功能范围与四个用户补充改进点，按页面归纳出「相对 MVP 的变化」。</p>
+      </div>
+      <table class="table">
+        <thead>
+          <tr><th style="width:150px">页面 / 组件</th><th style="width:88px">类型</th><th style="width:70px">优先级</th><th>相对 MVP 的变化</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>主题列表</td><td><span class="pill">沿用</span></td><td><span class="pill">—</span></td>
+            <td>卡片增加「当前学习阶段」小标签，其余保持 MVP 形态。</td>
+          </tr>
+          <tr>
+            <td>主题总览（详情页）</td><td><span class="pill c">变更</span></td><td><span class="pill p1">P1</span></td>
+            <td>顶部新增<b>阶段进度总览</b>（材料/笔记/应用/考试/复习聚合）；新增补证、微应用入口；笔记区支持模板。</td>
+          </tr>
+          <tr>
+            <td>材料阅读页</td><td><span class="pill c">变更</span></td><td><span class="pill p1">P1</span></td>
+            <td><b>AI 前导前置到正文前</b>（不再藏在对话框）；<b>保留引用链接</b>；正文标注难度档位与「原文事实 / AI 解释 / 待确认」。</td>
+          </tr>
+          <tr>
+            <td>查资料与补证</td><td><span class="pill n">新增</span></td><td><span class="pill p0">P0</span></td>
+            <td>全新页面：从一个疑问发起补证，记录来源、用途、可信度、关联问题，并绑定回主题。</td>
+          </tr>
+          <tr>
+            <td>结构化笔记模板</td><td><span class="pill n">新增</span></td><td><span class="pill p0">P0</span></td>
+            <td>笔记草稿新增<b>技术类 / 观点类模板</b>选择；结构区分事实、理解、AI 推断、案例、适用边界、待确认。</td>
+          </tr>
+          <tr>
+            <td>微应用练习</td><td><span class="pill n">新增</span></td><td><span class="pill p0">P0</span></td>
+            <td>全新页面：围绕概念/笔记段落生成小任务，作答后 AI 给结构化反馈并回写主题。</td>
+          </tr>
+          <tr>
+            <td>掌握度评估（考试）</td><td><span class="pill c">变更</span></td><td><span class="pill p0">P0</span></td>
+            <td><b>答题草稿保存 / 继续作答</b>；题目显式呈现考察目标、评分维度；阅卷输出扣分原因与薄弱点。</td>
+          </tr>
+          <tr>
+            <td>复习闭环</td><td><span class="pill c">变更</span></td><td><span class="pill p0">P0</span></td>
+            <td>复习由「标记完成」升级为<b>先作答→AI 反馈→掌握度变化→动态计算下次复习时间</b>。</td>
+          </tr>
+          <tr>
+            <td>任务状态组件</td><td><span class="pill n">新增</span></td><td><span class="pill p1">P1</span></td>
+            <td>统一「排队 / 运行 / 成功 / 失败 / 重试」状态展示与不丢输入的重试入口，跨阅读/笔记/考试/复习复用。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ========== S1 主题列表 ========== -->
+    <section id="s1">
+      <div class="sec-head">
+        <div class="k">SCREEN 01 · TopicList</div>
+        <h2>主题列表</h2>
+        <p>基本沿用 MVP：卡片网格 + 新建主题弹窗。唯一细节调整是卡片补充「当前学习阶段」标签，呼应主题总览的阶段化。</p>
+        <div class="badges"><span class="b keep">● 沿用</span><span class="b chg">卡片新增阶段标签</span></div>
+      </div>
+      <div class="browser">
+        <div class="browser-bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">localhost:5173/topics</div></div>
+        <div class="canvas">
+          <div class="app-head"><div class="title">AI Learning Lab</div><div class="sp"></div><span class="btn">复习计划</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <div style="font-size:20px;font-weight:600;">学习主题</div>
+            <span class="btn primary">＋ 新建主题</span>
+          </div>
+          <div class="grid3">
+            <div class="card">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <div style="font-weight:600;">深入理解 Django ORM</div><span class="tag solid">学习中</span>
+              </div>
+              <div class="ph-lines" style="margin:12px 0;"><div class="ph w90"></div><div class="ph w70"></div></div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <span class="tag">掌握度：基本通过</span>
+                <span class="tag line-new">阶段：结构化笔记 <span class="mk c">2</span></span>
+              </div>
+            </div>
+            <div class="card">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <div style="font-weight:600;">向量数据库入门</div><span class="tag solid">待考试</span>
+              </div>
+              <div class="ph-lines" style="margin:12px 0;"><div class="ph w80"></div><div class="ph w60"></div></div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <span class="tag">掌握度：未知</span><span class="tag line-new">阶段：微应用</span>
+              </div>
+            </div>
+            <div class="card">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <div style="font-weight:600;">强化学习基础概念</div><span class="tag solid">复习中</span>
+              </div>
+              <div class="ph-lines" style="margin:12px 0;"><div class="ph w90"></div><div class="ph w50"></div></div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <span class="tag">掌握度：强掌握</span><span class="tag line-new">阶段：间隔复习</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="anno">
+        <h4>变更标注</h4>
+        <ul>
+          <li><span class="n c">2</span><span><b>阶段标签（变更）</b>：卡片底部新增当前学习阶段，来自主题总览的阶段聚合，帮助在列表层一眼看出主题卡在哪一步。其余布局、新建弹窗与 MVP 一致。</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ========== S2 主题总览 ========== -->
+    <section id="s2">
+      <div class="sec-head">
+        <div class="k">SCREEN 02 · TopicDetail（学习主题总览）</div>
+        <h2>主题总览（详情页）</h2>
+        <p>MVP 详情页是「主题信息 + 笔记 + 材料」三段卡片。V1-alpha 在顶部加入<b>阶段进度总览</b>，并把补证、微应用、模板笔记、综合考试等入口聚合到主题这一个对象上。</p>
+        <div class="badges"><span class="b chg">● 变更</span><span class="b new">新增阶段总览</span><span class="b new">补证 / 微应用入口</span><span class="b new">笔记模板</span></div>
+      </div>
+      <div class="browser">
+        <div class="browser-bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">localhost:5173/topics/1</div></div>
+        <div class="canvas">
+          <span class="btn" style="margin-bottom:16px;">← 返回列表</span>
+
+          <!-- 阶段进度总览：新增 -->
+          <div class="card" style="border-color:#91caff;">
+            <div class="card-head" style="border-bottom-color:#d6e8ff;">
+              <div class="card-title">学习进度总览 <span class="mk">1</span></div>
+              <span class="tag line-new">当前阶段：微应用</span>
+            </div>
+            <div class="steps">
+              <div class="step done"><span class="num">✓</span><span class="lb">材料 3</span></div><span class="bar"></span>
+              <div class="step done"><span class="num">✓</span><span class="lb">笔记 1</span></div><span class="bar"></span>
+              <div class="step active"><span class="num">3</span><span class="lb">微应用</span></div><span class="bar"></span>
+              <div class="step"><span class="num">4</span><span class="lb">综合考试</span></div><span class="bar"></span>
+              <div class="step"><span class="num">5</span><span class="lb">复习</span></div>
+            </div>
+            <div class="row" style="margin-top:16px;gap:12px;">
+              <div class="col alert"><span class="ic">▤</span><div>已导入材料 <b>3</b> 份 · 补证 <b>1</b> 份<br><span class="muted">2 份主线 · 1 份反方观点</span></div></div>
+              <div class="col alert"><span class="ic">✎</span><div>结构化笔记 <b>1</b> 篇（技术类模板）<br><span class="muted">待确认项 2 · 薄弱点 1</span></div></div>
+              <div class="col alert"><span class="ic">◎</span><div>微应用 <b>1/1</b> 完成<br><span class="muted">综合考试尚未开始</span></div></div>
+            </div>
+          </div>
+
+          <!-- 主题信息 -->
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+              <div style="font-size:19px;font-weight:600;">深入理解 Django ORM</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+                <span class="tag solid">学习中</span><span class="tag">掌握度：基本通过</span>
+                <span class="btn sm">生成结构化笔记</span>
+                <span class="btn primary sm">◎ 掌握度评估</span>
+              </div>
+            </div>
+            <div class="desc" style="margin-top:16px;">
+              <div class="drow"><div class="dk">学习目标</div><div class="dv">能解释 ORM 查询优化并用于工作实践</div></div>
+              <div class="drow"><div class="dk">学习范围</div><div class="dv">QuerySet、惰性求值、N+1、select/prefetch_related</div></div>
+            </div>
+          </div>
+
+          <!-- 结构化笔记：模板 -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title">结构化笔记</div>
+              <div style="display:flex;gap:8px;">
+                <span class="tag line-new">模板：技术类 ▾ <span class="mk">2</span></span>
+                <span class="btn sm">按要求再生成</span>
+              </div>
+            </div>
+            <div class="li">
+              <div class="li-main">
+                <div class="li-title">Django ORM 查询优化要点</div>
+                <div class="ph-lines"><div class="ph w90"></div><div class="ph w80"></div></div>
+                <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+                  <span class="tag">概念定义</span><span class="tag">核心机制</span><span class="tag">常见误区</span><span class="tag line-new">待确认 2</span>
+                </div>
+              </div>
+              <div class="li-actions"><span class="btn link">编辑</span><span class="btn link">删除</span></div>
+            </div>
+          </div>
+
+          <!-- 学习材料 + 补证入口 -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title">学习材料</div>
+              <div style="display:flex;gap:8px;">
+                <span class="btn ghost sm">🔍 查资料 / 补证 <span class="mk">3</span></span>
+                <span class="btn primary sm">＋ 导入材料</span>
+              </div>
+            </div>
+            <div class="li">
+              <div class="li-main">
+                <div class="li-title">Django 官方文档 · QuerySet</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;"><span class="tag">网页</span><span class="tag">导入成功</span><span class="tag">主线材料</span><a href="#s3">查看来源</a></div>
+              </div>
+              <div class="li-actions"><span class="btn link">开始学习</span></div>
+            </div>
+            <div class="li">
+              <div class="li-main">
+                <div class="li-title">博客：为什么会出现 N+1 查询</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                  <span class="tag">网页</span><span class="tag">导入成功</span>
+                  <span class="tag line-new">补证材料 · 补案例 <span class="mk">3</span></span>
+                  <span class="tag line-new">关联问题：惰性求值何时触发</span>
+                </div>
+              </div>
+              <div class="li-actions"><span class="btn link">开始学习</span></div>
+            </div>
+            <div class="li">
+              <div class="li-main">
+                <div class="li-title">微应用：分析一段慢查询代码 <span class="mk">4</span></div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;"><span class="tag line-new">应用任务</span><span class="status ok"><span class="sd"></span>已反馈</span></div>
+              </div>
+              <div class="li-actions"><span class="btn link">查看反馈</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="anno">
+        <h4>新增 / 变更标注</h4>
+        <ul>
+          <li><span class="n">1</span><span><b>学习进度总览（新增，P1）</b>：以步骤条 + 聚合卡呈现材料 / 笔记 / 微应用 / 考试 / 复习状态，让用户一眼看出主题当前卡在哪个阶段。</span></li>
+          <li><span class="n">2</span><span><b>笔记模板（新增，P0）</b>：笔记区新增模板下拉（技术类 / 观点类），并以标签呈现结构化字段与待确认项数量。详见「结构化笔记模板」。</span></li>
+          <li><span class="n">3</span><span><b>补证入口与补证材料（新增，P0）</b>：材料区新增「查资料 / 补证」入口；补充材料带用途、材料类型、关联问题标签，而不是与主线材料混在一起。</span></li>
+          <li><span class="n">4</span><span><b>微应用条目（新增，P0）</b>：主题内直接聚合应用任务及其状态（已反馈 / 待作答），点击进入微应用练习页。</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ========== S3 材料阅读页 ========== -->
+    <section id="s3">
+      <div class="sec-head">
+        <div class="k">SCREEN 03 · MaterialReader</div>
+        <h2>材料阅读页</h2>
+        <p>MVP 是「沉浸式正文 + 右侧 AI 抽屉 + 悬浮问答按钮」，阅读前导藏在抽屉里、导入只保留纯文本。V1-alpha 针对四个体验改进点做了重点改造。</p>
+        <div class="badges"><span class="b chg">● 变更</span><span class="b chg">前导前置正文</span><span class="b chg">保留引用链接</span><span class="b chg">难度档位 / 保真标记</span></div>
+      </div>
+      <div class="browser">
+        <div class="browser-bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">localhost:5173/topics/1/materials/2</div></div>
+        <div class="canvas" style="background:#fdfdfd;">
+          <div class="row" style="gap:20px;align-items:flex-start;">
+            <!-- 正文区 -->
+            <div class="col" style="flex:1.7;">
+              <div class="card" style="padding:28px 32px;">
+                <span class="btn link" style="padding-left:0;">← 返回主题</span>
+                <div style="font-size:24px;font-weight:600;margin:8px 0 18px;">为什么会出现 N+1 查询</div>
+
+                <!-- AI 前导前置：变更 -->
+                <div class="card" style="background:var(--fill);border-color:#91caff;margin-bottom:22px;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                    <div style="font-weight:600;">📌 阅读前导（AI 生成） <span class="mk c">1</span></div>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                      <span class="tag line-new">难度档位：学习者友好 ▾ <span class="mk c">3</span></span>
+                      <span class="btn link">重新生成</span><span class="btn link">收起 ▴</span>
+                    </div>
+                  </div>
+                  <div class="grid2" style="gap:10px 20px;">
+                    <div><span class="muted">核心问题</span><div class="ph w90" style="margin-top:6px;"></div></div>
+                    <div><span class="muted">关键词</span><div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;"><span class="tag">惰性求值</span><span class="tag">N+1</span><span class="tag">prefetch</span></div></div>
+                    <div><span class="muted">先验知识</span><div class="ph w80" style="margin-top:6px;"></div></div>
+                    <div><span class="muted">建议阅读顺序</span><div class="ph w70" style="margin-top:6px;"></div></div>
+                    <div style="grid-column:1/3;"><span class="muted">可能难点</span><div class="ph w90" style="margin-top:6px;"></div></div>
+                  </div>
+                </div>
+
+                <!-- 正文，含引用链接 + 保真标记 -->
+                <div style="font-size:12px;color:var(--t3);margin-bottom:10px;">
+                  <span class="tag">原文事实</span> <span class="tag line-new">AI 解释</span> <span class="tag">待确认</span> ← 段落按来源类型着色标注 <span class="mk c">4</span>
+                </div>
+                <div class="ph-lines" style="margin-bottom:14px;">
+                  <div class="ph w90" style="height:12px;"></div><div class="ph w80" style="height:12px;"></div>
+                  <div class="ph w60" style="height:12px;"></div>
+                </div>
+                <p style="color:var(--t2);">
+                  当访问关联对象时，ORM 会按需触发额外查询（参见
+                  <a href="#s3">官方文档：QuerySet.select_related</a> 与
+                  <a href="#s3">相关讨论帖</a>），这就是 N+1 的来源。<span class="mk c">2</span>
+                </p>
+                <div class="ph-lines" style="margin-top:14px;">
+                  <div class="ph w90" style="height:12px;"></div><div class="ph w70" style="height:12px;"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 右侧 AI 助手抽屉 -->
+            <div class="col" style="flex:1;">
+              <div class="card" style="min-height:360px;display:flex;flex-direction:column;">
+                <div class="card-head"><div class="card-title">AI 学习助手</div><span class="muted">✕</span></div>
+                <div class="stack" style="flex:1;">
+                  <div style="align-self:flex-end;background:var(--fill-2);border-radius:8px;padding:8px 12px;max-width:85%;">引用：“惰性求值何时触发？”</div>
+                  <div style="background:var(--fill);border-radius:8px;padding:8px 12px;max-width:90%;">
+                    <div class="ph w90"></div><div class="ph w80" style="margin-top:6px;"></div>
+                    <div style="margin-top:8px;"><span class="btn ghost sm">🔍 就此疑问发起补证 <span class="mk">5</span></span></div>
+                  </div>
+                </div>
+                <hr class="soft" style="margin:12px 0;">
+                <div style="display:flex;gap:8px;"><div class="input" style="flex:1;">问问 AI…</div><span class="btn primary">➤</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="anno">
+        <h4>新增 / 变更标注（对应四个用户改进点）</h4>
+        <ul>
+          <li><span class="n c">1</span><span><b>AI 前导前置（改进点④，变更）</b>：前导从右侧对话框移到<b>正文首屏</b>，作为阅读入口；长前导默认可折叠，保留重新生成与跳转能力，视觉上与正文区分但不压过正文。</span></li>
+          <li><span class="n c">2</span><span><b>保留引用链接（改进点③，变更）</b>：导入从「纯文本」升级为「正文 + 链接元数据」，正文内 anchor 文本与外链按原始顺序保留并以链接样式展示，作为补证/笔记/出题的来源锚点。</span></li>
+          <li><span class="n c">3</span><span><b>难度档位（改进点②，变更）</b>：新增「学习者友好 / 贴近原文」等档位，默认生成面向学习者的解释版而非高密度摘要，降低阅读负担。</span></li>
+          <li><span class="n c">4</span><span><b>保真标记（改进点②，变更）</b>：段落标注「原文事实 / AI 解释 / 待确认」，避免把 AI 推断当成原文事实。</span></li>
+          <li><span class="n">5</span><span><b>就地发起补证（新增，P0）</b>：在问答气泡内直接把当前疑问带入补证流程，衔接「查资料与补证」页。</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ========== S4 查资料与补证 ========== -->
+    <section id="s4">
+      <div class="sec-head">
+        <div class="k">SCREEN 04 · SupplementRequest（全新）</div>
+        <h2>查资料与补证</h2>
+        <p>MVP 没有补证概念，补充资料只能当普通材料保存。V1-alpha 新增补证流程：从一个疑问发起，粘贴链接/文本后由 AI 做用途识别与结构化，并绑定回主题与问题。</p>
+        <div class="badges"><span class="b new">● 新增（P0）</span><span class="b new">来源 / 用途 / 可信度 / 关联问题</span></div>
+      </div>
+      <div class="browser">
+        <div class="browser-bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">localhost:5173/topics/1/supplements/new</div></div>
+        <div class="canvas">
+          <span class="btn" style="margin-bottom:16px;">← 返回主题</span>
+          <div class="row" style="gap:16px;align-items:flex-start;">
+            <div class="col" style="flex:1.1;">
+              <div class="card">
+                <div class="card-title">发起补证 <span class="mk">1</span></div>
+                <p class="muted" style="margin:4px 0 14px;">系统会带入主题目标、当前问题与关联材料片段作为上下文。</p>
+                <div class="stack">
+                  <div><div class="muted" style="margin-bottom:4px;">关联问题</div><div class="input" style="width:100%;">惰性求值何时触发？为什么会导致 N+1？</div></div>
+                  <div><div class="muted" style="margin-bottom:4px;">补充说明（为什么需要补资料）</div><div class="textarea">想补一个官方定义 + 一个反方观点，确认我的理解是否正确…</div></div>
+                  <div><div class="muted" style="margin-bottom:4px;">粘贴补充链接或文本 <span class="mk">2</span></div><div class="textarea">https://docs.djangoproject.com/... （首版支持粘贴，后续可接搜索）</div></div>
+                  <div><span class="btn primary">提交补证任务</span> <span class="status run" style="margin-left:8px;"><span class="sd"></span>AI 正在识别用途…</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="col">
+              <div class="card">
+                <div class="card-title">补证结果（AI 结构化） <span class="mk">3</span></div>
+                <div class="li">
+                  <div class="li-main">
+                    <div class="li-title">Django 官方：select_related / prefetch_related</div>
+                    <div class="desc" style="margin-top:8px;">
+                      <div class="drow"><div class="dk">来源</div><div class="dv">docs.djangoproject.com（官方文档）</div></div>
+                      <div class="drow"><div class="dk">适合解决</div><div class="dv">补官方定义 · 明确触发时机</div></div>
+                      <div class="drow"><div class="dk">材料类型</div><div class="dv"><span class="tag">官方定义</span></div></div>
+                      <div class="drow"><div class="dk">可信度</div><div class="dv"><span class="tag line-new">高 · 一手来源</span></div></div>
+                      <div class="drow"><div class="dk">阅读顺序</div><div class="dv">建议先读，作为判断基准</div></div>
+                    </div>
+                  </div>
+                </div>
+                <hr class="soft">
+                <div class="li">
+                  <div class="li-main">
+                    <div class="li-title">博客：ORM 惰性求值的一个误区</div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                      <span class="tag">补反方观点</span><span class="tag line-new">可信度：中 · 需交叉验证</span>
+                    </div>
+                    <div class="alert" style="margin-top:10px;"><span class="ic">⚠</span><div>与官方定义存在差异点，已列入主题「待确认项」。</div></div>
+                  </div>
+                </div>
+                <div style="margin-top:14px;display:flex;gap:8px;"><span class="btn primary sm">绑定到主题与问题</span><span class="btn sm">忽略</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="anno">
+        <h4>新增标注</h4>
+        <ul>
+          <li><span class="n">1</span><span><b>从疑问发起（P0）</b>：补证以「问题」为起点（可从阅读页问答气泡、笔记待确认项或主题材料区进入），而非凭空新增一份材料。</span></li>
+          <li><span class="n">2</span><span><b>粘贴优先（P0）</b>：首版支持粘贴链接/文本再由 AI 结构化；即便后续接入搜索，也保持同一数据结构（SupplementRequest）。</span></li>
+          <li><span class="n">3</span><span><b>结构化结果（P0）</b>：每条补充材料输出来源、适合解决的问题、材料类型、可信度说明与建议阅读顺序；冲突资料自动列入待确认项，并绑定回 Topic × Question。</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ========== S5 结构化笔记模板 ========== -->
+    <section id="s5">
+      <div class="sec-head">
+        <div class="k">SCREEN 05 · Note Templates（新增能力）</div>
+        <h2>结构化笔记模板</h2>
+        <p>MVP 笔记草稿是一段 Markdown，缺少稳定结构。V1-alpha 新增模板选择与结构化字段，让笔记稳定区分事实 / 理解 / AI 推断 / 案例 / 适用边界 / 待确认。</p>
+        <div class="badges"><span class="b new">● 新增（P0）</span><span class="b new">技术类 / 观点类模板</span><span class="b new">结构化字段</span></div>
+      </div>
+      <div class="browser">
+        <div class="browser-bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">localhost:5173/topics/1 · 确认结构化笔记</div></div>
+        <div class="canvas">
+          <div class="card" style="max-width:860px;margin:0 auto;">
+            <div class="card-head"><div class="card-title">确认结构化笔记（AI 草稿）</div><span class="muted">✕</span></div>
+
+            <!-- 模板选择：新增 -->
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;">
+              <span class="muted">选择模板 <span class="mk">1</span>：</span>
+              <span class="tag line-new">● 技术类</span>
+              <span class="tag">观点类</span>
+              <span class="btn link" style="margin-left:auto;">按此模板重新生成</span>
+            </div>
+
+            <div class="alert" style="margin-bottom:14px;"><span class="ic">ℹ</span><div>这是 AI 草稿。字段区分「原文事实 / 用户理解 / AI 推断」，请检查后再保存为正式笔记。</div></div>
+
+            <!-- 技术类结构化字段：新增 -->
+            <div class="stack">
+              <div class="card" style="background:var(--fill);"><b>概念定义</b> <span class="tag" style="margin-left:6px;">原文事实</span><div class="ph-lines" style="margin-top:8px;"><div class="ph w90"></div><div class="ph w70"></div></div></div>
+              <div class="card" style="background:var(--fill);"><b>核心机制</b> <span class="tag line-new" style="margin-left:6px;">AI 推断</span><div class="ph-lines" style="margin-top:8px;"><div class="ph w80"></div><div class="ph w60"></div></div></div>
+              <div class="row">
+                <div class="col card" style="background:var(--fill);"><b>适用条件</b><div class="ph-lines" style="margin-top:8px;"><div class="ph w80"></div></div></div>
+                <div class="col card" style="background:var(--fill);"><b>常见误区</b><div class="ph-lines" style="margin-top:8px;"><div class="ph w80"></div></div></div>
+              </div>
+              <div class="row">
+                <div class="col card" style="background:var(--fill);"><b>案例</b><div class="ph-lines" style="margin-top:8px;"><div class="ph w70"></div></div></div>
+                <div class="col card" style="background:var(--fill);"><b>实践 checklist</b><div class="ph-lines" style="margin-top:8px;"><div class="ph w70"></div></div></div>
+              </div>
+              <div class="card" style="background:var(--fill);border-color:#91caff;"><b>待确认项</b> <span class="mk">2</span> <span class="tag line-new" style="margin-left:6px;">2 项 · 供出题/复习读取</span><div class="ph-lines" style="margin-top:8px;"><div class="ph w80"></div></div></div>
+            </div>
+
+            <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end;">
+              <span class="btn">取消</span><span class="btn primary">保存为正式笔记</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="anno">
+        <h4>新增标注</h4>
+        <ul>
+          <li><span class="n">1</span><span><b>模板选择（P0）</b>：首版提供技术类（概念/机制/适用条件/误区/案例/checklist/待确认）与观点类（论点/证据/反例/适用边界/可迁移场景/待确认）两类模板；模板非强制，用户可编辑或换模板再生成。服务端保留材料指纹，无变化不重复调用 LLM。</span></li>
+          <li><span class="n">2</span><span><b>结构化字段入库（P0）</b>：正文仍存 Markdown，但 template_type、待确认项、薄弱点标签等关键结构单独入库，供考试与复习直接读取。字段按「原文事实 / 用户理解 / AI 推断」着色区分。</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ========== S6 微应用练习 ========== -->
+    <section id="s6">
+      <div class="sec-head">
+        <div class="k">SCREEN 06 · ApplicationTask（全新）</div>
+        <h2>微应用练习</h2>
+        <p>MVP 没有考试前的应用环节。V1-alpha 新增概念微应用：围绕一个概念/笔记段落生成小任务，用户作答后 AI 给结构化反馈，并把结果回写主题作为考试上下文。</p>
+        <div class="badges"><span class="b new">● 新增（P0）</span><span class="b new">生成 · 作答 · 反馈 · 回写</span></div>
+      </div>
+      <div class="browser">
+        <div class="browser-bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">localhost:5173/topics/1/applications/5</div></div>
+        <div class="canvas">
+          <span class="btn" style="margin-bottom:16px;">← 返回主题</span>
+          <div class="card">
+            <div class="card-head"><div class="card-title">微应用任务 · 概念迁移</div><span class="tag line-new">来源：笔记「核心机制」段落</span></div>
+            <div class="alert" style="margin-bottom:14px;"><span class="ic">◎</span><div><b>任务：</b>下面是一段会触发 N+1 的视图代码，请分析问题所在，并说明你会如何改写。（这是一个新场景，检验迁移而非复述原文）</div></div>
+            <div class="card" style="background:var(--fill);font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--t2);">for author in Author.objects.all(): print(author.book_set.count())</div>
+            <div style="margin-top:14px;"><div class="muted" style="margin-bottom:4px;">你的作答</div><div class="textarea">这里会对每个 author 触发一次 count 查询…</div></div>
+            <div style="margin-top:12px;display:flex;gap:8px;"><span class="btn primary">提交并获取反馈</span><span class="btn ghost">暂存</span></div>
+          </div>
+
+          <!-- 反馈：结构化 -->
+          <div class="card">
+            <div class="card-title">AI 反馈 <span class="mk">2</span></div>
+            <div class="grid2" style="margin-top:12px;">
+              <div class="card" style="background:var(--fill);"><b>✓ 使用正确的知识点</b><div class="ph-lines" style="margin-top:8px;"><div class="ph w80"></div></div></div>
+              <div class="card" style="background:var(--fill);border-color:#ffbb96;"><b>△ 遗漏的前提</b><div class="ph-lines" style="margin-top:8px;"><div class="ph w70"></div></div></div>
+              <div class="card" style="background:var(--fill);border-color:#ffbb96;"><b>△ 过度泛化之处</b><div class="ph-lines" style="margin-top:8px;"><div class="ph w70"></div></div></div>
+              <div class="card" style="background:var(--fill);border-color:#91caff;"><b>➤ 建议修订</b><div class="ph-lines" style="margin-top:8px;"><div class="ph w80"></div></div></div>
+            </div>
+            <div class="alert" style="margin-top:14px;"><span class="ic">↺</span><div>结果已回写主题，将作为综合考试的生成上下文 <span class="mk">3</span></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="anno">
+        <h4>新增标注</h4>
+        <ul>
+          <li><span class="n">1</span><span><b>任务生成（P0）</b>：围绕概念或笔记段落生成小任务（解释新案例 / 分析工作场景 / 设计简短方案 / 判断说法是否成立），首版实现概念微应用，支持暂存后继续。</span></li>
+          <li><span class="n">2</span><span><b>结构化反馈（P0）</b>：反馈固定包含「使用正确的知识点 / 遗漏的前提 / 过度泛化之处 / 建议修订」四段，指出知识使用是否准确。</span></li>
+          <li><span class="n">3</span><span><b>回写主题（P0）</b>：应用结果回流到主题，成为综合考试的生成上下文，确保考试不脱离真实应用表现。</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ========== S7 掌握度评估 / 考试 ========== -->
+    <section id="s7">
+      <div class="sec-head">
+        <div class="k">SCREEN 07 · Exam（掌握度评估）</div>
+        <h2>掌握度评估（考试增强）</h2>
+        <p>MVP 考试是「生成 3 题 → 一次性作答 → 提交阅卷」。V1-alpha 增加答题草稿保存/继续，并让题目与阅卷输出更结构化（考察目标、评分维度、扣分原因、薄弱点）。</p>
+        <div class="badges"><span class="b chg">● 变更（P0）</span><span class="b chg">草稿保存 / 继续作答</span><span class="b chg">评分维度 / 薄弱点</span></div>
+      </div>
+      <div class="browser">
+        <div class="browser-bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">localhost:5173/topics/1/exam</div></div>
+        <div class="canvas">
+          <span class="btn" style="margin-bottom:16px;">← 返回主题</span>
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div><div style="font-size:18px;font-weight:600;">掌握度评估</div><div class="muted" style="font-size:12px;">题目将知识放入新场景，检验迁移而非复述原文。</div></div>
+              <!-- 草稿状态：变更 -->
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="status ok"><span class="sd"></span>草稿已保存 14:32 <span class="mk c">1</span></span>
+                <span class="tag">进度 2/3</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title">第 2 题</div>
+              <div style="display:flex;gap:6px;">
+                <span class="tag line-new">考察目标：迁移应用 <span class="mk c">2</span></span>
+                <span class="tag line-new">评分维度：准确性 / 完整性 / 边界</span>
+              </div>
+            </div>
+            <div class="alert" style="margin-bottom:12px;"><span class="ic">◈</span><div><b>迁移场景：</b>团队新同学写了一个报表接口，响应很慢……</div></div>
+            <div class="ph-lines" style="margin-bottom:12px;"><div class="ph w90"></div><div class="ph w60"></div></div>
+            <div class="textarea">我会先定位是否存在 N+1……（作答中）</div>
+            <div style="margin-top:12px;display:flex;gap:8px;">
+              <span class="btn ghost">保存草稿 <span class="mk c">1</span></span>
+              <span class="btn">上一题</span><span class="btn primary">下一题</span>
+              <span class="btn primary" style="margin-left:auto;">提交并获取反馈</span>
+            </div>
+            <div class="note">离开后再次进入会自动恢复未提交答案；只有点击「提交」才进入阅卷任务。</div>
+          </div>
+
+          <!-- 阅卷结果：结构化 -->
+          <div class="card">
+            <div class="card-title">阅卷反馈（示意） <span class="mk c">3</span></div>
+            <div class="card" style="background:var(--fill);margin-top:12px;">
+              <div style="display:flex;justify-content:space-between;"><b>第 1 题：22 / 30 分</b><span class="tag line-new">薄弱点：适用边界</span></div>
+              <div class="grid2" style="margin-top:10px;">
+                <div><span class="muted">扣分原因</span><div class="ph w90" style="margin-top:6px;"></div></div>
+                <div><span class="muted">建议回到的环节</span><div style="margin-top:6px;"><span class="tag line-new">回到「深度理解」</span></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="anno">
+        <h4>新增 / 变更标注</h4>
+        <ul>
+          <li><span class="n c">1</span><span><b>草稿保存 / 继续作答（改进点①，P0）</b>：作答时可手动保存（必要时轻量自动保存），后端保存每题 draft_answer、last_saved_at 与考试 progress；再次进入恢复未提交答案，只有提交才触发 grading 任务。</span></li>
+          <li><span class="n c">2</span><span><b>题目结构增强（变更，P0）</b>：题目显式呈现考察目标与评分维度，帮助用户理解题意，也让评分有据可依。</span></li>
+          <li><span class="n c">3</span><span><b>阅卷输出结构化（变更，P0）</b>：阅卷不只有分数，包含每题扣分原因、薄弱点标签与「建议回到哪个学习环节」，并驱动掌握状态更新。</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ========== S8 复习闭环 ========== -->
+    <section id="s8">
+      <div class="sec-head">
+        <div class="k">SCREEN 08 · Review</div>
+        <h2>复习闭环增强</h2>
+        <p>MVP 复习是「生成提示 + 标记完成」。V1-alpha 把复习变成一次轻量测验：先作答、AI 反馈、掌握度变化，并据结果动态计算下一次复习时间。</p>
+        <div class="badges"><span class="b chg">● 变更（P0）</span><span class="b chg">先答后评</span><span class="b chg">动态下次复习时间</span></div>
+      </div>
+      <div class="browser">
+        <div class="browser-bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">localhost:5173/reviews</div></div>
+        <div class="canvas">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <div><div style="font-size:18px;font-weight:600;">复习计划</div><div class="muted" style="font-size:12px;">按评估结果安排的复习记录。</div></div>
+            <span class="btn">↻ 刷新</span>
+          </div>
+          <div class="card">
+            <div class="card-title">待复习</div>
+            <p class="muted" style="margin:2px 0 12px;">这些主题已到复习时间。先作答，再记录完成。</p>
+            <div class="li">
+              <div class="li-main">
+                <div class="li-title" style="display:flex;gap:8px;align-items:center;">强化学习基础概念 <span class="tag">掌握度：基本通过</span><span class="tag">最近测验：72 分</span></div>
+
+                <!-- 复习先作答：变更 -->
+                <div class="card" style="background:var(--fill);margin-top:10px;">
+                  <div style="font-weight:600;margin-bottom:6px;">回忆题 <span class="mk c">1</span></div>
+                  <div class="ph w90" style="margin-bottom:10px;"></div>
+                  <div class="textarea">先写下你的回答……</div>
+                  <div style="margin-top:10px;display:flex;gap:8px;"><span class="btn primary sm">提交回答</span><span class="btn sm">生成复习提示</span></div>
+                </div>
+
+                <!-- 反馈 + 掌握度变化：变更 -->
+                <div class="card" style="background:var(--fill);border-color:#91caff;margin-top:10px;">
+                  <div style="font-weight:600;margin-bottom:6px;">AI 反馈与调度 <span class="mk c">2</span></div>
+                  <div class="ph w80" style="margin-bottom:10px;"></div>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <span class="tag line-new">掌握度：基本通过 → 强掌握 ↑</span>
+                    <span class="tag line-new">下次复习：7 天后（原 3 天）</span>
+                    <span class="tag">next_due_reason：回答准确、边界清晰</span>
+                  </div>
+                </div>
+              </div>
+              <div class="li-actions" style="align-self:flex-start;"><span class="btn link">进入主题 →</span><span class="btn primary sm">✓ 完成本次复习</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">后续计划</div>
+            <div class="li"><div class="li-main"><div class="li-title">向量数据库入门</div><div class="muted">应复习时间：3 天后 · 到期后进入「待复习」</div></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="anno">
+        <h4>变更标注</h4>
+        <ul>
+          <li><span class="n c">1</span><span><b>先作答（P0）</b>：复习不再只是「生成提示 + 标记完成」，而是先让用户回答回忆题，形成一次轻量测验。ReviewRecord 新增 user_answer。</span></li>
+          <li><span class="n c">2</span><span><b>反馈 + 动态调度（P0）</b>：AI 给出反馈（ai_feedback），据回答质量更新掌握度并计算下一次复习时间（next_due_at + next_review_reason）。首版沿用分数区间规则：强掌握延后、基本通过保持、薄弱缩短并提示回到理解/应用。</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ========== S9 任务状态组件 ========== -->
+    <section id="s9">
+      <div class="sec-head">
+        <div class="k">SCREEN 09 · AITask Status（统一组件）</div>
+        <h2>任务状态组件</h2>
+        <p>MVP 各页面各写一套异步状态提示。V1-alpha 抽出统一组件，在阅读前导、问答、笔记、考试、阅卷、复习提示等场景一致展示排队 / 运行 / 成功 / 失败 / 重试，且失败不丢用户输入。</p>
+        <div class="badges"><span class="b new">● 新增 / 统一（P1）</span><span class="b new">复用 useAITaskPolling</span></div>
+      </div>
+      <div class="browser">
+        <div class="browser-bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">Component · &lt;AITaskStatus /&gt;</div></div>
+        <div class="canvas">
+          <div class="grid3">
+            <div class="card"><div class="muted" style="margin-bottom:10px;">排队中</div><span class="status"><span class="sd"></span>已提交，等待执行</span><div class="note">pending · 不阻塞页面</div></div>
+            <div class="card"><div class="muted" style="margin-bottom:10px;">运行中</div><span class="status run"><span class="sd"></span>AI 正在处理…</span><div class="note">running · 每 2s 轮询</div></div>
+            <div class="card"><div class="muted" style="margin-bottom:10px;">成功</div><span class="status ok"><span class="sd"></span>已完成</span><div class="note">succeeded · 结果落到对应卡片</div></div>
+          </div>
+          <div class="grid2" style="margin-top:16px;">
+            <div class="card">
+              <div class="muted" style="margin-bottom:10px;">失败（可重试，不丢输入）</div>
+              <div class="alert" style="border-style:dashed;border-color:#ffbb96;">
+                <span class="ic">⚠</span>
+                <div style="flex:1;">
+                  <b>任务失败：</b>模型响应超时。<div class="note" style="margin-top:2px;">你的输入已保留，可直接重试。</div>
+                  <div style="margin-top:8px;"><span class="btn sm">↺ 重新尝试</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="muted" style="margin-bottom:10px;">重试中（第 2/3 次）</div>
+              <span class="status run"><span class="sd"></span>重试中 · 退避 15s</span>
+              <div class="note">自动重试最多 3 次（退避 5 / 15 / 45s），服务重启后 running→pending 自动恢复。</div>
+            </div>
+          </div>
+          <div class="card" style="margin-top:16px;">
+            <div class="card-title">统一落点</div>
+            <div class="flow">
+              <span class="n">阅读前导</span><span class="n">划词问答</span><span class="n">笔记草稿</span><span class="n hi">补证</span><span class="n hi">微应用</span><span class="n">考试生成</span><span class="n">阅卷</span><span class="n">复习提示</span>
+              <span class="ar">→ 共用</span><span class="n hi">&lt;AITaskStatus /&gt;</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="anno">
+        <h4>新增标注</h4>
+        <ul>
+          <li><span class="n">1</span><span><b>统一状态展示（P1）</b>：所有长耗时能力发起后先返回任务状态，页面通过现有 useAITaskPolling 获取结果；失败展示可理解错误 + 重试入口，且不丢用户输入。避免为单页写一套特殊异步逻辑。</span></li>
+        </ul>
+      </div>
+      <hr class="soft">
+      <p class="note">原型说明：本页为静态线框示意，用于沟通「V1-alpha 做完后的界面形态与相对 MVP 的差异」，不含真实数据与交互逻辑；实现以 React + Ant Design + AITask 异步契约为准。数据模型对应 SupplementRequest / ApplicationTask 等新增对象，及 Material / Note / Exam / ExamQuestion / ReviewRecord / AITask 的字段扩展。</p>
+    </section>
+
+  </main>
+</div>
+</body>
+</html>
