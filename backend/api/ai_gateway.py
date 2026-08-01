@@ -79,6 +79,42 @@ class AIGateway:
         return provider.generate_response(messages)
 
     @classmethod
+    def generate_concept_draft(
+        cls, concept_title: str, source_text: str, context: str
+    ) -> dict[str, str]:
+        provider = cls.get_provider()
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是学习概念卡片助手。只输出合法 JSON，不要 Markdown。"
+                    "仅根据给定来源文本与上下文补全概念，不能虚构材料中未支持的事实。"
+                    '输出格式为 {"definition":"定义","principle":"原理",'
+                    '"pitfalls":"易错点","applications":"适用场景"}。'
+                    "每个字段都必须是可编辑的简洁文本；不确定时明确标注需要确认。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"概念名称：{concept_title}\n"
+                    f"来源文本：{source_text}\n\n"
+                    f"材料上下文：{context}"
+                ),
+            },
+        ]
+        content = provider.generate_response(
+            messages, response_format={"type": "json_object"}
+        )
+        parsed = json.loads(content)
+        required_fields = ("definition", "principle", "pitfalls", "applications")
+        if not isinstance(parsed, dict) or any(
+            not str(parsed.get(field, "")).strip() for field in required_fields
+        ):
+            raise ValueError("AI 概念草稿结果格式不正确")
+        return {field: str(parsed[field]).strip() for field in required_fields}
+
+    @classmethod
     def generate_note_draft(
         cls, topic_title: str, goal: str, context: str, instructions: str = ""
     ) -> str:

@@ -67,7 +67,9 @@ LLM_API_KEY=ollama
 - 材料导入：网页抓取或纯文本粘贴、清洗及 `MaterialChunk` 自动分段；材料标记人工添加
   或 AI 推荐来源。
 - 阅读页：`UniversalReader` HTML 外壳、暗色模式、来源入口、任务状态可见性、划词提问和
-  AI 侧边助手。
+  AI 侧边助手；选中文本菜单支持概念、问答和高亮。
+- 概念卡片：`Concept` 草稿由 `AITask` 异步补全定义、原理、易错点与适用场景；用户编辑确认
+  后保存。`ConceptAnchor` 和 `Highlight` 均以材料 `clean_text` offset 保存可回跳来源。
 - Assessment 闭环：迁移性题目生成、作答、AI 阅卷、掌握度更新和首次复习记录。
 - Django Admin：所有核心模型均已注册。
 - LLM 网关：支持 OpenAI-compatible Provider 与本地 Ollama。
@@ -81,7 +83,8 @@ LLM_API_KEY=ollama
 
 核心文件：
 
-- [api/models.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/models.py)：`AITask`、`Note`、`Exam`、`ExamQuestion`、`ReviewRecord`。
+- [api/models.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/models.py)：`AITask`、`Concept`、
+  `ConceptAnchor`、`Highlight`、`Note`、`Exam`、`ExamQuestion`、`ReviewRecord`。
 - [api/task_service.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/task_service.py)：入队、去重、任务执行、三次重试和结果写回。
 - [api/note_service.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/note_service.py)：笔记材料上下文和内容指纹计算。
 - [api/scheduler.py](file:///Users/meiao/ai_workspace/ai-learning-lab/backend/api/scheduler.py)：APScheduler 单 worker 调度器。
@@ -107,6 +110,7 @@ pending -> running -> succeeded
 | --- | --- | --- | --- |
 | 阅读前导 | 材料导入成功后自动入队 | 材料 CRUD 响应 | `GET /api/ai-tasks/?material={id}` |
 | 划词问答 | `POST /api/questions/` | `202`，`{question, task}` | `GET /api/ai-tasks/{id}/` |
+| 概念草稿 | `POST /api/topics/{id}/concepts/` | `202`，`{concept, task}` | `GET /api/ai-tasks/{id}/` |
 | 笔记草稿 | `POST /api/topics/{id}/note-drafts/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 考试生成 | `POST /api/exams/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 阅卷 | `POST /api/exams/{id}/submit/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
@@ -186,7 +190,7 @@ cd /Users/meiao/ai_workspace/ai-learning-lab
 (cd frontend && npm run build)
 ```
 
-当前已通过 Ruff、Django API 测试（11 项）、Django check、TypeScript `tsc -b` 与
+当前已通过 Ruff、Django API 测试（13 项）、Django check、TypeScript `tsc -b` 与
 Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超过 500 kB，
 后续可通过代码分割优化。
 
@@ -202,16 +206,19 @@ Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超�
 当前进入 V1-alpha 的阶段化开发。完整范围、原型和验收标准见
 [docs/V1-ALPHA.md](file:///Users/meiao/ai_workspace/ai-learning-lab/docs/V1-ALPHA.md)。
 
-阶段 1 已完成：
+阶段 1 和阶段 2 已完成：
 
 1. `api.0010_material_source_type_topic_type` 已应用，`Topic.type` 和
    `Material.source_type` 已贯穿 API 与 Django Admin。
 2. 主页已支持搜索、全部 / 学习 / 讨论筛选，以及带可选 URL 或粘贴文本初始材料的新建话题。
 3. `frontend/src/components/UniversalReader/` 已提供 HTML 正文阅读外壳和暗色模式；PDF、
    音视频和文件上传仍未实现，不能在 UI 中伪支持。
+4. `api.0011_concept_highlight_conceptanchor_aitask_concept_and_more` 和
+   `api.0012_alter_aitask_task_type` 已应用。阅读选区按 `MaterialChunk` 的 offset 持久化；
+   用户可发起概念草稿、编辑并确认概念卡片，或创建不调用 AI 的高亮。
 
-下一步实施阶段 2：在阅读中加入可靠的选中文本操作菜单、概念草稿与来源锚点。讨论型 AI
-对话、高亮、知识图谱和阶段总结按 V1-alpha 后续阶段推进。所有长耗时 AI 能力继续走
+下一步实施阶段 3：为问答补充位置锚点和可保存的沉淀入口，并提供高亮列表。讨论型 AI
+对话、知识图谱和阶段总结按 V1-alpha 后续阶段推进。所有长耗时 AI 能力继续走
 `AITask` 异步任务和前端轮询，不能退回为阻塞请求。
 
 ## 11. 接手原则

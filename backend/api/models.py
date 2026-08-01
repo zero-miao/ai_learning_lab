@@ -154,6 +154,126 @@ class Question(models.Model):
         verbose_name_plural = "用户问题"
 
 
+class Concept(models.Model):
+    STATUS_CHOICES = [
+        ("draft", "草稿"),
+        ("confirmed", "已确认"),
+    ]
+
+    topic = models.ForeignKey(
+        Topic,
+        related_name="concepts",
+        on_delete=models.CASCADE,
+        verbose_name="所属主题",
+    )
+    title = models.CharField(max_length=255, verbose_name="概念名称")
+    definition = models.TextField(blank=True, verbose_name="定义")
+    principle = models.TextField(blank=True, verbose_name="原理")
+    pitfalls = models.TextField(blank=True, verbose_name="易错点")
+    applications = models.TextField(blank=True, verbose_name="适用场景")
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="draft",
+        db_index=True,
+        verbose_name="状态",
+    )
+    source_task = models.ForeignKey(
+        "AITask",
+        related_name="generated_concepts",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="来源任务",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "概念卡片"
+        verbose_name_plural = "概念卡片"
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return self.title
+
+
+class ConceptAnchor(models.Model):
+    concept = models.ForeignKey(
+        Concept,
+        related_name="anchors",
+        on_delete=models.CASCADE,
+        verbose_name="所属概念",
+    )
+    material = models.ForeignKey(
+        Material,
+        related_name="concept_anchors",
+        on_delete=models.CASCADE,
+        verbose_name="来源材料",
+    )
+    chunk = models.ForeignKey(
+        MaterialChunk,
+        related_name="concept_anchors",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="来源片段",
+    )
+    source_text = models.TextField(verbose_name="来源文本")
+    start_offset = models.PositiveIntegerField(verbose_name="起始偏移")
+    end_offset = models.PositiveIntegerField(verbose_name="结束偏移")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "概念来源锚点"
+        verbose_name_plural = "概念来源锚点"
+        ordering = ["created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["concept", "material", "start_offset", "end_offset"],
+                name="unique_concept_anchor_range",
+            )
+        ]
+
+
+class Highlight(models.Model):
+    topic = models.ForeignKey(
+        Topic,
+        related_name="highlights",
+        on_delete=models.CASCADE,
+        verbose_name="所属主题",
+    )
+    material = models.ForeignKey(
+        Material,
+        related_name="highlights",
+        on_delete=models.CASCADE,
+        verbose_name="来源材料",
+    )
+    chunk = models.ForeignKey(
+        MaterialChunk,
+        related_name="highlights",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="来源片段",
+    )
+    source_text = models.TextField(verbose_name="高亮文本")
+    start_offset = models.PositiveIntegerField(verbose_name="起始偏移")
+    end_offset = models.PositiveIntegerField(verbose_name="结束偏移")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "高亮"
+        verbose_name_plural = "高亮"
+        ordering = ["created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["material", "start_offset", "end_offset"],
+                name="unique_highlight_range",
+            )
+        ]
+
+
 class AIResponse(models.Model):
     TASK_TYPE_CHOICES = [
         ("briefing", "阅读前导"),
@@ -338,6 +458,7 @@ class AITask(models.Model):
     TASK_TYPE_CHOICES = [
         ("briefing", "阅读前导"),
         ("answer_question", "回答问题"),
+        ("concept_draft", "概念草稿"),
         ("generate_exam", "生成考题"),
         ("grade_exam", "阅卷评分"),
         ("note_draft", "笔记草稿"),
@@ -384,6 +505,14 @@ class AITask(models.Model):
         null=True,
         blank=True,
         verbose_name="关联问题",
+    )
+    concept = models.ForeignKey(
+        Concept,
+        related_name="ai_tasks",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        verbose_name="关联概念",
     )
     exam = models.ForeignKey(
         Exam,

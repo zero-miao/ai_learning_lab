@@ -19,8 +19,16 @@ export interface Material {
   import_status: 'pending' | 'success' | 'failed';
   import_status_display: string;
   created_at: string;
-  chunks: any[];
+  chunks: MaterialChunk[];
   ai_responses: AIResponse[];
+}
+
+export interface MaterialChunk {
+  id: number;
+  chunk_index: number;
+  content: string;
+  start_offset: number;
+  end_offset: number;
 }
 
 export interface AIResponse {
@@ -47,7 +55,47 @@ export interface Topic {
   updated_at: string;
   materials: Material[];
   notes: Note[];
+  concepts: Concept[];
+  highlights: Highlight[];
   has_current_note: boolean;
+}
+
+export interface ConceptAnchor {
+  id: number;
+  material: number;
+  material_title: string;
+  chunk: number | null;
+  source_text: string;
+  start_offset: number;
+  end_offset: number;
+  created_at: string;
+}
+
+export interface Concept {
+  id: number;
+  topic: number;
+  title: string;
+  definition: string;
+  principle: string;
+  pitfalls: string;
+  applications: string;
+  status: 'draft' | 'confirmed';
+  status_display: string;
+  source_task: number | null;
+  anchors: ConceptAnchor[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Highlight {
+  id: number;
+  topic: number;
+  material: number;
+  chunk: number | null;
+  source_text: string;
+  start_offset: number;
+  end_offset: number;
+  created_at: string;
 }
 
 export interface Note {
@@ -108,13 +156,14 @@ export type AITaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'can
 
 export interface AITask {
   id: number;
-  task_type: 'briefing' | 'answer_question' | 'generate_exam' | 'grade_exam' | 'note_draft' | 'review_prompt';
+  task_type: 'briefing' | 'answer_question' | 'concept_draft' | 'generate_exam' | 'grade_exam' | 'note_draft' | 'review_prompt';
   task_type_display: string;
   status: AITaskStatus;
   status_display: string;
   topic: number | null;
   material: number | null;
   question: number | null;
+  concept: number | null;
   exam: number | null;
   review: number | null;
   result_json: Record<string, unknown>;
@@ -145,6 +194,11 @@ export interface TaskResponse {
   task: AITask;
 }
 
+export interface ConceptTaskResponse extends TaskResponse {
+  concept: Concept;
+  created: boolean;
+}
+
 export const getTopics = () => api.get<Topic[]>('topics/');
 export const getTopic = (id: number) => api.get<Topic>(`topics/${id}/`);
 export const createTopic = (data: Partial<Topic>) => api.post<Topic>('topics/', data);
@@ -161,6 +215,22 @@ export const deleteNote = (id: number) => api.delete(`notes/${id}/`);
 export const checkHealth = () => api.get('health/');
 export const getQuestion = (id: number) => api.get<Question>(`questions/${id}/`);
 export const createQuestion = (data: Partial<Question>) => api.post<{ question: Question; task: AITask }>('questions/', data);
+export const createConcept = (
+  topicId: number,
+  data: {
+    title: string;
+    material: number;
+    start_offset: number;
+    end_offset: number;
+  },
+) => api.post<ConceptTaskResponse>(`topics/${topicId}/concepts/`, data);
+export const getConcept = (id: number) => api.get<Concept>(`concepts/${id}/`);
+export const updateConcept = (id: number, data: Partial<Concept>) =>
+  api.patch<Concept>(`concepts/${id}/`, data);
+export const createHighlight = (
+  topicId: number,
+  data: { material: number; start_offset: number; end_offset: number },
+) => api.post<{ highlight: number; created: boolean }>(`topics/${topicId}/highlights/`, data);
 export const getExam = (id: number) => api.get<Exam>(`exams/${id}/`);
 export const createExam = (topic: number) => api.post<TaskResponse>('exams/', { topic });
 export const submitExam = (id: number, answers: Array<{ id: number; answer_text: string }>) =>

@@ -1,12 +1,26 @@
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 
-from .models import AITask, Exam, Material, Note, Question, ReviewRecord, Topic
+from .models import (
+    AITask,
+    Concept,
+    ConceptAnchor,
+    Exam,
+    Highlight,
+    Material,
+    MaterialChunk,
+    Note,
+    Question,
+    ReviewRecord,
+    Topic,
+)
 from .note_service import build_note_source
 from .serializers import (
     AITaskSerializer,
+    ConceptSerializer,
     ExamSerializer,
     MaterialSerializer,
     NoteSerializer,
@@ -36,6 +50,37 @@ def _build_review_context(review):
     return "\n\n".join(
         section for section in (material_context, note_context) if section
     )[:12000]
+
+
+def _get_anchor_data(topic, data):
+    try:
+        material_id = int(data.get("material"))
+        start_offset = int(data.get("start_offset"))
+        end_offset = int(data.get("end_offset"))
+    except (TypeError, ValueError) as error:
+        raise serializers.ValidationError(
+            {"detail": "材料和来源偏移必须是整数。"}
+        ) from error
+
+    material = Material.objects.filter(pk=material_id, topic=topic).first()
+    if material is None:
+        raise serializers.ValidationError({"material": "材料不存在或不属于当前话题。"})
+    if not 0 <= start_offset < end_offset <= len(material.clean_text):
+        raise serializers.ValidationError({"detail": "来源锚点不在材料正文范围内。"})
+
+    source_text = material.clean_text[start_offset:end_offset]
+    if not source_text.strip():
+        raise serializers.ValidationError({"detail": "不能为纯空白文本创建锚点。"})
+    chunk = (
+        MaterialChunk.objects.filter(
+            material=material,
+            start_offset__lte=start_offset,
+            end_offset__gt=start_offset,
+        )
+        .order_by("chunk_index")
+        .first()
+    )
+    return material, chunk, source_text, start_offset, end_offset
 
 
 class TopicViewSet(viewsets.ModelViewSet):
@@ -77,6 +122,79 @@ class TopicViewSet(viewsets.ModelViewSet):
         )
         return Response(
             {"task": AITaskSerializer(task).data}, status=status.HTTP_202_ACCEPTED
+        )
+
+    @action(detail=True, methods=["post"], url_path="concepts")
+    def create_concept(self, request, pk=None):
+        topic = self.get_object()
+        title = str(request.data.get("title", "")).strip()
+        if not title:
+            return Response(
+                {"detail": "请输入概念名称。"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        if len(title) > 255:
+            return Response(
+                {"detail": "概念名称不能超过 255 个字符。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        material, chunk, source_text, start_offset, end_offset = _get_anchor_data(
+            topic, request.data
+        )
+        context_start = max(0, start_offset - 1200)
+        context_end = min(len(material.clean_text), end_offset + 1200)
+        context = material.clean_text[context_start:context_end]
+
+        with transaction.atomic():
+            concept = Concept.objects.filter(topic=topic, title__iexact=title).first()
+            created = concept is None
+            if concept is None:
+                concept = Concept.objects.create(topic=topic, title=title)
+            ConceptAnchor.objects.get_or_create(
+                concept=concept,
+                material=material,
+                start_offset=start_offset,
+                end_offset=end_offset,
+                defaults={"chunk": chunk, "source_text": source_text},
+            )
+            task, _ = enqueue_or_reuse(
+                "concept_draft",
+                topic=topic,
+                material=material,
+                concept=concept,
+                input_json={
+                    "concept_id": concept.id,
+                    "source_text": source_text,
+                    "context": context,
+                },
+            )
+        return Response(
+            {
+                "concept": ConceptSerializer(concept).data,
+                "task": AITaskSerializer(task).data,
+                "created": created,
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="highlights")
+    def create_highlight(self, request, pk=None):
+        topic = self.get_object()
+        material, chunk, source_text, start_offset, end_offset = _get_anchor_data(
+            topic, request.data
+        )
+        highlight, created = Highlight.objects.get_or_create(
+            material=material,
+            start_offset=start_offset,
+            end_offset=end_offset,
+            defaults={
+                "topic": topic,
+                "chunk": chunk,
+                "source_text": source_text,
+            },
+        )
+        return Response(
+            {"highlight": highlight.id, "created": created},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 
 
@@ -121,6 +239,24 @@ class QuestionViewSet(viewsets.ModelViewSet):
                 "task": AITaskSerializer(task).data,
             },
             status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class ConceptViewSet(viewsets.ModelViewSet):
+    queryset = Concept.objects.select_related("topic", "source_task").prefetch_related(
+        "anchors__material", "anchors__chunk"
+    )
+    serializer_class = ConceptSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        topic_id = self.request.query_params.get("topic")
+        return queryset.filter(topic_id=topic_id) if topic_id else queryset
+
+    def create(self, request, *args, **kwargs):
+        return Response(
+            {"detail": "请从话题阅读上下文创建概念。"},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
         )
 
 
@@ -293,13 +429,13 @@ class ReviewRecordViewSet(viewsets.ReadOnlyModelViewSet):
 
 class AITaskViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AITask.objects.select_related(
-        "topic", "material", "question", "exam", "review"
+        "topic", "material", "question", "concept", "exam", "review"
     )
     serializer_class = AITaskSerializer
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        for field in ("topic", "material", "question", "exam", "review"):
+        for field in ("topic", "material", "question", "concept", "exam", "review"):
             value = self.request.query_params.get(field)
             if value:
                 queryset = queryset.filter(**{f"{field}_id": value})

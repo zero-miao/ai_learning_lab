@@ -16,6 +16,7 @@ def enqueue_or_reuse(
     topic=None,
     material=None,
     question=None,
+    concept=None,
     exam=None,
     review=None,
     input_json=None,
@@ -27,6 +28,8 @@ def enqueue_or_reuse(
         filters["topic"] = topic
     if question is not None:
         filters["question"] = question
+    if concept is not None:
+        filters["concept"] = concept
     if exam is not None:
         filters["exam"] = exam
     if review is not None:
@@ -42,6 +45,7 @@ def enqueue_or_reuse(
             topic=topic,
             material=material,
             question=question,
+            concept=concept,
             exam=exam,
             review=review,
             input_json=input_json or {},
@@ -109,7 +113,13 @@ def claim_due_task():
 
 def execute_task(task_id):
     task = AITask.objects.select_related(
-        "topic", "material", "question", "exam__topic", "review__topic", "review__exam"
+        "topic",
+        "material",
+        "question",
+        "concept__topic",
+        "exam__topic",
+        "review__topic",
+        "review__exam",
     ).get(pk=task_id)
     try:
         result = _run_task(task)
@@ -130,6 +140,8 @@ def _run_task(task):
         return _generate_briefing(task)
     if task.task_type == "answer_question":
         return _answer_question(task)
+    if task.task_type == "concept_draft":
+        return _generate_concept_draft(task)
     if task.task_type == "note_draft":
         return _generate_note_draft(task)
     if task.task_type == "generate_exam":
@@ -172,6 +184,36 @@ def _answer_question(task):
         model=task.model,
     )
     return {"ai_response_id": response.id, "question_id": question.id}
+
+
+def _generate_concept_draft(task):
+    concept = task.concept
+    if concept is None:
+        raise ValueError("概念不存在。")
+    source_text = str(task.input_json.get("source_text", "")).strip()
+    context = str(task.input_json.get("context", "")).strip()
+    if not source_text or not context:
+        raise ValueError("概念草稿缺少来源文本或材料上下文。")
+
+    draft = AIGateway.generate_concept_draft(concept.title, source_text, context)
+    concept.definition = draft["definition"]
+    concept.principle = draft["principle"]
+    concept.pitfalls = draft["pitfalls"]
+    concept.applications = draft["applications"]
+    concept.status = "draft"
+    concept.source_task = task
+    concept.save(
+        update_fields=[
+            "definition",
+            "principle",
+            "pitfalls",
+            "applications",
+            "status",
+            "source_task",
+            "updated_at",
+        ]
+    )
+    return {"concept_id": concept.id, **draft}
 
 
 def _generate_note_draft(task):

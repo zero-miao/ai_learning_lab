@@ -3,8 +3,11 @@ from rest_framework import serializers
 from .models import (
     AIResponse,
     AITask,
+    Concept,
+    ConceptAnchor,
     Exam,
     ExamQuestion,
+    Highlight,
     Material,
     MaterialChunk,
     Note,
@@ -48,6 +51,70 @@ class QuestionSerializer(serializers.ModelSerializer):
             "ai_responses",
         ]
         read_only_fields = ["created_at"]
+
+
+class ConceptAnchorSerializer(serializers.ModelSerializer):
+    material_title = serializers.CharField(source="material.title", read_only=True)
+
+    class Meta:
+        model = ConceptAnchor
+        fields = [
+            "id",
+            "material",
+            "material_title",
+            "chunk",
+            "source_text",
+            "start_offset",
+            "end_offset",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class ConceptSerializer(serializers.ModelSerializer):
+    anchors = ConceptAnchorSerializer(many=True, read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = Concept
+        fields = [
+            "id",
+            "topic",
+            "title",
+            "definition",
+            "principle",
+            "pitfalls",
+            "applications",
+            "status",
+            "status_display",
+            "source_task",
+            "anchors",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "topic",
+            "source_task",
+            "anchors",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class HighlightSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Highlight
+        fields = [
+            "id",
+            "topic",
+            "material",
+            "chunk",
+            "source_text",
+            "start_offset",
+            "end_offset",
+            "created_at",
+        ]
+        read_only_fields = fields
 
 
 class MaterialChunkSerializer(serializers.ModelSerializer):
@@ -118,6 +185,8 @@ class TopicSerializer(serializers.ModelSerializer):
     )
     materials = MaterialSerializer(many=True, read_only=True)
     notes = NoteSerializer(many=True, read_only=True)
+    concepts = ConceptSerializer(many=True, read_only=True)
+    highlights = HighlightSerializer(many=True, read_only=True)
     has_current_note = serializers.SerializerMethodField()
 
     def get_has_current_note(self, topic):
@@ -141,6 +210,8 @@ class TopicSerializer(serializers.ModelSerializer):
             "updated_at",
             "materials",
             "notes",
+            "concepts",
+            "highlights",
             "has_current_note",
         ]
         read_only_fields = ["created_at", "updated_at"]
@@ -250,6 +321,7 @@ class AITaskSerializer(serializers.ModelSerializer):
             "topic",
             "material",
             "question",
+            "concept",
             "exam",
             "review",
             "result_json",

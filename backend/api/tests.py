@@ -5,7 +5,19 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from .models import AIResponse, AITask, Exam, Material, Note, ReviewRecord, Topic
+from .models import (
+    AIResponse,
+    AITask,
+    Concept,
+    ConceptAnchor,
+    Exam,
+    Highlight,
+    Material,
+    MaterialChunk,
+    Note,
+    ReviewRecord,
+    Topic,
+)
 from .task_service import execute_task, recover_interrupted_tasks
 
 
@@ -66,6 +78,112 @@ class AsyncTaskApiTests(TestCase):
         self.assertEqual(material_response.status_code, 201)
         self.assertEqual(material_response.data["source_type"], "ai_recommended")
         self.assertEqual(material_response.data["source_type_display"], "AI 推荐")
+
+    @patch("api.task_service.AIGateway.generate_concept_draft")
+    def test_concept_draft_worker_persists_anchor_and_allows_confirmation(
+        self, generate_concept_draft
+    ):
+        MaterialChunk.objects.create(
+            material=self.material,
+            chunk_index=0,
+            content=self.material.clean_text,
+            start_offset=0,
+            end_offset=len(self.material.clean_text),
+        )
+        start_offset = self.material.clean_text.index("QuerySet")
+        end_offset = start_offset + len("QuerySet")
+        generate_concept_draft.return_value = {
+            "definition": "可组合的查询对象。",
+            "principle": "查询条件以惰性方式累积。",
+            "pitfalls": "不要误以为每次链式调用都会立即查询数据库。",
+            "applications": "用于逐步构建数据库查询。",
+        }
+
+        response = self.client.post(
+            f"/api/topics/{self.topic.id}/concepts/",
+            {
+                "title": "QuerySet",
+                "material": self.material.id,
+                "start_offset": start_offset,
+                "end_offset": end_offset,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(response.data["created"])
+        concept = Concept.objects.get(pk=response.data["concept"]["id"])
+        self.assertEqual(concept.status, "draft")
+        anchor = ConceptAnchor.objects.get(concept=concept)
+        self.assertEqual(anchor.source_text, "QuerySet")
+        self.assertEqual(anchor.start_offset, start_offset)
+        self.assertIsNotNone(anchor.chunk)
+        task = AITask.objects.get(pk=response.data["task"]["id"])
+        self.assertEqual(task.task_type, "concept_draft")
+        self.assertEqual(task.concept_id, concept.id)
+        task.status = "running"
+        task.attempt_count = 1
+        task.save()
+
+        execute_task(task.id)
+
+        concept.refresh_from_db()
+        self.assertEqual(
+            concept.definition, generate_concept_draft.return_value["definition"]
+        )
+        self.assertEqual(concept.source_task_id, task.id)
+        confirm_response = self.client.patch(
+            f"/api/concepts/{concept.id}/",
+            {"status": "confirmed", "definition": "用户确认后的定义。"},
+            format="json",
+        )
+        self.assertEqual(confirm_response.status_code, 200)
+        concept.refresh_from_db()
+        self.assertEqual(concept.status, "confirmed")
+        self.assertEqual(concept.definition, "用户确认后的定义。")
+
+        repeated_response = self.client.post(
+            f"/api/topics/{self.topic.id}/concepts/",
+            {
+                "title": "QuerySet",
+                "material": self.material.id,
+                "start_offset": start_offset,
+                "end_offset": end_offset,
+            },
+            format="json",
+        )
+        self.assertEqual(repeated_response.status_code, 202)
+        self.assertFalse(repeated_response.data["created"])
+        self.assertEqual(Concept.objects.filter(topic=self.topic).count(), 1)
+        self.assertEqual(ConceptAnchor.objects.filter(concept=concept).count(), 1)
+
+    def test_highlight_uses_server_derived_anchor_text(self):
+        start_offset = self.material.clean_text.index("Django")
+        end_offset = start_offset + len("Django ORM")
+        response = self.client.post(
+            f"/api/topics/{self.topic.id}/highlights/",
+            {
+                "material": self.material.id,
+                "start_offset": start_offset,
+                "end_offset": end_offset,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        highlight = Highlight.objects.get(pk=response.data["highlight"])
+        self.assertEqual(highlight.source_text, "Django ORM")
+        self.assertEqual(highlight.topic_id, self.topic.id)
+
+        invalid_response = self.client.post(
+            f"/api/topics/{self.topic.id}/highlights/",
+            {
+                "material": self.material.id,
+                "start_offset": -1,
+                "end_offset": 2,
+            },
+            format="json",
+        )
+        self.assertEqual(invalid_response.status_code, 400)
 
     def test_exam_request_returns_reused_pending_task(self):
         first = self.client.post("/api/exams/", {"topic": self.topic.id}, format="json")

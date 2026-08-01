@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     AITaskViewSet,
+    ConceptViewSet,
     ExamViewSet,
     MaterialViewSet,
     NoteViewSet,
@@ -16,6 +17,7 @@ router = DefaultRouter()
 router.register(r"topics", TopicViewSet)
 router.register(r"materials", MaterialViewSet)
 router.register(r"questions", QuestionViewSet)
+router.register(r"concepts", ConceptViewSet)
 router.register(r"notes", NoteViewSet)
 router.register(r"exams", ExamViewSet)
 router.register(r"reviews", ReviewRecordViewSet)

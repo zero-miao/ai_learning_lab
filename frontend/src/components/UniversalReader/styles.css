@@ -59,6 +59,38 @@
   background: #1554ad;
 }
 
+.universal-reader__highlight {
+  padding: 0 0.08em;
+  color: inherit;
+  background: #fff1b8;
+  border-radius: 2px;
+}
+
+.universal-reader--dark .universal-reader__highlight {
+  background: #614700;
+}
+
+.universal-reader__selection-menu {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.16);
+}
+
+.universal-reader--dark .universal-reader__selection-menu {
+  background: #27272a;
+  border-color: #52525b;
+}
+
+.universal-reader--dark .universal-reader__selection-menu .ant-btn {
+  color: #e5e7eb;
+}
+
 @media (max-width: 640px) {
   .universal-reader__header {
     flex-direction: column;
@@ -67,5 +99,10 @@
   .universal-reader__content {
     font-size: 18px;
     line-height: 1.8;
+  }
+
+  .universal-reader__selection-menu {
+    max-width: calc(100vw - 24px);
+    overflow-x: auto;
   }
 }

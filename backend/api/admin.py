@@ -3,8 +3,11 @@ from django.contrib import admin
 from .models import (
     AIResponse,
     AITask,
+    Concept,
+    ConceptAnchor,
     Exam,
     ExamQuestion,
+    Highlight,
     Material,
     MaterialChunk,
     Note,
@@ -56,6 +59,42 @@ class QuestionAdmin(admin.ModelAdmin):
     search_fields = ("question_text", "selected_text")
 
 
+@admin.register(Concept)
+class ConceptAdmin(admin.ModelAdmin):
+    list_display = ("title", "topic", "status", "source_task", "updated_at")
+    list_filter = ("status", "topic")
+    search_fields = ("title", "definition", "principle", "topic__title")
+    readonly_fields = ("source_task", "created_at", "updated_at")
+
+
+@admin.register(ConceptAnchor)
+class ConceptAnchorAdmin(admin.ModelAdmin):
+    list_display = (
+        "concept",
+        "material",
+        "chunk",
+        "start_offset",
+        "end_offset",
+        "created_at",
+    )
+    list_filter = ("material",)
+    search_fields = ("concept__title", "source_text", "material__title")
+
+
+@admin.register(Highlight)
+class HighlightAdmin(admin.ModelAdmin):
+    list_display = (
+        "topic",
+        "material",
+        "chunk",
+        "start_offset",
+        "end_offset",
+        "created_at",
+    )
+    list_filter = ("topic", "material")
+    search_fields = ("source_text", "material__title")
+
+
 @admin.register(Note)
 class NoteAdmin(admin.ModelAdmin):
     list_display = ("title", "topic", "source_task", "created_at", "updated_at")
@@ -80,6 +119,7 @@ class AITaskAdmin(admin.ModelAdmin):
         "topic",
         "material",
         "question",
+        "concept",
         "exam",
         "review",
         "attempt_count",
