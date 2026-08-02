@@ -280,6 +280,7 @@ class TopicSerializer(serializers.ModelSerializer):
     materials = MaterialSerializer(many=True, read_only=True)
     notes = NoteSerializer(many=True, read_only=True)
     concepts = ConceptSerializer(many=True, read_only=True)
+    questions = QuestionSerializer(many=True, read_only=True)
     concept_relations = ConceptRelationSerializer(many=True, read_only=True)
     highlights = HighlightSerializer(many=True, read_only=True)
     learning_output = serializers.SerializerMethodField()
@@ -318,6 +319,7 @@ class TopicSerializer(serializers.ModelSerializer):
             "materials",
             "notes",
             "concepts",
+            "questions",
             "concept_relations",
             "highlights",
             "learning_output",

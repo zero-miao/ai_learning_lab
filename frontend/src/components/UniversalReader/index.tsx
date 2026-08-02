@@ -8,7 +8,7 @@ import {
   SunOutlined,
 } from '@ant-design/icons';
 import { Button, Divider, Space, Tag, Typography } from 'antd';
-import type { Highlight, Material } from '../../api';
+import type { Concept, Highlight, Material, Question } from '../../api';
 import './styles.css';
 
 const { Title, Text } = Typography;
@@ -22,6 +22,8 @@ export interface TextSelectionAnchor {
 interface UniversalReaderProps {
   material: Material;
   highlights: Highlight[];
+  concepts: Concept[];
+  questions: Question[];
   darkMode: boolean;
   onDarkModeChange: (enabled: boolean) => void;
   onMarkConcept: (selection: TextSelectionAnchor) => void;
@@ -99,54 +101,105 @@ function getOffsetInElement(
   return range.toString().length;
 }
 
+type AnnotationType = 'highlight' | 'concept' | 'question';
+
+interface AnnotationRange {
+  type: AnnotationType;
+  id: number;
+  start: number;
+  end: number;
+  sourceStart: number;
+}
+
 function renderChunk(
   chunk: ReaderChunk,
   highlights: Highlight[],
+  concepts: Concept[],
+  questions: Question[],
 ) {
-  const ranges = highlights
-    .filter(
-      (highlight) =>
-        highlight.start_offset < chunk.endOffset &&
-        highlight.end_offset > chunk.startOffset,
-    )
-    .map((highlight) => ({
-      start: Math.max(0, highlight.start_offset - chunk.startOffset),
-      end: Math.min(chunk.content.length, highlight.end_offset - chunk.startOffset),
+  const ranges: AnnotationRange[] = [
+    ...highlights.map((highlight) => ({
+      type: 'highlight' as const,
       id: highlight.id,
-      isAnchor:
-        highlight.start_offset >= chunk.startOffset &&
-        highlight.start_offset < chunk.endOffset,
-    }))
-    .sort((left, right) => left.start - right.start);
+      start: highlight.start_offset,
+      end: highlight.end_offset,
+      sourceStart: highlight.start_offset,
+    })),
+    ...concepts.flatMap((concept) =>
+      concept.anchors.map((anchor) => ({
+        type: 'concept' as const,
+        id: concept.id,
+        start: anchor.start_offset,
+        end: anchor.end_offset,
+        sourceStart: anchor.start_offset,
+      })),
+    ),
+    ...questions
+      .filter(
+        (question) =>
+          question.start_offset !== null && question.end_offset !== null,
+      )
+      .map((question) => ({
+        type: 'question' as const,
+        id: question.id,
+        start: question.start_offset!,
+        end: question.end_offset!,
+        sourceStart: question.start_offset!,
+      })),
+  ].filter(
+    (range) => range.start < chunk.endOffset && range.end > chunk.startOffset,
+  );
 
-  const fragments: React.ReactNode[] = [];
-  let position = 0;
-  for (const range of ranges) {
-    if (range.end <= position) continue;
-    const start = Math.max(range.start, position);
-    if (start > position) {
-      fragments.push(chunk.content.slice(position, start));
-    }
-    fragments.push(
-      <mark
-        id={range.isAnchor ? `reader-highlight-${range.id}` : undefined}
-        key={range.id}
-        className="universal-reader__highlight"
-      >
-        {chunk.content.slice(start, range.end)}
-      </mark>,
+  if (!ranges.length) return chunk.content;
+
+  const boundaries = new Set([0, chunk.content.length]);
+  ranges.forEach((range) => {
+    boundaries.add(Math.max(0, range.start - chunk.startOffset));
+    boundaries.add(Math.min(chunk.content.length, range.end - chunk.startOffset));
+  });
+  const positions = Array.from(boundaries).sort((left, right) => left - right);
+
+  return positions.slice(0, -1).map((start, index) => {
+    const end = positions[index + 1];
+    const absoluteStart = chunk.startOffset + start;
+    const activeRanges = ranges.filter(
+      (range) => range.start < chunk.startOffset + end && range.end > absoluteStart,
     );
-    position = range.end;
-  }
-  if (position < chunk.content.length) {
-    fragments.push(chunk.content.slice(position));
-  }
-  return fragments;
+    const content = chunk.content.slice(start, end);
+    if (!activeRanges.length) return content;
+
+    const anchor = (
+      ['concept', 'question', 'highlight'] as AnnotationType[]
+    )
+      .map((type) =>
+        activeRanges.find(
+          (range) =>
+            range.type === type && range.sourceStart === absoluteStart,
+        ),
+      )
+      .find(Boolean);
+    return (
+      <span
+        id={anchor ? `reader-${anchor.type}-${anchor.id}` : undefined}
+        key={`${start}-${end}`}
+        className={[
+          'universal-reader__annotation',
+          ...activeRanges.map(
+            (range) => `universal-reader__annotation--${range.type}`,
+          ),
+        ].join(' ')}
+      >
+        {content}
+      </span>
+    );
+  });
 }
 
 export default function UniversalReader({
   material,
   highlights,
+  concepts,
+  questions,
   darkMode,
   onDarkModeChange,
   onMarkConcept,
@@ -261,7 +314,7 @@ export default function UniversalReader({
             data-start-offset={chunk.startOffset}
             data-end-offset={chunk.endOffset}
           >
-            {renderChunk(chunk, highlights)}
+            {renderChunk(chunk, highlights, concepts, questions)}
           </p>
         ))}
       </div>

@@ -138,7 +138,10 @@ const TopicMap: React.FC = () => {
     if (!topic) return;
     try {
       if (editingRelation) {
-        await updateConceptRelation(editingRelation.id, values);
+        await updateConceptRelation(editingRelation.id, {
+          ...values,
+          topic: topic.id,
+        });
         message.success('概念关系已更新');
       } else {
         await createConceptRelation({
@@ -275,6 +278,8 @@ const TopicMap: React.FC = () => {
                         stroke="#94a3b8"
                         strokeWidth="2"
                         markerEnd="url(#concept-map-arrow)"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => openEditRelation(relation)}
                       />
                       <text
                         x={labelX}
@@ -282,6 +287,8 @@ const TopicMap: React.FC = () => {
                         textAnchor="middle"
                         fill="#64748b"
                         fontSize="12"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => openEditRelation(relation)}
                       >
                         {relation.relation_type}
                       </text>

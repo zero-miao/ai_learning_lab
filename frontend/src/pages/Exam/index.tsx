@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Alert, Button, Card, Descriptions, Input, Layout, Result, Space, Spin, Tag, Typography, message } from 'antd';
 import { ArrowLeftOutlined, CheckCircleOutlined, FileTextOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -19,6 +19,7 @@ const ExamPage: React.FC = () => {
   const [taskId, setTaskId] = useState<number | null>(null);
   const [taskKind, setTaskKind] = useState<'generate_exam' | 'grade_exam' | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
+  const draftSaveInFlight = useRef(false);
 
   const setLoadedExam = useCallback((nextExam: Exam) => {
     setExam(nextExam);
@@ -110,26 +111,44 @@ const ExamPage: React.FC = () => {
     }
   };
 
-  const handleSaveDraft = async () => {
+  const saveDraft = useCallback(async (notify = false) => {
     if (!exam) return;
+    if (draftSaveInFlight.current) return;
     try {
+      draftSaveInFlight.current = true;
       setSavingDraft(true);
-      const response = await saveExamAnswers(
+      await saveExamAnswers(
         exam.id,
         exam.questions.map((question) => ({
           id: question.id,
           answer_text: answers[question.id] ?? '',
         })),
       );
-      setLoadedExam(response.data);
-      message.success('答题草稿已保存，下次可继续作答');
+      if (notify) message.success('答题草稿已保存，下次可继续作答');
     } catch (error) {
       console.error('Failed to save exam draft:', error);
-      message.error('保存答题草稿失败');
+      if (notify) message.error('保存答题草稿失败');
     } finally {
+      draftSaveInFlight.current = false;
       setSavingDraft(false);
     }
-  };
+  }, [answers, exam]);
+
+  useEffect(() => {
+    if (exam?.status !== 'draft') return;
+    const timer = window.setTimeout(() => {
+      void saveDraft();
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [answers, exam?.status, saveDraft]);
+
+  useEffect(() => {
+    if (exam?.status !== 'draft') return;
+    const timer = window.setInterval(() => {
+      void saveDraft();
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [exam?.status, saveDraft]);
 
   const handleRetry = async () => {
     if (!task) return;
@@ -197,7 +216,7 @@ const ExamPage: React.FC = () => {
             </Card>
           ))}
           <Space>
-            <Button loading={savingDraft} onClick={() => void handleSaveDraft()}>
+            <Button loading={savingDraft} onClick={() => void saveDraft(true)}>
               保存草稿
             </Button>
             <Button type="primary" size="large" onClick={() => void handleSubmit()}>

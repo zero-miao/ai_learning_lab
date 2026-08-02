@@ -96,6 +96,11 @@ class AsyncTaskApiTests(TestCase):
         self.assertTrue(question.is_saved)
         self.assertEqual(question.concept_id, concept.id)
         self.assertIsNotNone(question.saved_at)
+        topic_response = self.client.get(f"/api/topics/{self.topic.id}/")
+        self.assertEqual(len(topic_response.data["questions"]), 1)
+        self.assertEqual(
+            topic_response.data["questions"][0]["start_offset"], start_offset
+        )
 
     def test_concept_relation_requires_concepts_from_same_topic(self):
         query_set = Concept.objects.create(topic=self.topic, title="QuerySet")

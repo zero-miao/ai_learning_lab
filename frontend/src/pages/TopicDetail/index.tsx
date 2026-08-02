@@ -6,6 +6,7 @@ import {
   Button,
   Space,
   Card,
+  Divider,
   Descriptions,
   Tag,
   List,
@@ -170,6 +171,41 @@ const TopicDetail: React.FC = () => {
               suffix="个"
             />
           </Space>
+          <Divider style={{ margin: '20px 0 12px' }} />
+          <List
+            size="small"
+            dataSource={topic.questions.filter((question) => question.is_saved)}
+            locale={{ emptyText: '还没有已沉淀问答。' }}
+            renderItem={(question) => (
+              <List.Item
+                actions={
+                  question.material && question.start_offset !== null
+                    ? [
+                        <Button
+                          key="source"
+                          type="link"
+                          onClick={() =>
+                            navigate(
+                              `/topics/${topic.id}/materials/${question.material}?anchor=${question.start_offset}`,
+                            )
+                          }
+                        >
+                          查看原文
+                        </Button>,
+                      ]
+                    : undefined
+                }
+              >
+                <List.Item.Meta
+                  title={question.question_text}
+                  description={
+                    question.ai_responses[0]?.content ||
+                    'AI 回答仍在生成或不可用。'
+                  }
+                />
+              </List.Item>
+            )}
+          />
         </Card>
 
         <Card

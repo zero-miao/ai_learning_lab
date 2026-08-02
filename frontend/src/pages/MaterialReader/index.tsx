@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
   Button,
-  Card,
+  Collapse,
   Divider,
   Dropdown,
   Drawer,
@@ -16,13 +16,12 @@ import {
   Modal,
   Popconfirm,
   Space,
+  Tabs,
   Typography,
 } from 'antd';
 import {
+  AppstoreOutlined,
   ArrowLeftOutlined,
-  BookOutlined,
-  CommentOutlined,
-  HighlightOutlined,
   ReloadOutlined,
   SendOutlined,
 } from '@ant-design/icons';
@@ -31,13 +30,11 @@ import {
   createHighlight,
   createQuestion,
   deleteHighlight,
-  getConcept,
   getQuestion,
   getTopic,
   listAITasks,
   retryAITask,
   saveQuestion,
-  updateConcept,
 } from '../../api';
 import type { AITask, Concept, Material, Topic } from '../../api';
 import UniversalReader from '../../components/UniversalReader';
@@ -59,11 +56,47 @@ type ChatItem = {
 
 interface ConceptFormValues {
   title: string;
-  definition?: string;
-  principle?: string;
-  pitfalls?: string;
-  applications?: string;
 }
+
+function renderMarkdownInline(text: string): React.ReactNode[] {
+  return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <Typography.Text code key={index}>{part.slice(1, -1)}</Typography.Text>;
+    }
+    return part;
+  });
+}
+
+const MarkdownBriefing: React.FC<{ content: string }> = ({ content }) => {
+  const lines = content.split('\n');
+  return (
+    <div className="reader-briefing__markdown">
+      {lines.map((line, index) => {
+        if (!line.trim()) return null;
+        if (line.startsWith('### ')) {
+          return <Typography.Title key={index} level={5}>{renderMarkdownInline(line.slice(4))}</Typography.Title>;
+        }
+        if (line.startsWith('## ')) {
+          return <Typography.Title key={index} level={4}>{renderMarkdownInline(line.slice(3))}</Typography.Title>;
+        }
+        if (line.startsWith('# ')) {
+          return <Typography.Title key={index} level={3}>{renderMarkdownInline(line.slice(2))}</Typography.Title>;
+        }
+        if (/^[-*] /.test(line)) {
+          return <li key={index}>{renderMarkdownInline(line.slice(2))}</li>;
+        }
+        return (
+          <Typography.Paragraph key={index}>
+            {renderMarkdownInline(line)}
+          </Typography.Paragraph>
+        );
+      })}
+    </div>
+  );
+};
 
 const MaterialReader: React.FC = () => {
   const { topicId, materialId } = useParams<{
@@ -76,7 +109,8 @@ const MaterialReader: React.FC = () => {
   const [selectedText, setSelectedText] = useState('');
   const [selectedAnchor, setSelectedAnchor] =
     useState<TextSelectionAnchor | null>(null);
-  const [chatVisible, setChatVisible] = useState(false);
+  const [assistantVisible, setAssistantVisible] = useState(false);
+  const [assistantTab, setAssistantTab] = useState('questions');
   const [question, setQuestion] = useState('');
   const [chatHistory, setChatHistory] = useState<ChatItem[]>([]);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
@@ -85,19 +119,33 @@ const MaterialReader: React.FC = () => {
   const [conceptModalOpen, setConceptModalOpen] = useState(false);
   const [conceptSelection, setConceptSelection] =
     useState<TextSelectionAnchor | null>(null);
-  const [conceptDraft, setConceptDraft] = useState<Concept | null>(null);
-  const [conceptTaskId, setConceptTaskId] = useState<number | null>(null);
   const [conceptSaving, setConceptSaving] = useState(false);
   const [conceptForm] = Form.useForm<ConceptFormValues>();
-  const [highlightsVisible, setHighlightsVisible] = useState(false);
-  const [conceptsVisible, setConceptsVisible] = useState(false);
+  const [pendingConceptIds, setPendingConceptIds] = useState<Set<number>>(
+    new Set(),
+  );
   const navigate = useNavigate();
   const location = useLocation();
 
   const loadData = useCallback(async () => {
     if (!topicId || !materialId) return;
-    const response = await getTopic(Number(topicId));
+    const [response, tasksResponse] = await Promise.all([
+      getTopic(Number(topicId)),
+      listAITasks({ topic: Number(topicId) }),
+    ]);
     setTopic(response.data);
+    setPendingConceptIds(
+      new Set(
+        tasksResponse.data
+          .filter(
+            (task) =>
+              task.task_type === 'concept_draft' &&
+              (task.status === 'pending' || task.status === 'running') &&
+              task.concept !== null,
+          )
+          .map((task) => task.concept!),
+      ),
+    );
     const nextMaterial =
       response.data.materials.find((item) => item.id === Number(materialId)) ??
       null;
@@ -156,30 +204,6 @@ const MaterialReader: React.FC = () => {
     onFailed: handleTaskFailure,
   });
 
-  const conceptTask = useAITaskPolling(conceptTaskId, {
-    onSucceeded: async (task) => {
-      const conceptId = task.result_json.concept_id;
-      if (typeof conceptId !== 'number') {
-        message.error('概念草稿任务未返回概念数据。');
-        return;
-      }
-      try {
-        const response = await getConcept(conceptId);
-        await loadData();
-        message.success(`概念草稿“${response.data.title}”已生成`);
-      } catch (error) {
-        console.error('Failed to load concept draft:', error);
-        message.error('加载概念草稿失败');
-      } finally {
-        setConceptTaskId(null);
-      }
-    },
-    onFailed: (task) => {
-      message.error(task.error_message || '概念草稿生成失败');
-      setConceptTaskId(null);
-    },
-  });
-
   useEffect(() => {
     setLoading(true);
     void loadData()
@@ -189,6 +213,14 @@ const MaterialReader: React.FC = () => {
       })
       .finally(() => setLoading(false));
   }, [loadData]);
+
+  useEffect(() => {
+    if (!pendingConceptIds.size) return;
+    const timer = window.setInterval(() => {
+      void loadData();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [loadData, pendingConceptIds]);
 
   useEffect(() => {
     if (!material) return;
@@ -224,7 +256,8 @@ const MaterialReader: React.FC = () => {
   const handleAskSelection = (selection: TextSelectionAnchor) => {
     setSelectedText(selection.text);
     setSelectedAnchor(selection);
-    setChatVisible(true);
+    setAssistantTab('questions');
+    setAssistantVisible(true);
   };
 
   const handleAsk = async () => {
@@ -269,14 +302,8 @@ const MaterialReader: React.FC = () => {
 
   const handleMarkConcept = (selection: TextSelectionAnchor) => {
     setConceptSelection(selection);
-    setConceptDraft(null);
-    setConceptTaskId(null);
     conceptForm.setFieldsValue({
       title: selection.text.replace(/\s+/g, ' ').trim().slice(0, 80),
-      definition: '',
-      principle: '',
-      pitfalls: '',
-      applications: '',
     });
     setConceptModalOpen(true);
   };
@@ -285,20 +312,6 @@ const MaterialReader: React.FC = () => {
     if (!topic || !material) return;
     try {
       setConceptSaving(true);
-      if (conceptDraft) {
-        const response = await updateConcept(conceptDraft.id, {
-          title: values.title,
-          definition: values.definition,
-          principle: values.principle,
-          pitfalls: values.pitfalls,
-          applications: values.applications,
-          status: 'confirmed',
-        });
-        setConceptDraft(response.data);
-        message.success('概念卡片已确认');
-        await loadData();
-        return;
-      }
       if (!conceptSelection) return;
       const response = await createConcept(topic.id, {
         title: values.title,
@@ -306,14 +319,15 @@ const MaterialReader: React.FC = () => {
         start_offset: conceptSelection.startOffset,
         end_offset: conceptSelection.endOffset,
       });
-      setConceptTaskId(response.data.task.id);
+      setPendingConceptIds((current) => new Set(current).add(response.data.concept.id));
       message.info(
         response.data.created ? '已提交概念草稿生成任务' : '已关联到已有概念，正在更新草稿',
       );
       closeConceptModal();
+      await loadData();
     } catch (error) {
       console.error('Failed to create or update concept:', error);
-      message.error(conceptDraft ? '保存概念卡片失败' : '提交概念草稿失败');
+      message.error('提交概念草稿失败');
     } finally {
       setConceptSaving(false);
     }
@@ -322,7 +336,6 @@ const MaterialReader: React.FC = () => {
   const closeConceptModal = () => {
     setConceptModalOpen(false);
     setConceptSelection(null);
-    setConceptDraft(null);
     conceptForm.resetFields();
   };
 
@@ -373,7 +386,7 @@ const MaterialReader: React.FC = () => {
       behavior: 'smooth',
       block: 'center',
     });
-    setHighlightsVisible(false);
+    setAssistantVisible(false);
   };
 
   const handleDeleteHighlight = async (highlightId: number) => {
@@ -396,10 +409,11 @@ const MaterialReader: React.FC = () => {
       return;
     }
     if (anchor.material === material?.id) {
-      document
-        .getElementById(`reader-chunk-${anchor.chunk ?? 0}`)
-        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setConceptsVisible(false);
+      const target =
+        document.getElementById(`reader-concept-${concept.id}`) ??
+        document.getElementById(`reader-chunk-${anchor.chunk ?? 0}`);
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setAssistantVisible(false);
       return;
     }
     navigate(
@@ -455,23 +469,34 @@ const MaterialReader: React.FC = () => {
             />
           )}
           {briefing && (
-            <Card
-              title="阅读前导"
+            <Collapse
               size="small"
               style={{ marginBottom: 20 }}
-            >
-              <Typography.Paragraph
-                style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}
-              >
-                {briefing.content}
-              </Typography.Paragraph>
-            </Card>
+              items={[
+                {
+                  key: 'briefing',
+                  label: '阅读前导',
+                  children: <MarkdownBriefing content={briefing.content} />,
+                },
+              ]}
+            />
           )}
           <UniversalReader
             material={material}
             highlights={topic?.highlights.filter(
               (highlight) => highlight.material === material.id,
             ) ?? []}
+            concepts={(topic?.concepts ?? [])
+              .map((concept) => ({
+                ...concept,
+                anchors: concept.anchors.filter(
+                  (anchor) => anchor.material === material.id,
+                ),
+              }))
+              .filter((concept) => concept.anchors.length > 0)}
+            questions={(topic?.questions ?? []).filter(
+              (question) => question.material === material.id,
+            )}
             darkMode={darkMode}
             onDarkModeChange={setDarkMode}
             onMarkConcept={handleMarkConcept}
@@ -482,14 +507,24 @@ const MaterialReader: React.FC = () => {
       </Content>
 
       <Drawer
-        title="AI 学习助手"
+        title="学习助手"
         placement="right"
         width={400}
-        onClose={() => setChatVisible(false)}
-        open={chatVisible}
+        onClose={() => setAssistantVisible(false)}
+        open={assistantVisible}
         mask={false}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <Tabs
+          activeKey={assistantTab}
+          onChange={setAssistantTab}
+          items={[
+            { key: 'questions', label: '问答' },
+            { key: 'concepts', label: '概念' },
+            { key: 'highlights', label: '高亮' },
+          ]}
+        />
+        {assistantTab === 'questions' && (
+          <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100% - 48px)' }}>
           <div style={{ flex: 1, overflowY: 'auto', marginBottom: 16 }}>
             <List
               dataSource={chatHistory}
@@ -630,16 +665,9 @@ const MaterialReader: React.FC = () => {
               onClick={() => void handleAsk()}
             />
           </Space.Compact>
-        </div>
-      </Drawer>
-
-      <Drawer
-        title="概念列表"
-        placement="right"
-        width={400}
-        onClose={() => setConceptsVisible(false)}
-        open={conceptsVisible}
-      >
+          </div>
+        )}
+      {assistantVisible && assistantTab === 'concepts' && (
         <List
           dataSource={topic?.concepts ?? []}
           locale={{ emptyText: '从阅读中标记概念后，会在这里集中显示。' }}
@@ -660,9 +688,17 @@ const MaterialReader: React.FC = () => {
                   <Space size={6}>
                     <span>{concept.title}</span>
                     <Typography.Text
-                      type={concept.status === 'confirmed' ? 'success' : 'secondary'}
+                      type={
+                        pendingConceptIds.has(concept.id)
+                          ? 'warning'
+                          : concept.status === 'confirmed'
+                            ? 'success'
+                            : 'secondary'
+                      }
                     >
-                      {concept.status_display}
+                      {pendingConceptIds.has(concept.id)
+                        ? '草稿生成中'
+                        : concept.status_display}
                     </Typography.Text>
                   </Space>
                 }
@@ -675,15 +711,9 @@ const MaterialReader: React.FC = () => {
             </List.Item>
           )}
         />
-      </Drawer>
+      )}
 
-      <Drawer
-        title="高亮片段"
-        placement="right"
-        width={400}
-        onClose={() => setHighlightsVisible(false)}
-        open={highlightsVisible}
-      >
+      {assistantVisible && assistantTab === 'highlights' && (
         <List
           dataSource={(topic?.highlights ?? []).filter(
             (highlight) => highlight.material === material.id,
@@ -724,18 +754,19 @@ const MaterialReader: React.FC = () => {
             </List.Item>
           )}
         />
+      )}
       </Drawer>
 
       <Modal
-        title={conceptDraft ? '概念草稿' : '标记为概念'}
+        title="标记为概念"
         open={conceptModalOpen}
         onCancel={closeConceptModal}
         onOk={() => conceptForm.submit()}
         confirmLoading={conceptSaving}
-        okText={conceptDraft ? '确认概念卡片' : '后台生成草稿'}
+        okText="后台生成草稿"
         width={680}
       >
-        {conceptSelection && !conceptDraft && (
+        {conceptSelection && (
           <Alert
             type="info"
             showIcon
@@ -756,40 +787,14 @@ const MaterialReader: React.FC = () => {
           >
             <Input />
           </Form.Item>
-          {conceptDraft && !conceptTask && (
-            <>
-              <Form.Item name="definition" label="定义">
-                <Input.TextArea rows={3} />
-              </Form.Item>
-              <Form.Item name="principle" label="原理">
-                <Input.TextArea rows={3} />
-              </Form.Item>
-              <Form.Item name="pitfalls" label="易错点">
-                <Input.TextArea rows={3} />
-              </Form.Item>
-              <Form.Item name="applications" label="适用场景">
-                <Input.TextArea rows={3} />
-              </Form.Item>
-            </>
-          )}
         </Form>
       </Modal>
 
       <FloatButton
-        icon={<BookOutlined />}
-        style={{ right: 24, bottom: 164 }}
-        onClick={() => setConceptsVisible(true)}
-      />
-      <FloatButton
-        icon={<HighlightOutlined />}
-        style={{ right: 24, bottom: 94 }}
-        onClick={() => setHighlightsVisible(true)}
-      />
-      <FloatButton
-        icon={<CommentOutlined />}
+        icon={<AppstoreOutlined />}
         type="primary"
         style={{ right: 24 }}
-        onClick={() => setChatVisible(!chatVisible)}
+        onClick={() => setAssistantVisible(!assistantVisible)}
         badge={{ dot: selectedText !== '' }}
       />
     </Layout>

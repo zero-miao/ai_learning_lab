@@ -59,6 +59,7 @@ export interface Topic {
   materials: Material[];
   notes: Note[];
   concepts: Concept[];
+  questions: Question[];
   concept_relations: ConceptRelation[];
   highlights: Highlight[];
   learning_output: LearningOutput;
