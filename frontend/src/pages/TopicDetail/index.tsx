@@ -6,7 +6,6 @@ import {
   Button,
   Space,
   Card,
-  Divider,
   Descriptions,
   Tag,
   List,
@@ -15,7 +14,6 @@ import {
   Input,
   Popconfirm,
   Radio,
-  Statistic,
   Tabs,
   message,
 } from 'antd';
@@ -24,6 +22,7 @@ import {
   ApartmentOutlined,
   BookOutlined,
   DeleteOutlined,
+  EyeOutlined,
   FormOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
@@ -164,30 +163,11 @@ const TopicDetail: React.FC = () => {
         <Card
           title="学习产出"
         >
-          <Space size="large" wrap>
-            <Statistic
-              title="概念"
-              value={topic.learning_output.concept_count}
-              suffix="个"
-            />
-            <Statistic
-              title="已沉淀问答"
-              value={topic.learning_output.saved_question_count}
-              suffix="条"
-            />
-            <Statistic
-              title="思维导图节点"
-              value={topic.learning_output.map_node_count}
-              suffix="个"
-            />
-            <Statistic title="高亮" value={topic.highlights.length} suffix="处" />
-          </Space>
-          <Divider style={{ margin: '20px 0 12px' }} />
           <Tabs
             items={[
               {
                 key: 'questions',
-                label: '问答',
+                label: `问答 ${topic.questions.filter((question) => question.is_saved).length}`,
                 children: (
                   <List
                     size="small"
@@ -197,12 +177,12 @@ const TopicDetail: React.FC = () => {
                       <List.Item
                         actions={[
                           question.material && question.start_offset !== null ? (
-                            <Button key="source" type="link" onClick={() => navigate(`/topics/${topic.id}/materials/${question.material}?anchor=${question.start_offset}&question=${question.id}`)}>
+                            <Button key="source" type="link" icon={<EyeOutlined />} onClick={() => navigate(`/topics/${topic.id}/materials/${question.material}?anchor=${question.start_offset}&question=${question.id}`)}>
                               查看原文
                             </Button>
                           ) : null,
                           <Popconfirm key="delete" title="删除这条问答？" okText="删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void handleDeleteQuestion(question.id)}>
-                            <Button type="link" danger>删除</Button>
+                            <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
                           </Popconfirm>,
                         ]}
                       >
@@ -214,7 +194,7 @@ const TopicDetail: React.FC = () => {
               },
               {
                 key: 'concepts',
-                label: '概念',
+                label: `概念 ${topic.concepts.length}`,
                 children: (
                   <List
                     size="small"
@@ -223,7 +203,7 @@ const TopicDetail: React.FC = () => {
                     renderItem={(concept) => {
                       const anchor = concept.anchors[0];
                       return (
-                        <List.Item actions={anchor ? [<Button key="source" type="link" onClick={() => navigate(`/topics/${topic.id}/materials/${anchor.material}?anchor=${anchor.start_offset}`)}>查看原文</Button>] : undefined}>
+                        <List.Item actions={anchor ? [<Button key="source" type="link" icon={<EyeOutlined />} onClick={() => navigate(`/topics/${topic.id}/materials/${anchor.material}?anchor=${anchor.start_offset}`)}>查看原文</Button>] : undefined}>
                           <List.Item.Meta title={concept.title} description={concept.definition || '概念草稿正在生成或等待补全。'} />
                         </List.Item>
                       );
@@ -233,15 +213,15 @@ const TopicDetail: React.FC = () => {
               },
               {
                 key: 'highlights',
-                label: '高亮',
+                label: `高亮 ${topic.highlights.length}`,
                 children: (
                   <List
                     size="small"
                     dataSource={topic.highlights}
                     locale={{ emptyText: '还没有高亮。' }}
                     renderItem={(highlight) => (
-                      <List.Item actions={[<Button key="source" type="link" onClick={() => navigate(`/topics/${topic.id}/materials/${highlight.material}?anchor=${highlight.start_offset}`)}>查看原文</Button>]}>
-                        <Typography.Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0 }}>{highlight.source_text}</Typography.Paragraph>
+                      <List.Item actions={[<Button key="source" type="link" icon={<EyeOutlined />} onClick={() => navigate(`/topics/${topic.id}/materials/${highlight.material}?anchor=${highlight.start_offset}`)}>查看原文</Button>]}>
+                        <Typography.Paragraph style={{ margin: 0 }}>{highlight.source_text}</Typography.Paragraph>
                       </List.Item>
                     )}
                   />

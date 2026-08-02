@@ -22,6 +22,10 @@ import {
 import {
   AppstoreOutlined,
   ArrowLeftOutlined,
+  CheckOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  EyeOutlined,
   ReloadOutlined,
   SendOutlined,
 } from '@ant-design/icons';
@@ -880,6 +884,7 @@ const MaterialReader: React.FC = () => {
                 <Button
                   key="source"
                   type="link"
+                  icon={<EyeOutlined />}
                   disabled={item.start_offset === null}
                   onClick={() => handleJumpToQuestion(item.id)}
                 >
@@ -894,6 +899,7 @@ const MaterialReader: React.FC = () => {
                   onConfirm={() => void handleDeleteQuestion(item.id)}
                 >
                   <Button type="link" danger>
+                    <DeleteOutlined />
                     删除
                   </Button>
                 </Popconfirm>,
@@ -926,6 +932,7 @@ const MaterialReader: React.FC = () => {
                   <Button
                     key="source"
                     type="link"
+                    icon={<EyeOutlined />}
                     onClick={() => handleJumpToConcept(concept)}
                   >
                     查看来源
@@ -934,12 +941,12 @@ const MaterialReader: React.FC = () => {
                     key="more"
                     menu={{
                       items: [
-                        { key: 'edit', label: '编辑概念' },
+                        { key: 'edit', label: '编辑概念', icon: <EditOutlined /> },
                         ...(concept.status === 'draft' &&
                         !pendingConceptIds.has(concept.id)
-                          ? [{ key: 'confirm', label: '确认概念' }]
+                          ? [{ key: 'confirm', label: '确认概念', icon: <CheckOutlined /> }]
                           : []),
-                        { key: 'delete', label: '删除概念', danger: true },
+                        { key: 'delete', label: '删除概念', icon: <DeleteOutlined />, danger: true },
                       ],
                       onClick: ({ key }) => {
                         if (key === 'edit') openConceptEditor(concept);
@@ -974,7 +981,7 @@ const MaterialReader: React.FC = () => {
                     </Space>
                   }
                   description={
-                    <Typography.Paragraph ellipsis={{ rows: 3 }}>
+                    <Typography.Paragraph>
                       {concept.definition || '概念草稿正在等待补全。'}
                     </Typography.Paragraph>
                   }
@@ -1003,6 +1010,7 @@ const MaterialReader: React.FC = () => {
                 <Button
                   key="jump"
                   type="link"
+                  icon={<EyeOutlined />}
                   onClick={() => handleJumpToHighlight(highlight.id)}
                 >
                   查看原文
@@ -1015,7 +1023,7 @@ const MaterialReader: React.FC = () => {
                   cancelText="取消"
                   onConfirm={() => void handleDeleteHighlight(highlight.id)}
                 >
-                  <Button type="link" danger>
+                  <Button type="link" danger icon={<DeleteOutlined />}>
                     删除
                   </Button>
                 </Popconfirm>,
@@ -1024,7 +1032,7 @@ const MaterialReader: React.FC = () => {
               <List.Item.Meta
                 title={`高亮于 ${new Date(highlight.created_at).toLocaleString()}`}
                 description={
-                  <Typography.Paragraph ellipsis={{ rows: 3 }}>
+                  <Typography.Paragraph>
                     {highlight.source_text}
                   </Typography.Paragraph>
                 }
