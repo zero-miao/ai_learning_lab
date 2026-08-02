@@ -282,6 +282,22 @@ const MaterialReader: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    if (!assistantVisible) return;
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (
+        !target.closest('.ant-drawer') &&
+        !target.closest('.ant-float-btn') &&
+        !target.closest('.universal-reader__selection-menu')
+      ) {
+        setAssistantVisible(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [assistantVisible]);
+
+  useEffect(() => {
     if (!pendingConceptIds.size) return;
     const timer = window.setInterval(() => {
       void loadData();
@@ -477,7 +493,7 @@ const MaterialReader: React.FC = () => {
       setAssistantTab('concepts');
       setSelectedConceptId(id);
     } else if (type === 'question') {
-      setAssistantTab('questions');
+      setAssistantTab('question-history');
       setSelectedQuestionId(id);
     } else {
       setAssistantTab('highlights');

@@ -16,6 +16,7 @@ import {
   Popconfirm,
   Radio,
   Statistic,
+  Tabs,
   message,
 } from 'antd';
 import {
@@ -140,7 +141,7 @@ const TopicDetail: React.FC = () => {
                 icon={<ApartmentOutlined />}
                 onClick={() => navigate(`/topics/${topic.id}/map`)}
               >
-                查看主图
+                查看思维导图
               </Button>
               <Button
                 type="primary"
@@ -175,119 +176,78 @@ const TopicDetail: React.FC = () => {
               suffix="条"
             />
             <Statistic
-              title="主图节点"
+              title="思维导图节点"
               value={topic.learning_output.map_node_count}
               suffix="个"
             />
+            <Statistic title="高亮" value={topic.highlights.length} suffix="处" />
           </Space>
           <Divider style={{ margin: '20px 0 12px' }} />
-          <List
-            size="small"
-            dataSource={topic.questions.filter((question) => question.is_saved)}
-            locale={{ emptyText: '还没有已沉淀问答。' }}
-            renderItem={(question) => (
-              <List.Item
-                actions={
-                  question.material && question.start_offset !== null
-                    ? [
-                        <Button
-                          key="source"
-                          type="link"
-                          onClick={() =>
-                            navigate(
-                              `/topics/${topic.id}/materials/${question.material}?anchor=${question.start_offset}&question=${question.id}`,
-                            )
-                          }
-                        >
-                          查看原文
-                        </Button>,
-                        <Popconfirm
-                          key="delete"
-                          title="删除这条问答？"
-                          okText="删除"
-                          cancelText="取消"
-                          okButtonProps={{ danger: true }}
-                          onConfirm={() => void handleDeleteQuestion(question.id)}
-                        >
-                          <Button type="link" danger>
-                            删除
-                          </Button>
-                        </Popconfirm>,
-                      ]
-                    : undefined
-                }
-              >
-                <List.Item.Meta
-                  title={question.question_text}
-                  description={
-                    <Space direction="vertical" size={2}>
-                      {question.selected_text && (
-                        <Typography.Text type="secondary">
-                          原文：“{question.selected_text}”
-                        </Typography.Text>
-                      )}
-                      <span>
-                        {question.ai_responses[0]?.content ||
-                          'AI 回答仍在生成或不可用。'}
-                      </span>
-                    </Space>
-                  }
-                />
-              </List.Item>
-            )}
-          />
-          <Divider style={{ margin: '20px 0 12px' }} />
-          <Typography.Text strong>概念列表</Typography.Text>
-          <List
-            size="small"
-            dataSource={topic.concepts}
-            locale={{ emptyText: '还没有概念。' }}
-            renderItem={(concept) => (
-              <List.Item
-                actions={[
-                  <Button
-                    key="map"
-                    type="link"
-                    onClick={() => navigate(`/topics/${topic.id}/map`)}
-                  >
-                    查看主图
-                  </Button>,
-                ]}
-              >
-                <List.Item.Meta
-                  title={concept.title}
-                  description={concept.definition || '概念草稿正在生成或等待补全。'}
-                />
-              </List.Item>
-            )}
-          />
-          <Divider style={{ margin: '20px 0 12px' }} />
-          <Typography.Text strong>高亮列表</Typography.Text>
-          <List
-            size="small"
-            dataSource={topic.highlights}
-            locale={{ emptyText: '还没有高亮。' }}
-            renderItem={(highlight) => (
-              <List.Item
-                actions={[
-                  <Button
-                    key="source"
-                    type="link"
-                    onClick={() =>
-                      navigate(
-                        `/topics/${topic.id}/materials/${highlight.material}?anchor=${highlight.start_offset}`,
-                      )
-                    }
-                  >
-                    查看原文
-                  </Button>,
-                ]}
-              >
-                <Typography.Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0 }}>
-                  {highlight.source_text}
-                </Typography.Paragraph>
-              </List.Item>
-            )}
+          <Tabs
+            items={[
+              {
+                key: 'questions',
+                label: '问答',
+                children: (
+                  <List
+                    size="small"
+                    dataSource={topic.questions.filter((question) => question.is_saved)}
+                    locale={{ emptyText: '还没有已沉淀问答。' }}
+                    renderItem={(question) => (
+                      <List.Item
+                        actions={[
+                          question.material && question.start_offset !== null ? (
+                            <Button key="source" type="link" onClick={() => navigate(`/topics/${topic.id}/materials/${question.material}?anchor=${question.start_offset}&question=${question.id}`)}>
+                              查看原文
+                            </Button>
+                          ) : null,
+                          <Popconfirm key="delete" title="删除这条问答？" okText="删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void handleDeleteQuestion(question.id)}>
+                            <Button type="link" danger>删除</Button>
+                          </Popconfirm>,
+                        ]}
+                      >
+                        <List.Item.Meta title={question.question_text} description={question.selected_text ? `原文：“${question.selected_text}”` : question.ai_responses[0]?.content || 'AI 回答仍在生成或不可用。'} />
+                      </List.Item>
+                    )}
+                  />
+                ),
+              },
+              {
+                key: 'concepts',
+                label: '概念',
+                children: (
+                  <List
+                    size="small"
+                    dataSource={topic.concepts}
+                    locale={{ emptyText: '还没有概念。' }}
+                    renderItem={(concept) => {
+                      const anchor = concept.anchors[0];
+                      return (
+                        <List.Item actions={anchor ? [<Button key="source" type="link" onClick={() => navigate(`/topics/${topic.id}/materials/${anchor.material}?anchor=${anchor.start_offset}`)}>查看原文</Button>] : undefined}>
+                          <List.Item.Meta title={concept.title} description={concept.definition || '概念草稿正在生成或等待补全。'} />
+                        </List.Item>
+                      );
+                    }}
+                  />
+                ),
+              },
+              {
+                key: 'highlights',
+                label: '高亮',
+                children: (
+                  <List
+                    size="small"
+                    dataSource={topic.highlights}
+                    locale={{ emptyText: '还没有高亮。' }}
+                    renderItem={(highlight) => (
+                      <List.Item actions={[<Button key="source" type="link" onClick={() => navigate(`/topics/${topic.id}/materials/${highlight.material}?anchor=${highlight.start_offset}`)}>查看原文</Button>]}>
+                        <Typography.Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0 }}>{highlight.source_text}</Typography.Paragraph>
+                      </List.Item>
+                    )}
+                  />
+                ),
+              },
+            ]}
           />
         </Card>
 

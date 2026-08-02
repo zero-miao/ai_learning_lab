@@ -104,7 +104,7 @@ const TopicMap: React.FC = () => {
       );
     } catch (error) {
       console.error('Failed to load topic map:', error);
-      message.error('加载话题主图失败');
+      message.error('加载话题思维导图失败');
     } finally {
       setLoading(false);
     }
@@ -248,7 +248,7 @@ const TopicMap: React.FC = () => {
         <Card
           title={
             <Space>
-              <span>{topic.title} 的主思维导图</span>
+              <span>{topic.title} 的思维导图</span>
               <Tag color="blue">{topic.concepts.length} 个概念</Tag>
               <Tag>{topic.concept_relations.length} 条关系</Tag>
             </Space>
@@ -355,7 +355,7 @@ const TopicMap: React.FC = () => {
               })}
             </div>
           ) : (
-            <Empty description="从阅读中标记概念后，主图会在这里逐步生长。" />
+            <Empty description="从阅读中标记概念后，思维导图会在这里逐步生长。" />
           )}
         </Card>
 
