@@ -297,6 +297,7 @@ export const createConcept = (
 export const getConcept = (id: number) => api.get<Concept>(`concepts/${id}/`);
 export const updateConcept = (id: number, data: Partial<Concept>) =>
   api.patch<Concept>(`concepts/${id}/`, data);
+export const deleteConcept = (id: number) => api.delete(`concepts/${id}/`);
 export const createConceptRelation = (
   data: Pick<
     ConceptRelation,

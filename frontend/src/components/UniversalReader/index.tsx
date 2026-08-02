@@ -29,6 +29,10 @@ interface UniversalReaderProps {
   onMarkConcept: (selection: TextSelectionAnchor) => void;
   onAskQuestion: (selection: TextSelectionAnchor) => void;
   onHighlight: (selection: TextSelectionAnchor) => void;
+  onAnnotationClick: (
+    type: 'concept' | 'question' | 'highlight',
+    id: number,
+  ) => void;
 }
 
 interface ReaderChunk {
@@ -105,6 +109,7 @@ type AnnotationType = 'highlight' | 'concept' | 'question';
 
 interface AnnotationRange {
   type: AnnotationType;
+  variant: string;
   id: number;
   start: number;
   end: number;
@@ -116,10 +121,12 @@ function renderChunk(
   highlights: Highlight[],
   concepts: Concept[],
   questions: Question[],
+  onAnnotationClick: UniversalReaderProps['onAnnotationClick'],
 ) {
   const ranges: AnnotationRange[] = [
     ...highlights.map((highlight) => ({
       type: 'highlight' as const,
+      variant: 'highlight',
       id: highlight.id,
       start: highlight.start_offset,
       end: highlight.end_offset,
@@ -128,6 +135,10 @@ function renderChunk(
     ...concepts.flatMap((concept) =>
       concept.anchors.map((anchor) => ({
         type: 'concept' as const,
+        variant:
+          concept.status === 'confirmed'
+            ? 'concept-confirmed'
+            : 'concept-draft',
         id: concept.id,
         start: anchor.start_offset,
         end: anchor.end_offset,
@@ -141,6 +152,7 @@ function renderChunk(
       )
       .map((question) => ({
         type: 'question' as const,
+        variant: question.is_saved ? 'question-saved' : 'question',
         id: question.id,
         start: question.start_offset!,
         end: question.end_offset!,
@@ -168,16 +180,17 @@ function renderChunk(
     const content = chunk.content.slice(start, end);
     if (!activeRanges.length) return content;
 
-    const anchor = (
+    const prioritizedRanges = (
       ['concept', 'question', 'highlight'] as AnnotationType[]
     )
       .map((type) =>
-        activeRanges.find(
-          (range) =>
-            range.type === type && range.sourceStart === absoluteStart,
-        ),
+        activeRanges.filter((range) => range.type === type),
       )
-      .find(Boolean);
+      .flat();
+    const anchor = prioritizedRanges.find(
+      (range) => range.sourceStart === absoluteStart,
+    );
+    const clickTarget = anchor ?? prioritizedRanges[0];
     return (
       <span
         id={anchor ? `reader-${anchor.type}-${anchor.id}` : undefined}
@@ -185,9 +198,14 @@ function renderChunk(
         className={[
           'universal-reader__annotation',
           ...activeRanges.map(
-            (range) => `universal-reader__annotation--${range.type}`,
+            (range) => `universal-reader__annotation--${range.variant}`,
           ),
         ].join(' ')}
+        onClick={(event) => {
+          if (!clickTarget) return;
+          event.stopPropagation();
+          onAnnotationClick(clickTarget.type, clickTarget.id);
+        }}
       >
         {content}
       </span>
@@ -205,6 +223,7 @@ export default function UniversalReader({
   onMarkConcept,
   onAskQuestion,
   onHighlight,
+  onAnnotationClick,
 }: UniversalReaderProps) {
   const chunks = getReaderChunks(material);
   const [selectionMenu, setSelectionMenu] = React.useState<SelectionMenu | null>(
@@ -314,7 +333,13 @@ export default function UniversalReader({
             data-start-offset={chunk.startOffset}
             data-end-offset={chunk.endOffset}
           >
-            {renderChunk(chunk, highlights, concepts, questions)}
+            {renderChunk(
+              chunk,
+              highlights,
+              concepts,
+              questions,
+              onAnnotationClick,
+            )}
           </p>
         ))}
       </div>

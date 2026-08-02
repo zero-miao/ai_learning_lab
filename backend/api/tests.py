@@ -535,6 +535,11 @@ class AsyncTaskApiTests(TestCase):
         self.assertEqual(
             AIResponse.objects.filter(task_type="answer_question").count(), 1
         )
+        ask_question.assert_called_once_with(
+            self.material.clean_text,
+            "QuerySet 为什么可组合？",
+            "",
+        )
 
     @patch("api.task_service.AIGateway.grade_exam")
     @patch("api.task_service.AIGateway.generate_exam")

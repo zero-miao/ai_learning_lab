@@ -197,7 +197,9 @@ def _answer_question(task):
     context = task.input_json.get("context", "")
     if not context:
         raise ValueError("问题缺少材料上下文。")
-    content = AIGateway.ask_question(context, question.question_text)
+    content = AIGateway.ask_question(
+        context, question.question_text, question.selected_text
+    )
     response = AIResponse.objects.create(
         question=question,
         task_type="answer_question",

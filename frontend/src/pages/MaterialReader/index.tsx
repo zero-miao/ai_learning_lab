@@ -29,12 +29,14 @@ import {
   createConcept,
   createHighlight,
   createQuestion,
+  deleteConcept,
   deleteHighlight,
   getQuestion,
   getTopic,
   listAITasks,
   retryAITask,
   saveQuestion,
+  updateConcept,
 } from '../../api';
 import type { AITask, Concept, Material, Topic } from '../../api';
 import UniversalReader from '../../components/UniversalReader';
@@ -58,6 +60,14 @@ interface ConceptFormValues {
   title: string;
 }
 
+interface ConceptEditorValues {
+  title: string;
+  definition?: string;
+  principle?: string;
+  pitfalls?: string;
+  applications?: string;
+}
+
 function renderMarkdownInline(text: string): React.ReactNode[] {
   return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, index) => {
     if (part.startsWith('**') && part.endsWith('**')) {
@@ -72,29 +82,69 @@ function renderMarkdownInline(text: string): React.ReactNode[] {
 
 const MarkdownBriefing: React.FC<{ content: string }> = ({ content }) => {
   const lines = content.split('\n');
+  const blocks: React.ReactNode[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index];
+    const isTable =
+      line.includes('|') &&
+      /^\s*\|?[\s:-]+\|[\s|:-]*$/.test(lines[index + 1] ?? '');
+    if (isTable) {
+      const rows = [line];
+      index += 2;
+      while (lines[index]?.includes('|')) {
+        rows.push(lines[index]);
+        index += 1;
+      }
+      const cells = (row: string) =>
+        row
+          .trim()
+          .replace(/^\||\|$/g, '')
+          .split('|')
+          .map((cell) => cell.trim());
+      blocks.push(
+        <div key={`table-${index}`} style={{ overflowX: 'auto', marginBottom: 16 }}>
+          <table className="reader-briefing__table">
+            <thead>
+              <tr>
+                {cells(rows[0]).map((cell, cellIndex) => (
+                  <th key={cellIndex}>{renderMarkdownInline(cell)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.slice(1).map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {cells(row).map((cell, cellIndex) => (
+                    <td key={cellIndex}>{renderMarkdownInline(cell)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      continue;
+    }
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+    if (line.startsWith('### ')) {
+      blocks.push(<Typography.Title key={index} level={5}>{renderMarkdownInline(line.slice(4))}</Typography.Title>);
+    } else if (line.startsWith('## ')) {
+      blocks.push(<Typography.Title key={index} level={4}>{renderMarkdownInline(line.slice(3))}</Typography.Title>);
+    } else if (line.startsWith('# ')) {
+      blocks.push(<Typography.Title key={index} level={3}>{renderMarkdownInline(line.slice(2))}</Typography.Title>);
+    } else if (/^[-*] /.test(line)) {
+      blocks.push(<li key={index}>{renderMarkdownInline(line.slice(2))}</li>);
+    } else {
+      blocks.push(<Typography.Paragraph key={index}>{renderMarkdownInline(line)}</Typography.Paragraph>);
+    }
+    index += 1;
+  }
   return (
-    <div className="reader-briefing__markdown">
-      {lines.map((line, index) => {
-        if (!line.trim()) return null;
-        if (line.startsWith('### ')) {
-          return <Typography.Title key={index} level={5}>{renderMarkdownInline(line.slice(4))}</Typography.Title>;
-        }
-        if (line.startsWith('## ')) {
-          return <Typography.Title key={index} level={4}>{renderMarkdownInline(line.slice(3))}</Typography.Title>;
-        }
-        if (line.startsWith('# ')) {
-          return <Typography.Title key={index} level={3}>{renderMarkdownInline(line.slice(2))}</Typography.Title>;
-        }
-        if (/^[-*] /.test(line)) {
-          return <li key={index}>{renderMarkdownInline(line.slice(2))}</li>;
-        }
-        return (
-          <Typography.Paragraph key={index}>
-            {renderMarkdownInline(line)}
-          </Typography.Paragraph>
-        );
-      })}
-    </div>
+    <div className="reader-briefing__markdown">{blocks}</div>
   );
 };
 
@@ -121,6 +171,12 @@ const MaterialReader: React.FC = () => {
     useState<TextSelectionAnchor | null>(null);
   const [conceptSaving, setConceptSaving] = useState(false);
   const [conceptForm] = Form.useForm<ConceptFormValues>();
+  const [conceptEditorOpen, setConceptEditorOpen] = useState(false);
+  const [editingConcept, setEditingConcept] = useState<Concept | null>(null);
+  const [conceptEditorForm] = Form.useForm<ConceptEditorValues>();
+  const [selectedConceptId, setSelectedConceptId] = useState<number | null>(null);
+  const [selectedQuestionId, setSelectedQuestionId] = useState<number | null>(null);
+  const [selectedHighlightId, setSelectedHighlightId] = useState<number | null>(null);
   const [pendingConceptIds, setPendingConceptIds] = useState<Set<number>>(
     new Set(),
   );
@@ -389,6 +445,63 @@ const MaterialReader: React.FC = () => {
     setAssistantVisible(false);
   };
 
+  const handleAnnotationClick = (
+    type: 'concept' | 'question' | 'highlight',
+    id: number,
+  ) => {
+    setAssistantVisible(true);
+    if (type === 'concept') {
+      setAssistantTab('concepts');
+      setSelectedConceptId(id);
+    } else if (type === 'question') {
+      setAssistantTab('questions');
+      setSelectedQuestionId(id);
+    } else {
+      setAssistantTab('highlights');
+      setSelectedHighlightId(id);
+    }
+  };
+
+  const openConceptEditor = (concept: Concept) => {
+    setEditingConcept(concept);
+    conceptEditorForm.setFieldsValue(concept);
+    setConceptEditorOpen(true);
+  };
+
+  const saveConcept = async (
+    values: ConceptEditorValues,
+    confirm = false,
+    target = editingConcept,
+  ) => {
+    if (!target) return;
+    try {
+      const response = await updateConcept(target.id, {
+        ...values,
+        status: confirm ? 'confirmed' : target.status,
+      });
+      setEditingConcept(response.data);
+      message.success(confirm ? '概念已确认' : '概念已更新');
+      setConceptEditorOpen(false);
+      await loadData();
+    } catch (error) {
+      console.error('Failed to update concept:', error);
+      message.error('保存概念失败');
+    }
+  };
+
+  const handleDeleteConcept = async (conceptId: number) => {
+    try {
+      await deleteConcept(conceptId);
+      if (selectedConceptId === conceptId) setSelectedConceptId(null);
+      setConceptEditorOpen(false);
+      message.success('概念已删除');
+      await loadData();
+    } catch (error) {
+      console.error('Failed to delete concept:', error);
+      message.error('删除概念失败');
+    }
+  };
+
   const handleDeleteHighlight = async (highlightId: number) => {
     try {
       await deleteHighlight(highlightId);
@@ -432,6 +545,14 @@ const MaterialReader: React.FC = () => {
   const briefing = material.ai_responses.find(
     (item) => item.task_type === 'briefing',
   );
+  const selectedConcept =
+    topic?.concepts.find((concept) => concept.id === selectedConceptId) ?? null;
+  const selectedQuestion =
+    topic?.questions.find((question) => question.id === selectedQuestionId) ??
+    null;
+  const selectedHighlight =
+    topic?.highlights.find((highlight) => highlight.id === selectedHighlightId) ??
+    null;
 
   return (
     <Layout
@@ -471,11 +592,16 @@ const MaterialReader: React.FC = () => {
           {briefing && (
             <Collapse
               size="small"
-              style={{ marginBottom: 20 }}
+              defaultActiveKey={['briefing']}
+              style={{
+                marginBottom: 20,
+                borderColor: '#69b1ff',
+                background: '#e6f4ff',
+              }}
               items={[
                 {
                   key: 'briefing',
-                  label: '阅读前导',
+                  label: '阅读前导（AI 生成）',
                   children: <MarkdownBriefing content={briefing.content} />,
                 },
               ]}
@@ -502,6 +628,7 @@ const MaterialReader: React.FC = () => {
             onMarkConcept={handleMarkConcept}
             onAskQuestion={handleAskSelection}
             onHighlight={handleHighlight}
+            onAnnotationClick={handleAnnotationClick}
           />
         </div>
       </Content>
@@ -525,6 +652,22 @@ const MaterialReader: React.FC = () => {
         />
         {assistantTab === 'questions' && (
           <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100% - 48px)' }}>
+          {selectedQuestion && (
+            <Alert
+              type="info"
+              showIcon
+              message={selectedQuestion.question_text}
+              description={
+                <div style={{ whiteSpace: 'pre-wrap' }}>
+                  {selectedQuestion.ai_responses[0]?.content ||
+                    'AI 回答正在生成或尚未可用。'}
+                </div>
+              }
+              closable
+              onClose={() => setSelectedQuestionId(null)}
+              style={{ marginBottom: 12 }}
+            />
+          )}
           <div style={{ flex: 1, overflowY: 'auto', marginBottom: 16 }}>
             <List
               dataSource={chatHistory}
@@ -668,59 +811,126 @@ const MaterialReader: React.FC = () => {
           </div>
         )}
       {assistantVisible && assistantTab === 'concepts' && (
-        <List
-          dataSource={topic?.concepts ?? []}
-          locale={{ emptyText: '从阅读中标记概念后，会在这里集中显示。' }}
-          renderItem={(concept) => (
-            <List.Item
-              actions={[
-                <Button
-                  key="source"
-                  type="link"
-                  onClick={() => handleJumpToConcept(concept)}
-                >
-                  查看来源
-                </Button>,
-              ]}
-            >
-              <List.Item.Meta
-                title={
-                  <Space size={6}>
-                    <span>{concept.title}</span>
-                    <Typography.Text
-                      type={
-                        pendingConceptIds.has(concept.id)
-                          ? 'warning'
-                          : concept.status === 'confirmed'
-                            ? 'success'
-                            : 'secondary'
-                      }
-                    >
-                      {pendingConceptIds.has(concept.id)
-                        ? '草稿生成中'
-                        : concept.status_display}
-                    </Typography.Text>
-                  </Space>
-                }
-                description={
-                  <Typography.Paragraph ellipsis={{ rows: 3 }}>
-                    {concept.definition || '概念草稿正在等待补全。'}
-                  </Typography.Paragraph>
-                }
-              />
-            </List.Item>
+        <>
+          {selectedConcept && (
+            <Alert
+              type="info"
+              showIcon
+              message={selectedConcept.title}
+              description={
+                selectedConcept.definition || '概念草稿正在等待补全。'
+              }
+              closable
+              onClose={() => setSelectedConceptId(null)}
+              style={{ marginBottom: 12 }}
+            />
           )}
-        />
+          <List
+            dataSource={topic?.concepts ?? []}
+            locale={{ emptyText: '从阅读中标记概念后，会在这里集中显示。' }}
+            renderItem={(concept) => (
+              <List.Item
+                style={
+                  selectedConceptId === concept.id
+                    ? { background: '#e6f4ff', padding: '8px' }
+                    : undefined
+                }
+                actions={[
+                  <Button
+                    key="source"
+                    type="link"
+                    onClick={() => handleJumpToConcept(concept)}
+                  >
+                    查看来源
+                  </Button>,
+                  <Button
+                    key="edit"
+                    type="link"
+                    onClick={() => openConceptEditor(concept)}
+                  >
+                    编辑
+                  </Button>,
+                  concept.status === 'draft' && !pendingConceptIds.has(concept.id) ? (
+                    <Button
+                      key="confirm"
+                      type="link"
+                      onClick={() => {
+                        void saveConcept(concept, true, concept);
+                      }}
+                    >
+                      确认
+                    </Button>
+                  ) : null,
+                  <Popconfirm
+                    key="delete"
+                    title="删除这个概念？"
+                    okText="删除"
+                    cancelText="取消"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => void handleDeleteConcept(concept.id)}
+                  >
+                    <Button type="link" danger>
+                      删除
+                    </Button>
+                  </Popconfirm>,
+                ]}
+              >
+                <List.Item.Meta
+                  title={
+                    <Space size={6}>
+                      <span>{concept.title}</span>
+                      <Typography.Text
+                        type={
+                          pendingConceptIds.has(concept.id)
+                            ? 'warning'
+                            : concept.status === 'confirmed'
+                              ? 'success'
+                              : 'secondary'
+                        }
+                      >
+                        {pendingConceptIds.has(concept.id)
+                          ? '草稿生成中'
+                          : concept.status_display}
+                      </Typography.Text>
+                    </Space>
+                  }
+                  description={
+                    <Typography.Paragraph ellipsis={{ rows: 3 }}>
+                      {concept.definition || '概念草稿正在等待补全。'}
+                    </Typography.Paragraph>
+                  }
+                />
+              </List.Item>
+            )}
+          />
+        </>
       )}
 
       {assistantVisible && assistantTab === 'highlights' && (
-        <List
-          dataSource={(topic?.highlights ?? []).filter(
-            (highlight) => highlight.material === material.id,
+        <>
+          {selectedHighlight && (
+            <Alert
+              type="warning"
+              showIcon
+              message="高亮片段"
+              description={selectedHighlight.source_text}
+              closable
+              onClose={() => setSelectedHighlightId(null)}
+              style={{ marginBottom: 12 }}
+            />
           )}
-          locale={{ emptyText: '当前材料还没有高亮片段' }}
-          renderItem={(highlight) => (
-            <List.Item
+          <List
+            dataSource={(topic?.highlights ?? []).filter(
+              (highlight) => highlight.material === material.id,
+            )}
+            locale={{ emptyText: '当前材料还没有高亮片段' }}
+            renderItem={(highlight) => (
+              <List.Item
+                style={
+                  selectedHighlightId === highlight.id
+                    ? { background: '#fffbe6', padding: '8px' }
+                    : undefined
+                }
               actions={[
                 <Button
                   key="jump"
@@ -751,9 +961,10 @@ const MaterialReader: React.FC = () => {
                   </Typography.Paragraph>
                 }
               />
-            </List.Item>
-          )}
-        />
+              </List.Item>
+            )}
+          />
+        </>
       )}
       </Drawer>
 
@@ -786,6 +997,44 @@ const MaterialReader: React.FC = () => {
             rules={[{ required: true, message: '请输入概念名称' }]}
           >
             <Input />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="编辑概念卡片"
+        open={conceptEditorOpen}
+        onCancel={() => {
+          setConceptEditorOpen(false);
+          setEditingConcept(null);
+          conceptEditorForm.resetFields();
+        }}
+        onOk={() => conceptEditorForm.submit()}
+        width={680}
+      >
+        <Form
+          form={conceptEditorForm}
+          layout="vertical"
+          onFinish={(values) => void saveConcept(values)}
+        >
+          <Form.Item
+            name="title"
+            label="概念名称"
+            rules={[{ required: true, message: '请输入概念名称' }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item name="definition" label="定义">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+          <Form.Item name="principle" label="原理">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+          <Form.Item name="pitfalls" label="易错点">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+          <Form.Item name="applications" label="适用场景">
+            <Input.TextArea rows={3} />
           </Form.Item>
         </Form>
       </Modal>

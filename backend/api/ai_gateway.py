@@ -55,14 +55,21 @@ class AIGateway:
         return cls._provider
 
     @classmethod
-    def ask_question(cls, context: str, question: str) -> str:
+    def ask_question(cls, context: str, question: str, selected_text: str = "") -> str:
         provider = cls.get_provider()
         messages = [
             {
                 "role": "system",
                 "content": "你是一个专业的学习助手。请基于提供的材料回答用户的问题。如果材料中没有相关信息，请明确说明。",
             },
-            {"role": "user", "content": f"学习材料：\n{context}\n\n问题：{question}"},
+            {
+                "role": "user",
+                "content": (
+                    f"学习材料：\n{context}\n\n"
+                    f"用户选中的原文：{selected_text or '未选择特定片段'}\n\n"
+                    f"问题：{question}"
+                ),
+            },
         ]
         return provider.generate_response(messages)
 

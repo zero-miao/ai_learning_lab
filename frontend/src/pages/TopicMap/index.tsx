@@ -25,6 +25,7 @@ import {
 } from '@ant-design/icons';
 import {
   createConceptRelation,
+  deleteConcept,
   deleteConceptRelation,
   getTopic,
   updateConcept,
@@ -86,6 +87,7 @@ const TopicMap: React.FC = () => {
     null,
   );
   const [conceptModalOpen, setConceptModalOpen] = useState(false);
+  const [draggedConceptId, setDraggedConceptId] = useState<number | null>(null);
   const [relationForm] = Form.useForm<RelationFormValues>();
   const [conceptForm] = Form.useForm<ConceptFormValues>();
 
@@ -168,6 +170,32 @@ const TopicMap: React.FC = () => {
     } catch (error) {
       console.error('Failed to delete concept relation:', error);
       message.error('删除概念关系失败');
+    }
+  };
+
+  const handleDropOnConcept = (target: Concept) => {
+    if (!draggedConceptId || draggedConceptId === target.id) return;
+    setEditingRelation(null);
+    relationForm.setFieldsValue({
+      from_concept: draggedConceptId,
+      to_concept: target.id,
+      relation_type: '关联',
+      description: '',
+    });
+    setRelationModalOpen(true);
+    setDraggedConceptId(null);
+  };
+
+  const handleDeleteConcept = async () => {
+    if (!selectedConcept) return;
+    try {
+      await deleteConcept(selectedConcept.id);
+      setSelectedConcept(null);
+      message.success('概念及其关联关系已删除');
+      await loadTopic();
+    } catch (error) {
+      console.error('Failed to delete concept:', error);
+      message.error('删除概念失败');
     }
   };
 
@@ -306,6 +334,12 @@ const TopicMap: React.FC = () => {
                       selectedConcept?.id === concept.id ? 'primary' : 'default'
                     }
                     onClick={() => setSelectedConcept(concept)}
+                    draggable
+                    onDragStart={() => setDraggedConceptId(concept.id)}
+                    onDragEnd={() => setDraggedConceptId(null)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={() => handleDropOnConcept(concept)}
+                    title="拖拽到另一个概念节点以建立关系"
                     style={{
                       position: 'absolute',
                       left: position.x,
@@ -374,9 +408,22 @@ const TopicMap: React.FC = () => {
         open={Boolean(selectedConcept)}
         onClose={() => setSelectedConcept(null)}
         extra={
-          <Button type="link" icon={<EditOutlined />} onClick={openEditConcept}>
-            编辑
-          </Button>
+          <Space size="small">
+            <Button type="link" icon={<EditOutlined />} onClick={openEditConcept}>
+              编辑
+            </Button>
+            <Popconfirm
+              title="删除这个概念及其关联关系？"
+              okText="删除"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => void handleDeleteConcept()}
+            >
+              <Button type="link" danger icon={<DeleteOutlined />}>
+                删除
+              </Button>
+            </Popconfirm>
+          </Space>
         }
       >
         {selectedConcept && (
