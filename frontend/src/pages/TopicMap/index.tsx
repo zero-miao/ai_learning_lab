@@ -423,7 +423,7 @@ const TopicMap: React.FC = () => {
         {selectedConcept && (
           <Space direction="vertical" size="middle" style={{ display: 'flex' }}>
             <Title level={3}>{selectedConcept.title}</Title>
-            <Tag color={selectedConcept.status === 'confirmed' ? 'success' : 'warning'}>
+            <Tag color={selectedConcept.status === 'confirmed' ? 'blue' : 'green'}>
               {selectedConcept.status_display}
             </Tag>
             <Descriptions column={1} size="small">
@@ -521,6 +521,19 @@ const TopicMap: React.FC = () => {
           <Form.Item name="description" label="关系说明">
             <Input.TextArea rows={3} />
           </Form.Item>
+          {editingRelation && (
+            <Popconfirm
+              title="删除这条概念关系？"
+              okText="删除"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => void handleDeleteRelation(editingRelation.id)}
+            >
+              <Button danger>
+                删除关联
+              </Button>
+            </Popconfirm>
+          )}
         </Form>
       </Modal>
 

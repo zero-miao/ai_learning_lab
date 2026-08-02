@@ -13,6 +13,7 @@ import {
   Modal,
   Form,
   Input,
+  Popconfirm,
   Radio,
   Statistic,
   message,
@@ -28,6 +29,7 @@ import {
 import {
   createMaterial,
   deleteMaterial,
+  deleteQuestion,
   getTopic,
   listAITasks,
 } from '../../api';
@@ -99,6 +101,17 @@ const TopicDetail: React.FC = () => {
     }
   };
 
+  const handleDeleteQuestion = async (questionId: number) => {
+    try {
+      await deleteQuestion(questionId);
+      message.success('问答已删除');
+      fetchTopic();
+    } catch (error) {
+      console.error('Failed to delete question:', error);
+      message.error('删除问答失败');
+    }
+  };
+
   if (loading && !topic) return <div style={{ padding: '24px' }}>加载中...</div>;
   if (!topic) return <div style={{ padding: '24px' }}>未找到主题</div>;
   if (topic.type === 'discussion') {
@@ -112,9 +125,9 @@ const TopicDetail: React.FC = () => {
           返回列表
         </Button>
 
-        <Card>
+        <Card size="small">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <Title level={2}>{topic.title}</Title>
+            <Title level={3} style={{ margin: 0 }}>{topic.title}</Title>
             <Space>
               <Tag color={topic.type === 'learning' ? 'blue' : 'purple'}>
                 {topic.type_display}
@@ -138,11 +151,10 @@ const TopicDetail: React.FC = () => {
             </Space>
           </div>
 
-          <Descriptions column={1} bordered style={{ marginTop: '24px' }}>
+          <Descriptions size="small" column={2} style={{ marginTop: '16px' }}>
             <Descriptions.Item label="学习目标">{topic.goal || '未设置'}</Descriptions.Item>
             <Descriptions.Item label="学习范围">{topic.scope || '未设置'}</Descriptions.Item>
             <Descriptions.Item label="创建时间">{new Date(topic.created_at).toLocaleString()}</Descriptions.Item>
-            <Descriptions.Item label="更新时间">{new Date(topic.updated_at).toLocaleString()}</Descriptions.Item>
           </Descriptions>
         </Card>
 
@@ -186,12 +198,24 @@ const TopicDetail: React.FC = () => {
                           type="link"
                           onClick={() =>
                             navigate(
-                              `/topics/${topic.id}/materials/${question.material}?anchor=${question.start_offset}`,
+                              `/topics/${topic.id}/materials/${question.material}?anchor=${question.start_offset}&question=${question.id}`,
                             )
                           }
                         >
                           查看原文
                         </Button>,
+                        <Popconfirm
+                          key="delete"
+                          title="删除这条问答？"
+                          okText="删除"
+                          cancelText="取消"
+                          okButtonProps={{ danger: true }}
+                          onConfirm={() => void handleDeleteQuestion(question.id)}
+                        >
+                          <Button type="link" danger>
+                            删除
+                          </Button>
+                        </Popconfirm>,
                       ]
                     : undefined
                 }
@@ -199,8 +223,17 @@ const TopicDetail: React.FC = () => {
                 <List.Item.Meta
                   title={question.question_text}
                   description={
-                    question.ai_responses[0]?.content ||
-                    'AI 回答仍在生成或不可用。'
+                    <Space direction="vertical" size={2}>
+                      {question.selected_text && (
+                        <Typography.Text type="secondary">
+                          原文：“{question.selected_text}”
+                        </Typography.Text>
+                      )}
+                      <span>
+                        {question.ai_responses[0]?.content ||
+                          'AI 回答仍在生成或不可用。'}
+                      </span>
+                    </Space>
                   }
                 />
               </List.Item>

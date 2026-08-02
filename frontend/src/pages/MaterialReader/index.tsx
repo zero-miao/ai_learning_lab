@@ -281,7 +281,18 @@ const MaterialReader: React.FC = () => {
 
   useEffect(() => {
     if (!material) return;
-    const anchorValue = new URLSearchParams(location.search).get('anchor');
+    const searchParams = new URLSearchParams(location.search);
+    const questionId = Number(searchParams.get('question'));
+    if (Number.isInteger(questionId) && questionId > 0) {
+      const questionElement = document.querySelector<HTMLElement>(
+        `[data-question-ids~="${questionId}"]`,
+      );
+      if (questionElement) {
+        questionElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+    }
+    const anchorValue = searchParams.get('anchor');
     if (anchorValue === null) return;
     const anchor = Number(anchorValue);
     if (!Number.isInteger(anchor) || anchor < 0) return;
@@ -529,6 +540,17 @@ const MaterialReader: React.FC = () => {
     }
   };
 
+  const confirmDeleteConcept = (concept: Concept) => {
+    Modal.confirm({
+      title: `删除概念“${concept.title}”？`,
+      content: '该概念的所有来源锚点和关联关系都会一并删除，且无法恢复。',
+      okText: '删除概念',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: () => handleDeleteConcept(concept.id),
+    });
+  };
+
   const handleDeleteHighlight = async (highlightId: number) => {
     try {
       await deleteHighlight(highlightId);
@@ -619,7 +641,6 @@ const MaterialReader: React.FC = () => {
           {briefing && (
             <Collapse
               size="small"
-              defaultActiveKey={['briefing']}
               style={{
                 marginBottom: 20,
                 borderColor: '#69b1ff',
@@ -908,7 +929,7 @@ const MaterialReader: React.FC = () => {
                         if (key === 'confirm') {
                           void saveConcept(concept, true, concept);
                         }
-                        if (key === 'delete') void handleDeleteConcept(concept.id);
+                        if (key === 'delete') confirmDeleteConcept(concept);
                       },
                     }}
                   >
@@ -921,13 +942,13 @@ const MaterialReader: React.FC = () => {
                     <Space size={6}>
                       <span>{concept.title}</span>
                       <Typography.Text
-                        type={
-                          pendingConceptIds.has(concept.id)
-                            ? 'warning'
+                        style={{
+                          color: pendingConceptIds.has(concept.id)
+                            ? '#389e0d'
                             : concept.status === 'confirmed'
-                              ? 'success'
-                              : 'secondary'
-                        }
+                              ? '#0958d9'
+                              : '#389e0d',
+                        }}
                       >
                         {pendingConceptIds.has(concept.id)
                           ? '草稿生成中'

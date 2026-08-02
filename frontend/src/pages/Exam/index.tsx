@@ -18,7 +18,6 @@ const ExamPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [taskId, setTaskId] = useState<number | null>(null);
   const [taskKind, setTaskKind] = useState<'generate_exam' | 'grade_exam' | null>(null);
-  const [savingDraft, setSavingDraft] = useState(false);
   const [draftState, setDraftState] = useState<'saved' | 'unsaved' | 'saving' | 'failed'>('saved');
   const draftSaveInFlight = useRef(false);
 
@@ -118,7 +117,6 @@ const ExamPage: React.FC = () => {
     if (draftSaveInFlight.current) return;
     try {
       draftSaveInFlight.current = true;
-      setSavingDraft(true);
       setDraftState('saving');
       await saveExamAnswers(
         exam.id,
@@ -135,7 +133,6 @@ const ExamPage: React.FC = () => {
       setDraftState('failed');
     } finally {
       draftSaveInFlight.current = false;
-      setSavingDraft(false);
     }
   }, [answers, exam]);
 
@@ -246,14 +243,9 @@ const ExamPage: React.FC = () => {
               }} />
             </Card>
           ))}
-          <Space>
-            <Button loading={savingDraft} onClick={() => void saveDraft(true)}>
-              保存草稿
-            </Button>
-            <Button type="primary" size="large" onClick={() => void handleSubmit()}>
-              提交并获取反馈
-            </Button>
-          </Space>
+          <Button type="primary" size="large" onClick={() => void handleSubmit()}>
+            提交并获取反馈
+          </Button>
         </Space>
       )}
 
