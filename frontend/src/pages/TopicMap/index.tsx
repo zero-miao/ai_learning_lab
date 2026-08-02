@@ -154,6 +154,9 @@ const TopicMap: React.FC = () => {
   const handleDeleteRelation = async (relationId: number) => {
     try {
       await deleteConceptRelation(relationId);
+      setRelationModalOpen(false);
+      setEditingRelation(null);
+      relationForm.resetFields();
       message.success('概念关系已删除');
       await loadTopic();
     } catch (error) {

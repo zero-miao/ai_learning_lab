@@ -127,11 +127,13 @@ const TopicDetail: React.FC = () => {
 
         <Card size="small">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <Title level={3} style={{ margin: 0 }}>{topic.title}</Title>
-            <Space>
+            <Space size={8}>
               <Tag color={topic.type === 'learning' ? 'blue' : 'purple'}>
-                {topic.type_display}
+                {topic.type === 'learning' ? '学习类' : '讨论类'}
               </Tag>
+              <Title level={3} style={{ margin: 0 }}>{topic.title}</Title>
+            </Space>
+            <Space>
               <Tag color="blue">{topic.status_display}</Tag>
               <Tag color="green">掌握度: {topic.mastery_level_display}</Tag>
               <Button
@@ -160,11 +162,6 @@ const TopicDetail: React.FC = () => {
 
         <Card
           title="学习产出"
-          extra={
-            <Button type="link" onClick={() => navigate(`/topics/${topic.id}/map`)}>
-              打开思维导图
-            </Button>
-          }
         >
           <Space size="large" wrap>
             <Statistic
@@ -236,6 +233,59 @@ const TopicDetail: React.FC = () => {
                     </Space>
                   }
                 />
+              </List.Item>
+            )}
+          />
+          <Divider style={{ margin: '20px 0 12px' }} />
+          <Typography.Text strong>概念列表</Typography.Text>
+          <List
+            size="small"
+            dataSource={topic.concepts}
+            locale={{ emptyText: '还没有概念。' }}
+            renderItem={(concept) => (
+              <List.Item
+                actions={[
+                  <Button
+                    key="map"
+                    type="link"
+                    onClick={() => navigate(`/topics/${topic.id}/map`)}
+                  >
+                    查看主图
+                  </Button>,
+                ]}
+              >
+                <List.Item.Meta
+                  title={concept.title}
+                  description={concept.definition || '概念草稿正在生成或等待补全。'}
+                />
+              </List.Item>
+            )}
+          />
+          <Divider style={{ margin: '20px 0 12px' }} />
+          <Typography.Text strong>高亮列表</Typography.Text>
+          <List
+            size="small"
+            dataSource={topic.highlights}
+            locale={{ emptyText: '还没有高亮。' }}
+            renderItem={(highlight) => (
+              <List.Item
+                actions={[
+                  <Button
+                    key="source"
+                    type="link"
+                    onClick={() =>
+                      navigate(
+                        `/topics/${topic.id}/materials/${highlight.material}?anchor=${highlight.start_offset}`,
+                      )
+                    }
+                  >
+                    查看原文
+                  </Button>,
+                ]}
+              >
+                <Typography.Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0 }}>
+                  {highlight.source_text}
+                </Typography.Paragraph>
               </List.Item>
             )}
           />

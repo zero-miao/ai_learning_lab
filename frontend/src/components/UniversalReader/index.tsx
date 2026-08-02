@@ -33,6 +33,10 @@ interface UniversalReaderProps {
     type: 'concept' | 'question' | 'highlight',
     id: number,
   ) => void;
+  selectedAnnotations: Array<{
+    type: 'concept' | 'question' | 'highlight';
+    id: number | null;
+  }>;
 }
 
 interface ReaderChunk {
@@ -122,6 +126,7 @@ function renderChunk(
   concepts: Concept[],
   questions: Question[],
   onAnnotationClick: UniversalReaderProps['onAnnotationClick'],
+  selectedAnnotations: UniversalReaderProps['selectedAnnotations'],
 ) {
   const ranges: AnnotationRange[] = [
     ...highlights.map((highlight) => ({
@@ -200,6 +205,14 @@ function renderChunk(
           ...activeRanges.map(
             (range) => `universal-reader__annotation--${range.variant}`,
           ),
+          ...activeRanges
+            .filter((range) =>
+              selectedAnnotations.some(
+                (selected) =>
+                  selected.type === range.type && selected.id === range.id,
+              ),
+            )
+            .map(() => 'universal-reader__annotation--selected'),
         ].join(' ')}
         data-question-ids={activeRanges
           .filter((range) => range.type === 'question')
@@ -228,6 +241,7 @@ export default function UniversalReader({
   onAskQuestion,
   onHighlight,
   onAnnotationClick,
+  selectedAnnotations,
 }: UniversalReaderProps) {
   const chunks = getReaderChunks(material);
   const [selectionMenu, setSelectionMenu] = React.useState<SelectionMenu | null>(
@@ -343,6 +357,7 @@ export default function UniversalReader({
               concepts,
               questions,
               onAnnotationClick,
+              selectedAnnotations,
             )}
           </p>
         ))}

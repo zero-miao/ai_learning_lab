@@ -166,7 +166,9 @@ const MaterialReader: React.FC = () => {
   const [chatHistory, setChatHistory] = useState<ChatItem[]>([]);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [activeTaskType, setActiveTaskType] = useState<string | null>(null);
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(
+    () => window.matchMedia('(prefers-color-scheme: dark)').matches,
+  );
   const [conceptModalOpen, setConceptModalOpen] = useState(false);
   const [conceptSelection, setConceptSelection] =
     useState<TextSelectionAnchor | null>(null);
@@ -270,6 +272,14 @@ const MaterialReader: React.FC = () => {
       })
       .finally(() => setLoading(false));
   }, [loadData]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (event: MediaQueryListEvent) =>
+      setDarkMode(event.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
 
   useEffect(() => {
     if (!pendingConceptIds.size) return;
@@ -594,15 +604,6 @@ const MaterialReader: React.FC = () => {
   const briefing = material.ai_responses.find(
     (item) => item.task_type === 'briefing',
   );
-  const selectedConcept =
-    topic?.concepts.find((concept) => concept.id === selectedConceptId) ?? null;
-  const selectedQuestion =
-    topic?.questions.find((question) => question.id === selectedQuestionId) ??
-    null;
-  const selectedHighlight =
-    topic?.highlights.find((highlight) => highlight.id === selectedHighlightId) ??
-    null;
-
   return (
     <Layout
       style={{
@@ -677,6 +678,11 @@ const MaterialReader: React.FC = () => {
             onAskQuestion={handleAskSelection}
             onHighlight={handleHighlight}
             onAnnotationClick={handleAnnotationClick}
+            selectedAnnotations={[
+              { type: 'concept', id: selectedConceptId },
+              { type: 'question', id: selectedQuestionId },
+              { type: 'highlight', id: selectedHighlightId },
+            ]}
           />
         </div>
       </Content>
@@ -694,50 +700,13 @@ const MaterialReader: React.FC = () => {
           onChange={setAssistantTab}
           items={[
             { key: 'questions', label: '问答' },
+            { key: 'question-history', label: '问答历史' },
             { key: 'concepts', label: '概念' },
             { key: 'highlights', label: '高亮' },
           ]}
         />
         {assistantTab === 'questions' && (
           <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100% - 48px)' }}>
-          {selectedQuestion && (
-            <Alert
-              type="info"
-              showIcon
-              message={selectedQuestion.question_text}
-              description={
-                <div style={{ whiteSpace: 'pre-wrap' }}>
-                  {selectedQuestion.ai_responses[0]?.content ||
-                    'AI 回答正在生成或尚未可用。'}
-                </div>
-              }
-              action={
-                <Space direction="vertical" size={0}>
-                  <Button
-                    size="small"
-                    type="link"
-                    onClick={() => handleJumpToQuestion(selectedQuestion.id)}
-                  >
-                    查看原文
-                  </Button>
-                  <Popconfirm
-                    title="删除这条问答？"
-                    okText="删除"
-                    cancelText="取消"
-                    okButtonProps={{ danger: true }}
-                    onConfirm={() => void handleDeleteQuestion(selectedQuestion.id)}
-                  >
-                    <Button size="small" type="link" danger>
-                      删除
-                    </Button>
-                  </Popconfirm>
-                </Space>
-              }
-              closable
-              onClose={() => setSelectedQuestionId(null)}
-              style={{ marginBottom: 12 }}
-            />
-          )}
           <div style={{ flex: 1, overflowY: 'auto', marginBottom: 16 }}>
             <List
               dataSource={chatHistory}
@@ -880,21 +849,53 @@ const MaterialReader: React.FC = () => {
           </Space.Compact>
           </div>
         )}
+      {assistantVisible && assistantTab === 'question-history' && (
+        <List
+          dataSource={topic?.questions ?? []}
+          locale={{ emptyText: '当前话题还没有问答记录。' }}
+          renderItem={(item) => (
+            <List.Item
+              style={
+                selectedQuestionId === item.id
+                  ? { background: '#fff7e6', padding: '8px' }
+                  : undefined
+              }
+              actions={[
+                <Button
+                  key="source"
+                  type="link"
+                  disabled={item.start_offset === null}
+                  onClick={() => handleJumpToQuestion(item.id)}
+                >
+                  查看原文
+                </Button>,
+                <Popconfirm
+                  key="delete"
+                  title="删除这条问答？"
+                  okText="删除"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
+                  onConfirm={() => void handleDeleteQuestion(item.id)}
+                >
+                  <Button type="link" danger>
+                    删除
+                  </Button>
+                </Popconfirm>,
+              ]}
+            >
+              <List.Item.Meta
+                title={item.question_text}
+                description={
+                  item.ai_responses[0]?.content ||
+                  'AI 回答正在生成或尚未可用。'
+                }
+              />
+            </List.Item>
+          )}
+        />
+      )}
       {assistantVisible && assistantTab === 'concepts' && (
         <>
-          {selectedConcept && (
-            <Alert
-              type="info"
-              showIcon
-              message={selectedConcept.title}
-              description={
-                selectedConcept.definition || '概念草稿正在等待补全。'
-              }
-              closable
-              onClose={() => setSelectedConceptId(null)}
-              style={{ marginBottom: 12 }}
-            />
-          )}
           <List
             dataSource={topic?.concepts ?? []}
             locale={{ emptyText: '从阅读中标记概念后，会在这里集中显示。' }}
@@ -970,17 +971,6 @@ const MaterialReader: React.FC = () => {
 
       {assistantVisible && assistantTab === 'highlights' && (
         <>
-          {selectedHighlight && (
-            <Alert
-              type="warning"
-              showIcon
-              message="高亮片段"
-              description={selectedHighlight.source_text}
-              closable
-              onClose={() => setSelectedHighlightId(null)}
-              style={{ marginBottom: 12 }}
-            />
-          )}
           <List
             dataSource={(topic?.highlights ?? []).filter(
               (highlight) => highlight.material === material.id,
