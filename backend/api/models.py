@@ -374,6 +374,7 @@ class Highlight(models.Model):
         verbose_name="来源片段",
     )
     source_text = models.TextField(verbose_name="高亮文本")
+    user_note = models.TextField(blank=True, verbose_name="用户备注")
     start_offset = models.PositiveIntegerField(verbose_name="起始偏移")
     end_offset = models.PositiveIntegerField(verbose_name="结束偏移")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
@@ -394,7 +395,6 @@ class AIResponse(models.Model):
     TASK_TYPE_CHOICES = [
         ("briefing", "阅读前导"),
         ("answer_question", "回答问题"),
-        ("draft_note", "笔记草稿"),
         ("generate_exam", "生成考题"),
         ("grade_exam", "阅卷评分"),
     ]
@@ -552,38 +552,6 @@ class ReviewRecord(models.Model):
         ordering = ["due_at"]
 
 
-class Note(models.Model):
-    topic = models.ForeignKey(
-        Topic,
-        related_name="notes",
-        on_delete=models.CASCADE,
-        verbose_name="所属主题",
-    )
-    title = models.CharField(max_length=255, verbose_name="标题")
-    content = models.TextField(verbose_name="笔记内容")
-    material_fingerprint = models.CharField(
-        max_length=64, blank=True, db_index=True, verbose_name="材料指纹"
-    )
-    source_task = models.ForeignKey(
-        "AITask",
-        related_name="confirmed_notes",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        verbose_name="来源任务",
-    )
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
-    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
-
-    class Meta:
-        verbose_name = "结构化笔记"
-        verbose_name_plural = "结构化笔记"
-        ordering = ["-updated_at"]
-
-    def __str__(self):
-        return self.title
-
-
 class AITask(models.Model):
     TASK_TYPE_CHOICES = [
         ("briefing", "阅读前导"),
@@ -591,7 +559,6 @@ class AITask(models.Model):
         ("concept_draft", "概念草稿"),
         ("generate_exam", "生成考题"),
         ("grade_exam", "阅卷评分"),
-        ("note_draft", "笔记草稿"),
         ("review_prompt", "复习提示"),
         ("grade_review", "复盘反馈"),
         ("discussion_opening", "讨论开场"),

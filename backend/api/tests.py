@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -17,12 +18,11 @@ from .models import (
     Highlight,
     Material,
     MaterialChunk,
-    Note,
     Question,
     ReviewRecord,
     Topic,
 )
-from .task_service import execute_task, recover_interrupted_tasks
+from .task_service import enqueue_or_reuse, execute_task, recover_interrupted_tasks
 
 
 class AsyncTaskApiTests(TestCase):
@@ -53,6 +53,20 @@ class AsyncTaskApiTests(TestCase):
         self.assertEqual(second.status_code, 202)
         self.assertEqual(first.data["task"]["status"], "pending")
         self.assertNotEqual(first.data["question"]["id"], second.data["question"]["id"])
+
+    def test_task_model_uses_task_type_override_with_default_fallback(self):
+        with patch.dict(
+            os.environ,
+            {
+                "LLM_MODEL": "default-model",
+                "LLM_MODEL_CONCEPT_DRAFT": "concept-model",
+            },
+        ):
+            concept_task, _ = enqueue_or_reuse("concept_draft", topic=self.topic)
+            question_task, _ = enqueue_or_reuse("answer_question", topic=self.topic)
+
+        self.assertEqual(concept_task.model, "concept-model")
+        self.assertEqual(question_task.model, "default-model")
 
     def test_question_anchor_and_save_to_concept(self):
         MaterialChunk.objects.create(
@@ -194,6 +208,15 @@ class AsyncTaskApiTests(TestCase):
         self.assertEqual(topic.type, "learning")
         self.assertEqual(topic.discussion_outcome, "learn")
         self.assertEqual(topic.discussion_messages.count(), 3)
+        history_response = self.client.get(f"/api/topics/{topic.id}/discussion/")
+        self.assertEqual(history_response.status_code, 200)
+        self.assertEqual(len(history_response.data["messages"]), 3)
+        follow_up_response = self.client.post(
+            f"/api/topics/{topic.id}/discussion-messages/",
+            {"content": "转换后如何继续安排学习？"},
+            format="json",
+        )
+        self.assertEqual(follow_up_response.status_code, 202)
 
     @patch("api.task_service.AIGateway.assess_discussion_material")
     def test_discussion_assessment_updates_rationale(self, assess_discussion_material):
@@ -346,12 +369,14 @@ class AsyncTaskApiTests(TestCase):
                 "material": self.material.id,
                 "start_offset": start_offset,
                 "end_offset": end_offset,
+                "user_note": "复习时补充这里的查询链路。",
             },
             format="json",
         )
         self.assertEqual(response.status_code, 201)
         highlight = Highlight.objects.get(pk=response.data["highlight"])
         self.assertEqual(highlight.source_text, "Django ORM")
+        self.assertEqual(highlight.user_note, "复习时补充这里的查询链路。")
         self.assertEqual(highlight.topic_id, self.topic.id)
 
         invalid_response = self.client.post(
@@ -364,6 +389,24 @@ class AsyncTaskApiTests(TestCase):
             format="json",
         )
         self.assertEqual(invalid_response.status_code, 400)
+
+    def test_highlight_user_note_can_be_updated(self):
+        highlight = Highlight.objects.create(
+            topic=self.topic,
+            material=self.material,
+            source_text="Django ORM",
+            start_offset=0,
+            end_offset=10,
+        )
+        response = self.client.patch(
+            f"/api/highlights/{highlight.id}/user-note/",
+            {"user_note": "适合和原生 SQL 的边界一起复习。"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["user_note"], "适合和原生 SQL 的边界一起复习。")
+        highlight.refresh_from_db()
+        self.assertEqual(highlight.user_note, "适合和原生 SQL 的边界一起复习。")
 
     def test_highlight_can_be_deleted(self):
         highlight = Highlight.objects.create(
@@ -409,85 +452,6 @@ class AsyncTaskApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         question.refresh_from_db()
         self.assertEqual(question.answer_text, "先组合条件，再在需要结果时执行查询。")
-
-    @patch("api.task_service.AIGateway.generate_note_draft")
-    def test_note_draft_worker_and_confirmation(self, generate_note_draft):
-        generate_note_draft.return_value = "## 核心结论\nQuerySet 可以组合。"
-        response = self.client.post(
-            f"/api/topics/{self.topic.id}/note-drafts/", format="json"
-        )
-        self.assertEqual(response.status_code, 202)
-        task = AITask.objects.get(pk=response.data["task"]["id"])
-        self.assertEqual(task.task_type, "note_draft")
-        task.status = "running"
-        task.attempt_count = 1
-        task.save()
-
-        execute_task(task.id)
-
-        task.refresh_from_db()
-        self.assertEqual(task.status, "succeeded")
-        self.assertEqual(task.result_json["content"], generate_note_draft.return_value)
-        confirm_response = self.client.post(
-            "/api/notes/",
-            {
-                "topic": self.topic.id,
-                "title": task.result_json["title"],
-                "content": task.result_json["content"],
-                "source_task": task.id,
-            },
-            format="json",
-        )
-        self.assertEqual(confirm_response.status_code, 201)
-        self.assertEqual(Note.objects.count(), 1)
-        note = Note.objects.first()
-        self.assertEqual(note.source_task_id, task.id)
-        self.assertEqual(
-            note.material_fingerprint, task.input_json["material_fingerprint"]
-        )
-
-        topic_response = self.client.get(f"/api/topics/{self.topic.id}/")
-        self.assertTrue(topic_response.data["has_current_note"])
-        repeated_response = self.client.post(
-            f"/api/topics/{self.topic.id}/note-drafts/", format="json"
-        )
-        self.assertEqual(repeated_response.status_code, 409)
-
-        updated_note = self.client.patch(
-            f"/api/notes/{note.id}/",
-            {"content": "补充了适用边界。"},
-            format="json",
-        )
-        self.assertEqual(updated_note.status_code, 200)
-        note.refresh_from_db()
-        self.assertEqual(note.content, "补充了适用边界。")
-
-        regenerate_response = self.client.post(
-            f"/api/topics/{self.topic.id}/note-drafts/",
-            {"instructions": "重点说明查询优化。"},
-            format="json",
-        )
-        self.assertEqual(regenerate_response.status_code, 202)
-        regeneration_task = AITask.objects.get(
-            pk=regenerate_response.data["task"]["id"]
-        )
-        self.assertEqual(
-            regeneration_task.input_json["instructions"], "重点说明查询优化。"
-        )
-        regeneration_task.status = "running"
-        regeneration_task.attempt_count = 1
-        regeneration_task.save()
-        generate_note_draft.reset_mock()
-        execute_task(regeneration_task.id)
-        generate_note_draft.assert_called_once_with(
-            self.topic.title,
-            self.topic.goal,
-            regeneration_task.input_json["context"],
-            "重点说明查询优化。",
-        )
-        delete_response = self.client.delete(f"/api/notes/{note.id}/")
-        self.assertEqual(delete_response.status_code, 204)
-        self.assertFalse(Note.objects.filter(pk=note.id).exists())
 
     @patch("api.task_service.AIGateway.generate_exam")
     def test_exam_worker_creates_questions(self, generate_exam):
@@ -539,6 +503,7 @@ class AsyncTaskApiTests(TestCase):
             self.material.clean_text,
             "QuerySet 为什么可组合？",
             "",
+            task.model,
         )
 
     @patch("api.task_service.AIGateway.grade_exam")

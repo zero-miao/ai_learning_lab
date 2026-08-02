@@ -57,19 +57,16 @@ export interface Topic {
   created_at: string;
   updated_at: string;
   materials: Material[];
-  notes: Note[];
   concepts: Concept[];
   questions: Question[];
   concept_relations: ConceptRelation[];
   highlights: Highlight[];
   learning_output: LearningOutput;
-  has_current_note: boolean;
 }
 
 export interface LearningOutput {
   concept_count: number;
   saved_question_count: number;
-  summary_count: number;
   map_node_count: number;
 }
 
@@ -136,20 +133,10 @@ export interface Highlight {
   material: number;
   chunk: number | null;
   source_text: string;
+  user_note: string;
   start_offset: number;
   end_offset: number;
   created_at: string;
-}
-
-export interface Note {
-  id: number;
-  topic: number;
-  title: string;
-  content: string;
-  material_fingerprint: string;
-  source_task: number | null;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface ExamQuestion {
@@ -204,7 +191,7 @@ export type AITaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'can
 
 export interface AITask {
   id: number;
-  task_type: 'briefing' | 'answer_question' | 'concept_draft' | 'generate_exam' | 'grade_exam' | 'note_draft' | 'review_prompt' | 'grade_review' | 'discussion_opening' | 'discussion_assessment' | 'discussion_reply' | 'learning_path';
+  task_type: 'briefing' | 'answer_question' | 'concept_draft' | 'generate_exam' | 'grade_exam' | 'review_prompt' | 'grade_review' | 'discussion_opening' | 'discussion_assessment' | 'discussion_reply' | 'learning_path';
   task_type_display: string;
   status: AITaskStatus;
   status_display: string;
@@ -274,12 +261,6 @@ export const createLearningPath = (topicId: number) =>
   api.post<TaskResponse>(`topics/${topicId}/learning-path/`);
 export const convertToLearning = (topicId: number) =>
   api.post<Topic>(`topics/${topicId}/convert-to-learning/`);
-export const createNoteDraft = (topicId: number, instructions = '') =>
-  api.post<TaskResponse>(`topics/${topicId}/note-drafts/`, { instructions });
-export const createNote = (data: Partial<Note>) => api.post<Note>('notes/', data);
-export const updateNote = (id: number, data: Partial<Note>) =>
-  api.patch<Note>(`notes/${id}/`, data);
-export const deleteNote = (id: number) => api.delete(`notes/${id}/`);
 export const checkHealth = () => api.get('health/');
 export const getQuestion = (id: number) => api.get<Question>(`questions/${id}/`);
 export const createQuestion = (data: Partial<Question>) => api.post<{ question: Question; task: AITask }>('questions/', data);
@@ -313,9 +294,18 @@ export const deleteConceptRelation = (id: number) =>
   api.delete(`concept-relations/${id}/`);
 export const createHighlight = (
   topicId: number,
-  data: { material: number; start_offset: number; end_offset: number },
+  data: {
+    material: number;
+    start_offset: number;
+    end_offset: number;
+    user_note?: string;
+  },
 ) => api.post<{ highlight: number; created: boolean }>(`topics/${topicId}/highlights/`, data);
 export const deleteHighlight = (id: number) => api.delete(`highlights/${id}/`);
+export const updateHighlightUserNote = (id: number, userNote: string) =>
+  api.patch<Highlight>(`highlights/${id}/user-note/`, {
+    user_note: userNote,
+  });
 export const getExam = (id: number) => api.get<Exam>(`exams/${id}/`);
 export const getExams = (params?: { topic?: number }) =>
   api.get<Exam[]>('exams/', { params });

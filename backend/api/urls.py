@@ -8,7 +8,6 @@ from .views import (
     ExamViewSet,
     HighlightViewSet,
     MaterialViewSet,
-    NoteViewSet,
     QuestionViewSet,
     ReviewRecordViewSet,
     TopicViewSet,
@@ -22,7 +21,6 @@ router.register(r"questions", QuestionViewSet)
 router.register(r"concepts", ConceptViewSet)
 router.register(r"concept-relations", ConceptRelationViewSet)
 router.register(r"highlights", HighlightViewSet)
-router.register(r"notes", NoteViewSet)
 router.register(r"exams", ExamViewSet)
 router.register(r"reviews", ReviewRecordViewSet)
 router.register(r"ai-tasks", AITaskViewSet)

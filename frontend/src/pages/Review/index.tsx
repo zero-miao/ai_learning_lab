@@ -250,7 +250,7 @@ const ReviewPage: React.FC = () => {
 
       {renderSection(
         '待复习',
-        '这些主题已到复习时间。进入主题回顾材料和笔记后，再记录完成。',
+        '这些主题已到复习时间。进入主题回顾材料、概念和已沉淀问答后，再记录完成。',
         dueReviews,
         true,
       )}

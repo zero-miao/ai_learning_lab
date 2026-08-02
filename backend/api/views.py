@@ -14,12 +14,10 @@ from .models import (
     Highlight,
     Material,
     MaterialChunk,
-    Note,
     Question,
     ReviewRecord,
     Topic,
 )
-from .note_service import build_note_source
 from .serializers import (
     AITaskSerializer,
     ConceptRelationSerializer,
@@ -28,7 +26,6 @@ from .serializers import (
     ExamSerializer,
     HighlightSerializer,
     MaterialSerializer,
-    NoteSerializer,
     QuestionSerializer,
     ReviewRecordSerializer,
     TopicSerializer,
@@ -49,9 +46,6 @@ def _build_review_context(review):
     material_context = "\n\n".join(
         f"材料：{material.title}\n{material.clean_text}" for material in materials
     )
-    note_context = "\n\n".join(
-        f"结构化笔记：{note.title}\n{note.content}" for note in review.topic.notes.all()
-    )
     concept_context = "\n\n".join(
         (
             f"概念：{concept.title}\n定义：{concept.definition}\n"
@@ -70,7 +64,6 @@ def _build_review_context(review):
         section
         for section in (
             material_context,
-            note_context,
             concept_context,
             question_context,
         )
@@ -137,43 +130,6 @@ class TopicViewSet(viewsets.ModelViewSet):
                 input_json={"topic_id": topic.id},
             )
 
-    @action(detail=True, methods=["post"], url_path="note-drafts")
-    def create_note_draft(self, request, pk=None):
-        topic = self.get_object()
-        context, material_fingerprint = build_note_source(topic)
-        if not context:
-            return Response(
-                {"detail": "请先导入至少一份处理成功的学习材料。"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        instructions = str(request.data.get("instructions", "")).strip()
-        has_current_note = Note.objects.filter(
-            topic=topic, material_fingerprint=material_fingerprint
-        ).exists()
-        if has_current_note and not instructions:
-            return Response(
-                {
-                    "detail": (
-                        "学习材料未变化，已有最新笔记。"
-                        "可编辑现有笔记，或填写新的生成要求后再生成。"
-                    )
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-        task, _ = enqueue_or_reuse(
-            "note_draft",
-            topic=topic,
-            input_json={
-                "topic_id": topic.id,
-                "context": context[:12000],
-                "material_fingerprint": material_fingerprint,
-                "instructions": instructions,
-            },
-        )
-        return Response(
-            {"task": AITaskSerializer(task).data}, status=status.HTTP_202_ACCEPTED
-        )
-
     @action(detail=True, methods=["post"], url_path="concepts")
     def create_concept(self, request, pk=None):
         topic = self.get_object()
@@ -232,6 +188,12 @@ class TopicViewSet(viewsets.ModelViewSet):
         material, chunk, source_text, start_offset, end_offset = _get_anchor_data(
             topic, request.data
         )
+        user_note = request.data.get("user_note", "")
+        if not isinstance(user_note, str):
+            return Response(
+                {"user_note": "备注必须是文本。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         highlight, created = Highlight.objects.get_or_create(
             material=material,
             start_offset=start_offset,
@@ -240,6 +202,7 @@ class TopicViewSet(viewsets.ModelViewSet):
                 "topic": topic,
                 "chunk": chunk,
                 "source_text": source_text,
+                "user_note": user_note,
             },
         )
         return Response(
@@ -250,11 +213,6 @@ class TopicViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], url_path="discussion")
     def discussion(self, request, pk=None):
         topic = self.get_object()
-        if topic.type != "discussion":
-            return Response(
-                {"detail": "该话题不是讨论型话题。"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         messages = topic.discussion_messages.all()
         return Response(
             {
@@ -266,11 +224,6 @@ class TopicViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="discussion-messages")
     def create_discussion_message(self, request, pk=None):
         topic = self.get_object()
-        if topic.type != "discussion":
-            return Response(
-                {"detail": "该话题不是讨论型话题。"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         content = str(request.data.get("content", "")).strip()
         if not content:
             return Response(
@@ -506,35 +459,18 @@ class HighlightViewSet(viewsets.ReadOnlyModelViewSet):
         highlight.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-
-class NoteViewSet(viewsets.ModelViewSet):
-    queryset = Note.objects.select_related("topic", "source_task")
-    serializer_class = NoteSerializer
-
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        topic_id = self.request.query_params.get("topic")
-        return queryset.filter(topic_id=topic_id) if topic_id else queryset
-
-    def perform_create(self, serializer):
-        task_id = self.request.data.get("source_task")
-        task = None
-        if task_id:
-            task = AITask.objects.filter(
-                pk=task_id, task_type="note_draft", status="succeeded"
-            ).first()
-            if task is None:
-                raise serializers.ValidationError(
-                    {"source_task": "笔记草稿任务不存在或尚未完成。"}
-                )
-            if task.topic_id != serializer.validated_data["topic"].id:
-                raise serializers.ValidationError(
-                    {"source_task": "笔记草稿与所属主题不一致。"}
-                )
-        serializer.save(
-            source_task=task,
-            material_fingerprint=task.input_json.get("material_fingerprint", ""),
-        )
+    @action(detail=True, methods=["patch"], url_path="user-note")
+    def update_user_note(self, request, pk=None):
+        highlight = self.get_object()
+        user_note = request.data.get("user_note")
+        if not isinstance(user_note, str):
+            return Response(
+                {"user_note": "备注必须是文本。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        highlight.user_note = user_note
+        highlight.save(update_fields=["user_note"])
+        return Response(HighlightSerializer(highlight).data)
 
 
 class ExamViewSet(viewsets.ReadOnlyModelViewSet):
@@ -687,7 +623,7 @@ class ReviewRecordViewSet(viewsets.ReadOnlyModelViewSet):
         context = _build_review_context(review)
         if not context:
             return Response(
-                {"detail": "请先保留至少一份处理成功的材料或结构化笔记。"},
+                {"detail": "请先保留至少一份处理成功的材料、概念或已沉淀问答。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         task, _ = enqueue_or_reuse(
@@ -716,7 +652,7 @@ class ReviewRecordViewSet(viewsets.ReadOnlyModelViewSet):
         context = _build_review_context(review)
         if not context:
             return Response(
-                {"detail": "请先保留至少一份学习材料、概念、问答或笔记。"},
+                {"detail": "请先保留至少一份学习材料、概念或已沉淀问答。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         review.response_text = response_text

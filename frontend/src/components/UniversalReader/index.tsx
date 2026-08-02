@@ -29,6 +29,7 @@ interface UniversalReaderProps {
   onMarkConcept: (selection: TextSelectionAnchor) => void;
   onAskQuestion: (selection: TextSelectionAnchor) => void;
   onHighlight: (selection: TextSelectionAnchor) => void;
+  onClearAnnotationSelection: () => void;
   onAnnotationClick: (
     type: 'concept' | 'question' | 'highlight',
     id: number,
@@ -218,6 +219,14 @@ function renderChunk(
           .filter((range) => range.type === 'question')
           .map((range) => range.id)
           .join(' ')}
+        data-concept-ids={activeRanges
+          .filter((range) => range.type === 'concept')
+          .map((range) => range.id)
+          .join(' ')}
+        data-highlight-ids={activeRanges
+          .filter((range) => range.type === 'highlight')
+          .map((range) => range.id)
+          .join(' ')}
         onClick={(event) => {
           if (!clickTarget) return;
           event.stopPropagation();
@@ -240,6 +249,7 @@ export default function UniversalReader({
   onMarkConcept,
   onAskQuestion,
   onHighlight,
+  onClearAnnotationSelection,
   onAnnotationClick,
   selectedAnnotations,
 }: UniversalReaderProps) {
@@ -343,7 +353,11 @@ export default function UniversalReader({
 
       <Divider className="universal-reader__divider" />
 
-      <div className="universal-reader__content" onMouseUp={handleMouseUp}>
+      <div
+        className="universal-reader__content"
+        onMouseUp={handleMouseUp}
+        onClick={onClearAnnotationSelection}
+      >
         {chunks.map((chunk) => (
           <p
             id={`reader-chunk-${chunk.id}`}

@@ -97,14 +97,20 @@ const TopicList: React.FC = () => {
 
   const visibleTopics = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();
-    return topics.filter((topic) => {
-      const matchesType = filter === 'all' || topic.type === filter;
-      const matchesKeyword =
-        !normalizedKeyword ||
-        topic.title.toLowerCase().includes(normalizedKeyword) ||
-        topic.goal.toLowerCase().includes(normalizedKeyword);
-      return matchesType && matchesKeyword;
-    });
+    return topics
+      .filter((topic) => {
+        const matchesType = filter === 'all' || topic.type === filter;
+        const matchesKeyword =
+          !normalizedKeyword ||
+          topic.title.toLowerCase().includes(normalizedKeyword) ||
+          topic.goal.toLowerCase().includes(normalizedKeyword);
+        return matchesType && matchesKeyword;
+      })
+      .sort(
+        (left, right) =>
+          new Date(right.created_at).getTime() -
+          new Date(left.created_at).getTime(),
+      );
   }, [filter, keyword, topics]);
 
   const closeModal = () => {

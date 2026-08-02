@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
@@ -44,8 +44,9 @@ import {
   retryAITask,
   saveQuestion,
   updateConcept,
+  updateHighlightUserNote,
 } from '../../api';
-import type { AITask, Concept, Material, Topic } from '../../api';
+import type { AITask, Concept, Highlight, Material, Topic } from '../../api';
 import UniversalReader from '../../components/UniversalReader';
 import type { TextSelectionAnchor } from '../../components/UniversalReader';
 import { useAITaskPolling } from '../../hooks/useAITaskPolling';
@@ -73,6 +74,10 @@ interface ConceptEditorValues {
   principle?: string;
   pitfalls?: string;
   applications?: string;
+}
+
+interface HighlightFormValues {
+  user_note?: string;
 }
 
 function renderMarkdownInline(text: string): React.ReactNode[] {
@@ -183,6 +188,14 @@ const MaterialReader: React.FC = () => {
   const [conceptEditorOpen, setConceptEditorOpen] = useState(false);
   const [editingConcept, setEditingConcept] = useState<Concept | null>(null);
   const [conceptEditorForm] = Form.useForm<ConceptEditorValues>();
+  const [highlightModalOpen, setHighlightModalOpen] = useState(false);
+  const [highlightSelection, setHighlightSelection] =
+    useState<TextSelectionAnchor | null>(null);
+  const [editingHighlight, setEditingHighlight] = useState<Highlight | null>(
+    null,
+  );
+  const [highlightSaving, setHighlightSaving] = useState(false);
+  const [highlightForm] = Form.useForm<HighlightFormValues>();
   const [selectedConceptId, setSelectedConceptId] = useState<number | null>(null);
   const [selectedQuestionId, setSelectedQuestionId] = useState<number | null>(null);
   const [selectedHighlightId, setSelectedHighlightId] = useState<number | null>(null);
@@ -191,6 +204,7 @@ const MaterialReader: React.FC = () => {
   );
   const navigate = useNavigate();
   const location = useLocation();
+  const handledNavigationRef = useRef<string | null>(null);
 
   const loadData = useCallback(async () => {
     if (!topicId || !materialId) return;
@@ -294,7 +308,10 @@ const MaterialReader: React.FC = () => {
       if (
         !target.closest('.ant-drawer') &&
         !target.closest('.ant-float-btn') &&
-        !target.closest('.universal-reader__selection-menu')
+        !target.closest('.universal-reader__selection-menu') &&
+        !target.closest('.ant-modal-root') &&
+        !target.closest('.ant-dropdown') &&
+        !target.closest('.ant-popover')
       ) {
         setAssistantVisible(false);
       }
@@ -313,14 +330,56 @@ const MaterialReader: React.FC = () => {
 
   useEffect(() => {
     if (!material) return;
+    const navigationKey = [
+      location.key,
+      topicId,
+      materialId,
+      location.search,
+    ].join(':');
+    if (handledNavigationRef.current === navigationKey) return;
+    handledNavigationRef.current = navigationKey;
+
     const searchParams = new URLSearchParams(location.search);
-    const questionId = Number(searchParams.get('question'));
-    if (Number.isInteger(questionId) && questionId > 0) {
-      const questionElement = document.querySelector<HTMLElement>(
-        `[data-question-ids~="${questionId}"]`,
+    const annotationTargets = [
+      {
+        type: 'concept' as const,
+        tab: 'concepts',
+        id: Number(searchParams.get('concept')),
+        selector: (id: number) => `[data-concept-ids~="${id}"]`,
+      },
+      {
+        type: 'question' as const,
+        tab: 'question-history',
+        id: Number(searchParams.get('question')),
+        selector: (id: number) => `[data-question-ids~="${id}"]`,
+      },
+      {
+        type: 'highlight' as const,
+        tab: 'highlights',
+        id: Number(searchParams.get('highlight')),
+        selector: (id: number) => `[data-highlight-ids~="${id}"]`,
+      },
+    ];
+    const annotationTarget = annotationTargets.find(({ id }) =>
+      Number.isInteger(id) && id > 0,
+    );
+    if (annotationTarget) {
+      setAssistantVisible(true);
+      setAssistantTab(annotationTarget.tab);
+      setSelectedConceptId(
+        annotationTarget.type === 'concept' ? annotationTarget.id : null,
       );
-      if (questionElement) {
-        questionElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setSelectedQuestionId(
+        annotationTarget.type === 'question' ? annotationTarget.id : null,
+      );
+      setSelectedHighlightId(
+        annotationTarget.type === 'highlight' ? annotationTarget.id : null,
+      );
+      const element = document.querySelector<HTMLElement>(
+        annotationTarget.selector(annotationTarget.id),
+      );
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
         return;
       }
     }
@@ -439,19 +498,53 @@ const MaterialReader: React.FC = () => {
     conceptForm.resetFields();
   };
 
-  const handleHighlight = async (selection: TextSelectionAnchor) => {
+  const handleHighlight = (selection: TextSelectionAnchor) => {
+    setEditingHighlight(null);
+    setHighlightSelection(selection);
+    highlightForm.resetFields();
+    setHighlightModalOpen(true);
+  };
+
+  const openHighlightEditor = (highlight: Highlight) => {
+    setEditingHighlight(highlight);
+    setHighlightSelection(null);
+    highlightForm.setFieldsValue({ user_note: highlight.user_note });
+    setHighlightModalOpen(true);
+  };
+
+  const closeHighlightModal = () => {
+    setHighlightModalOpen(false);
+    setHighlightSelection(null);
+    setEditingHighlight(null);
+    highlightForm.resetFields();
+  };
+
+  const handleHighlightSubmit = async (values: HighlightFormValues) => {
     if (!topic || !material) return;
     try {
-      const response = await createHighlight(topic.id, {
-        material: material.id,
-        start_offset: selection.startOffset,
-        end_offset: selection.endOffset,
-      });
-      message.success(response.data.created ? '已添加高亮' : '该文本已经高亮');
+      setHighlightSaving(true);
+      if (editingHighlight) {
+        await updateHighlightUserNote(
+          editingHighlight.id,
+          values.user_note ?? '',
+        );
+        message.success('高亮备注已更新');
+      } else if (highlightSelection) {
+        const response = await createHighlight(topic.id, {
+          material: material.id,
+          start_offset: highlightSelection.startOffset,
+          end_offset: highlightSelection.endOffset,
+          user_note: values.user_note ?? '',
+        });
+        message.success(response.data.created ? '已添加高亮' : '该文本已经高亮');
+      }
+      closeHighlightModal();
       await loadData();
     } catch (error) {
-      console.error('Failed to create highlight:', error);
-      message.error('添加高亮失败');
+      console.error('Failed to save highlight:', error);
+      message.error('保存高亮失败');
+    } finally {
+      setHighlightSaving(false);
     }
   };
 
@@ -478,8 +571,13 @@ const MaterialReader: React.FC = () => {
   const handleJumpToHighlight = (highlightId: number) => {
     const highlight = topic?.highlights.find((item) => item.id === highlightId);
     if (!highlight) return;
+    setSelectedConceptId(null);
+    setSelectedQuestionId(null);
+    setSelectedHighlightId(highlightId);
     const target =
-      document.getElementById(`reader-highlight-${highlight.id}`) ??
+      document.querySelector<HTMLElement>(
+        `[data-highlight-ids~="${highlight.id}"]`,
+      ) ??
       document.getElementById(
         highlight.chunk ? `reader-chunk-${highlight.chunk}` : 'reader-chunk-0',
       );
@@ -487,7 +585,6 @@ const MaterialReader: React.FC = () => {
       behavior: 'smooth',
       block: 'center',
     });
-    setAssistantVisible(false);
   };
 
   const handleAnnotationClick = (
@@ -495,6 +592,9 @@ const MaterialReader: React.FC = () => {
     id: number,
   ) => {
     setAssistantVisible(true);
+    setSelectedConceptId(null);
+    setSelectedQuestionId(null);
+    setSelectedHighlightId(null);
     if (type === 'concept') {
       setAssistantTab('concepts');
       setSelectedConceptId(id);
@@ -507,14 +607,23 @@ const MaterialReader: React.FC = () => {
     }
   };
 
+  const clearAnnotationSelection = () => {
+    setSelectedConceptId(null);
+    setSelectedQuestionId(null);
+    setSelectedHighlightId(null);
+    setAssistantVisible(false);
+  };
+
   const handleJumpToQuestion = (questionId: number) => {
     const item = topic?.questions.find((question) => question.id === questionId);
     if (!item || item.start_offset === null) return;
+    setSelectedConceptId(null);
+    setSelectedQuestionId(questionId);
+    setSelectedHighlightId(null);
     const target = document.querySelector<HTMLElement>(
       `[data-question-ids~="${questionId}"]`,
     );
     target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setAssistantVisible(false);
   };
 
   const handleDeleteQuestion = async (questionId: number) => {
@@ -602,16 +711,20 @@ const MaterialReader: React.FC = () => {
       message.warning('该概念没有可用的材料来源。');
       return;
     }
+    setSelectedConceptId(concept.id);
+    setSelectedQuestionId(null);
+    setSelectedHighlightId(null);
     if (anchor.material === material?.id) {
       const target =
-        document.getElementById(`reader-concept-${concept.id}`) ??
+        document.querySelector<HTMLElement>(
+          `[data-concept-ids~="${concept.id}"]`,
+        ) ??
         document.getElementById(`reader-chunk-${anchor.chunk ?? 0}`);
       target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setAssistantVisible(false);
       return;
     }
     navigate(
-      `/topics/${topic.id}/materials/${anchor.material}?anchor=${anchor.start_offset}`,
+      `/topics/${topic.id}/materials/${anchor.material}?anchor=${anchor.start_offset}&concept=${concept.id}`,
     );
   };
 
@@ -645,7 +758,16 @@ const MaterialReader: React.FC = () => {
             type="text"
             icon={<ArrowLeftOutlined />}
             onClick={() => navigate(`/topics/${topicId}`)}
-            style={{ marginBottom: 20, color: darkMode ? '#d4d4d8' : '#595959' }}
+            style={{
+              position: 'fixed',
+              top: 76,
+              left: 24,
+              zIndex: 2,
+              marginBottom: 20,
+              color: darkMode ? '#d4d4d8' : '#595959',
+              background: darkMode ? '#171717' : '#ffffff',
+              boxShadow: '0 2px 8px rgba(15, 23, 42, 0.12)',
+            }}
           >
             返回话题
           </Button>
@@ -699,6 +821,7 @@ const MaterialReader: React.FC = () => {
             onMarkConcept={handleMarkConcept}
             onAskQuestion={handleAskSelection}
             onHighlight={handleHighlight}
+            onClearAnnotationSelection={clearAnnotationSelection}
             onAnnotationClick={handleAnnotationClick}
             selectedAnnotations={[
               { type: 'concept', id: selectedConceptId },
@@ -988,15 +1111,23 @@ const MaterialReader: React.FC = () => {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                     <Typography.Text strong style={{ flex: 1 }}>高亮于 {new Date(highlight.created_at).toLocaleString()}</Typography.Text>
                     <Tooltip title="查看原文"><Button type="text" size="small" icon={<EyeOutlined />} onClick={() => handleJumpToHighlight(highlight.id)} /></Tooltip>
+                    <Tooltip title="编辑备注"><Button type="text" size="small" icon={<EditOutlined />} onClick={() => openHighlightEditor(highlight)} /></Tooltip>
                     <Popconfirm title="删除这条高亮？" okText="删除" okButtonProps={{ danger: true }} cancelText="取消" onConfirm={() => void handleDeleteHighlight(highlight.id)}>
                       <Tooltip title="删除高亮"><Button type="text" size="small" danger icon={<DeleteOutlined />} /></Tooltip>
                     </Popconfirm>
                   </div>
                 }
                 description={
-                  <Typography.Paragraph>
-                    {highlight.source_text}
-                  </Typography.Paragraph>
+                  <Space direction="vertical" size={2}>
+                    <Typography.Paragraph style={{ margin: 0 }}>
+                      {highlight.source_text}
+                    </Typography.Paragraph>
+                    {highlight.user_note && (
+                      <Typography.Text type="secondary">
+                        备注：{highlight.user_note}
+                      </Typography.Text>
+                    )}
+                  </Space>
                 }
               />
               </List.Item>
@@ -1073,6 +1204,37 @@ const MaterialReader: React.FC = () => {
           </Form.Item>
           <Form.Item name="applications" label="适用场景">
             <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={editingHighlight ? '编辑高亮备注' : '添加高亮'}
+        open={highlightModalOpen}
+        onCancel={closeHighlightModal}
+        onOk={() => highlightForm.submit()}
+        confirmLoading={highlightSaving}
+        okText={editingHighlight ? '保存备注' : '添加高亮'}
+      >
+        {highlightSelection && (
+          <Alert
+            type="info"
+            showIcon
+            message="已选中的原文"
+            description={`“${highlightSelection.text}”`}
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        <Form
+          form={highlightForm}
+          layout="vertical"
+          onFinish={(values) => void handleHighlightSubmit(values)}
+        >
+          <Form.Item name="user_note" label="备注（可选）">
+            <Input.TextArea
+              rows={4}
+              placeholder="记录你的理解、疑问或后续行动..."
+            />
           </Form.Item>
         </Form>
       </Modal>

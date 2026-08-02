@@ -12,12 +12,10 @@ from .models import (
     Highlight,
     Material,
     MaterialChunk,
-    Note,
     Question,
     ReviewRecord,
     Topic,
 )
-from .note_service import build_note_source
 
 
 class AIResponseSerializer(serializers.ModelSerializer):
@@ -201,6 +199,7 @@ class HighlightSerializer(serializers.ModelSerializer):
             "material",
             "chunk",
             "source_text",
+            "user_note",
             "start_offset",
             "end_offset",
             "created_at",
@@ -247,27 +246,6 @@ class MaterialSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at", "clean_text", "import_status"]
 
 
-class NoteSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Note
-        fields = [
-            "id",
-            "topic",
-            "title",
-            "content",
-            "material_fingerprint",
-            "source_task",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = [
-            "material_fingerprint",
-            "source_task",
-            "created_at",
-            "updated_at",
-        ]
-
-
 class TopicSerializer(serializers.ModelSerializer):
     type_display = serializers.CharField(source="get_type_display", read_only=True)
     discussion_outcome_display = serializers.CharField(
@@ -278,25 +256,18 @@ class TopicSerializer(serializers.ModelSerializer):
         source="get_mastery_level_display", read_only=True
     )
     materials = MaterialSerializer(many=True, read_only=True)
-    notes = NoteSerializer(many=True, read_only=True)
     concepts = ConceptSerializer(many=True, read_only=True)
     questions = QuestionSerializer(many=True, read_only=True)
     concept_relations = ConceptRelationSerializer(many=True, read_only=True)
     highlights = HighlightSerializer(many=True, read_only=True)
     learning_output = serializers.SerializerMethodField()
-    has_current_note = serializers.SerializerMethodField()
 
     def get_learning_output(self, topic):
         return {
             "concept_count": topic.concepts.count(),
             "saved_question_count": topic.questions.filter(is_saved=True).count(),
-            "summary_count": topic.notes.count(),
             "map_node_count": topic.concepts.count(),
         }
-
-    def get_has_current_note(self, topic):
-        _, fingerprint = build_note_source(topic)
-        return topic.notes.filter(material_fingerprint=fingerprint).exists()
 
     class Meta:
         model = Topic
@@ -317,13 +288,11 @@ class TopicSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "materials",
-            "notes",
             "concepts",
             "questions",
             "concept_relations",
             "highlights",
             "learning_output",
-            "has_current_note",
         ]
         read_only_fields = ["created_at", "updated_at"]
 

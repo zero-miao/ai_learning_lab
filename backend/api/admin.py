@@ -12,7 +12,6 @@ from .models import (
     Highlight,
     Material,
     MaterialChunk,
-    Note,
     Question,
     ReviewRecord,
     Topic,
@@ -121,15 +120,7 @@ class HighlightAdmin(admin.ModelAdmin):
         "created_at",
     )
     list_filter = ("topic", "material")
-    search_fields = ("source_text", "material__title")
-
-
-@admin.register(Note)
-class NoteAdmin(admin.ModelAdmin):
-    list_display = ("title", "topic", "source_task", "created_at", "updated_at")
-    list_filter = ("topic",)
-    search_fields = ("title", "content", "topic__title")
-    readonly_fields = ("source_task", "created_at", "updated_at")
+    search_fields = ("source_text", "user_note", "material__title")
 
 
 @admin.register(AIResponse)

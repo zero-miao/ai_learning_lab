@@ -32,31 +32,50 @@ class OpenAIProvider(LLMProvider):
 
 
 class AIGateway:
-    _provider: Optional[LLMProvider] = None
+    _providers: Dict[str, LLMProvider] = {}
 
     @classmethod
-    def get_provider(cls) -> LLMProvider:
-        if cls._provider is None:
+    def get_default_model(cls) -> str:
+        provider_type = os.getenv("LLM_PROVIDER_TYPE", "openai").lower()
+        return os.getenv(
+            "LLM_MODEL", "llama3" if provider_type == "ollama" else "gpt-4o"
+        )
+
+    @classmethod
+    def get_model_for_task(cls, task_type: str) -> str:
+        override = os.getenv(f"LLM_MODEL_{task_type.upper()}", "").strip()
+        return override or cls.get_default_model()
+
+    @classmethod
+    def get_provider(cls, model: Optional[str] = None) -> LLMProvider:
+        selected_model = model or cls.get_default_model()
+        if selected_model not in cls._providers:
             provider_type = os.getenv("LLM_PROVIDER_TYPE", "openai").lower()
 
             if provider_type == "ollama":
                 api_key = os.getenv("LLM_API_KEY", "ollama")
                 base_url = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")
-                model = os.getenv("LLM_MODEL", "llama3")
             else:
                 api_key = os.getenv("LLM_API_KEY")
                 base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
-                model = os.getenv("LLM_MODEL", "gpt-4o")
 
                 if not api_key:
                     raise ValueError("LLM_API_KEY not found in environment variables.")
 
-            cls._provider = OpenAIProvider(api_key, base_url, model)
-        return cls._provider
+            cls._providers[selected_model] = OpenAIProvider(
+                api_key, base_url, selected_model
+            )
+        return cls._providers[selected_model]
 
     @classmethod
-    def ask_question(cls, context: str, question: str, selected_text: str = "") -> str:
-        provider = cls.get_provider()
+    def ask_question(
+        cls,
+        context: str,
+        question: str,
+        selected_text: str = "",
+        model: Optional[str] = None,
+    ) -> str:
+        provider = cls.get_provider(model)
         messages = [
             {
                 "role": "system",
@@ -74,8 +93,10 @@ class AIGateway:
         return provider.generate_response(messages)
 
     @classmethod
-    def generate_briefing(cls, material_content: str) -> str:
-        provider = cls.get_provider()
+    def generate_briefing(
+        cls, material_content: str, model: Optional[str] = None
+    ) -> str:
+        provider = cls.get_provider(model)
         messages = [
             {
                 "role": "system",
@@ -86,8 +107,10 @@ class AIGateway:
         return provider.generate_response(messages)
 
     @classmethod
-    def generate_discussion_opening(cls, topic_title: str, goal: str) -> str:
-        provider = cls.get_provider()
+    def generate_discussion_opening(
+        cls, topic_title: str, goal: str, model: Optional[str] = None
+    ) -> str:
+        provider = cls.get_provider(model)
         messages = [
             {
                 "role": "system",
@@ -106,9 +129,13 @@ class AIGateway:
 
     @classmethod
     def assess_discussion_material(
-        cls, topic_title: str, goal: str, material_context: str
+        cls,
+        topic_title: str,
+        goal: str,
+        material_context: str,
+        model: Optional[str] = None,
     ) -> str:
-        provider = cls.get_provider()
+        provider = cls.get_provider(model)
         messages = [
             {
                 "role": "system",
@@ -137,8 +164,9 @@ class AIGateway:
         material_context: str,
         history: str,
         user_message: str,
+        model: Optional[str] = None,
     ) -> str:
-        provider = cls.get_provider()
+        provider = cls.get_provider(model)
         messages = [
             {
                 "role": "system",
@@ -160,9 +188,14 @@ class AIGateway:
 
     @classmethod
     def generate_learning_path(
-        cls, topic_title: str, goal: str, material_context: str, history: str
+        cls,
+        topic_title: str,
+        goal: str,
+        material_context: str,
+        history: str,
+        model: Optional[str] = None,
     ) -> str:
-        provider = cls.get_provider()
+        provider = cls.get_provider(model)
         messages = [
             {
                 "role": "system",
@@ -185,9 +218,13 @@ class AIGateway:
 
     @classmethod
     def generate_concept_draft(
-        cls, concept_title: str, source_text: str, context: str
+        cls,
+        concept_title: str,
+        source_text: str,
+        context: str,
+        model: Optional[str] = None,
     ) -> dict[str, str]:
-        provider = cls.get_provider()
+        provider = cls.get_provider(model)
         messages = [
             {
                 "role": "system",
@@ -220,36 +257,10 @@ class AIGateway:
         return {field: str(parsed[field]).strip() for field in required_fields}
 
     @classmethod
-    def generate_note_draft(
-        cls, topic_title: str, goal: str, context: str, instructions: str = ""
-    ) -> str:
-        provider = cls.get_provider()
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是学习笔记助手。基于给定材料生成简洁、可编辑的 Markdown "
-                    "结构化笔记。必须区分材料明确陈述的内容和需要继续确认的推断，"
-                    "避免虚构材料中没有的事实。建议包含：核心结论、关键概念与关系、"
-                    "适用边界、待确认问题。不要添加标题。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"学习主题：{topic_title}\n学习目标：{goal or '未提供'}\n"
-                    f"学习材料：\n{context}\n\n"
-                    f"用户的额外要求：{instructions or '无'}"
-                ),
-            },
-        ]
-        return provider.generate_response(messages)
-
-    @classmethod
     def generate_exam(
-        cls, topic_title: str, goal: str, context: str
+        cls, topic_title: str, goal: str, context: str, model: Optional[str] = None
     ) -> list[dict[str, Any]]:
-        provider = cls.get_provider()
+        provider = cls.get_provider(model)
         messages = [
             {
                 "role": "system",
@@ -276,9 +287,14 @@ class AIGateway:
 
     @classmethod
     def generate_review_prompt(
-        cls, topic_title: str, goal: str, context: str, exam_feedback: str
+        cls,
+        topic_title: str,
+        goal: str,
+        context: str,
+        exam_feedback: str,
+        model: Optional[str] = None,
     ) -> str:
-        provider = cls.get_provider()
+        provider = cls.get_provider(model)
         messages = [
             {
                 "role": "system",
@@ -302,9 +318,13 @@ class AIGateway:
 
     @classmethod
     def grade_review(
-        cls, topic_title: str, context: str, response_text: str
+        cls,
+        topic_title: str,
+        context: str,
+        response_text: str,
+        model: Optional[str] = None,
     ) -> dict[str, Any]:
-        provider = cls.get_provider()
+        provider = cls.get_provider(model)
         messages = [
             {
                 "role": "system",
@@ -341,8 +361,9 @@ class AIGateway:
         cls,
         topic_title: str,
         questions: list[dict[str, Any]],
+        model: Optional[str] = None,
     ) -> dict[str, Any]:
-        provider = cls.get_provider()
+        provider = cls.get_provider(model)
         messages = [
             {
                 "role": "system",

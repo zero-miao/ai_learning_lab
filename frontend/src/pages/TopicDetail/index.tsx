@@ -10,6 +10,7 @@ import {
   Tag,
   List,
   Modal,
+  Pagination,
   Form,
   Input,
   Popconfirm,
@@ -34,9 +35,37 @@ import {
   listAITasks,
 } from '../../api';
 import type { Topic } from '../../api';
+import TopicDiscussion from '../../components/TopicDiscussion';
 
 const { Title } = Typography;
 const { Content } = Layout;
+const OUTPUT_PAGE_SIZE = 5;
+type LearningOutputTab = 'questions' | 'concepts' | 'highlights';
+
+interface SearchField {
+  label: string;
+  value?: string;
+}
+
+function getMatchingFields(fields: SearchField[], keyword: string) {
+  if (!keyword) return [];
+  return fields.filter((field) =>
+    field.value?.toLowerCase().includes(keyword),
+  );
+}
+
+function renderHighlightedText(value: string, keyword: string): React.ReactNode {
+  if (!keyword) return value;
+  const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`(${escapedKeyword})`, 'gi');
+  return value.split(pattern).map((part, index) =>
+    part.toLowerCase() === keyword ? (
+      <mark key={index}>{part}</mark>
+    ) : (
+      part
+    ),
+  );
+}
 
 const TopicDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -44,6 +73,9 @@ const TopicDetail: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [briefingMaterialIds, setBriefingMaterialIds] = useState<number[]>([]);
+  const [outputTab, setOutputTab] = useState<LearningOutputTab>('questions');
+  const [outputKeyword, setOutputKeyword] = useState('');
+  const [outputPage, setOutputPage] = useState(1);
   const [form] = Form.useForm();
   const navigate = useNavigate();
 
@@ -117,6 +149,94 @@ const TopicDetail: React.FC = () => {
   if (topic.type === 'discussion') {
     return <Navigate to={`/topics/${topic.id}/discussion`} replace />;
   }
+  const getMaterialTitle = (materialId: number | null) =>
+    topic.materials.find((material) => material.id === materialId)?.title ??
+    '未知材料';
+  const normalizedKeyword = outputKeyword.trim().toLowerCase();
+  const savedQuestions = topic.questions.filter(
+    (question) => question.is_saved,
+  );
+  const questionFields = (question: (typeof savedQuestions)[number]) => [
+    { label: '问题', value: question.question_text },
+    ...(question.selected_text
+      ? [{ label: '原文', value: question.selected_text }]
+      : [{ label: 'AI 回答', value: question.ai_responses[0]?.content }]),
+    { label: '出处', value: getMaterialTitle(question.material) },
+  ];
+  const conceptFields = (concept: Topic['concepts'][number]) => {
+    const anchor = concept.anchors[0];
+    return [
+      { label: '概念名称', value: concept.title },
+      { label: '定义', value: concept.definition },
+      { label: '原文', value: anchor?.source_text },
+      { label: '出处', value: anchor?.material_title },
+    ];
+  };
+  const highlightFields = (highlight: Topic['highlights'][number]) => [
+    { label: '原文', value: highlight.source_text },
+    { label: '出处', value: getMaterialTitle(highlight.material) },
+    { label: '备注', value: highlight.user_note },
+  ];
+  const matchesFields = (fields: SearchField[], keyword = normalizedKeyword) =>
+    !keyword || getMatchingFields(fields, keyword).length > 0;
+  const renderMatchedFieldNames = (fields: SearchField[]) => {
+    const matchedFields = getMatchingFields(fields, normalizedKeyword);
+    return matchedFields.length ? (
+      <Typography.Text type="secondary">
+        匹配字段：{matchedFields.map((field) => field.label).join('、')}
+      </Typography.Text>
+    ) : null;
+  };
+  const filteredQuestions = savedQuestions.filter((question) =>
+    matchesFields(questionFields(question)),
+  );
+  const filteredConcepts = topic.concepts.filter((concept) =>
+    matchesFields(conceptFields(concept)),
+  );
+  const filteredHighlights = topic.highlights.filter((highlight) =>
+    matchesFields(highlightFields(highlight)),
+  );
+  const paginate = <Item,>(items: Item[]) =>
+    items.slice(
+      (outputPage - 1) * OUTPUT_PAGE_SIZE,
+      outputPage * OUTPUT_PAGE_SIZE,
+    );
+  const renderOutputPagination = (total: number) =>
+    total > OUTPUT_PAGE_SIZE ? (
+      <Pagination
+        current={outputPage}
+        pageSize={OUTPUT_PAGE_SIZE}
+        total={total}
+        showSizeChanger={false}
+        onChange={setOutputPage}
+        style={{ marginTop: 16, textAlign: 'right' }}
+      />
+    ) : null;
+  const handleOutputTabChange = (nextTab: string) => {
+    setOutputTab(nextTab as LearningOutputTab);
+    setOutputPage(1);
+  };
+  const handleOutputKeywordChange = (value: string) => {
+    setOutputKeyword(value);
+    setOutputPage(1);
+    const nextKeyword = value.trim().toLowerCase();
+    if (!nextKeyword) return;
+    const matchingTabs = {
+      questions: savedQuestions.some((question) =>
+        matchesFields(questionFields(question), nextKeyword),
+      ),
+      concepts: topic.concepts.some((concept) =>
+        matchesFields(conceptFields(concept), nextKeyword),
+      ),
+      highlights: topic.highlights.some((highlight) =>
+        matchesFields(highlightFields(highlight), nextKeyword),
+      ),
+    };
+    const nextTab = (
+      [outputTab, 'questions', 'concepts', 'highlights'] as LearningOutputTab[]
+    ).find((tab) => matchingTabs[tab]);
+    if (nextTab) setOutputTab(nextTab);
+  };
 
   return (
     <Content style={{ padding: '24px' }}>
@@ -162,69 +282,240 @@ const TopicDetail: React.FC = () => {
 
         <Card
           title="学习产出"
+          extra={
+            <Input.Search
+              allowClear
+              placeholder="搜索当前学习产出"
+              style={{ width: 260 }}
+              value={outputKeyword}
+              onChange={(event) => handleOutputKeywordChange(event.target.value)}
+            />
+          }
         >
           <Tabs
+            activeKey={outputTab}
+            onChange={handleOutputTabChange}
             items={[
               {
                 key: 'questions',
-                label: `问答 (${topic.questions.filter((question) => question.is_saved).length})`,
+                label: `问答 (${filteredQuestions.length})`,
                 children: (
-                  <List
-                    size="small"
-                    dataSource={topic.questions.filter((question) => question.is_saved)}
-                    locale={{ emptyText: '还没有已沉淀问答。' }}
-                    renderItem={(question) => (
-                      <List.Item
-                        actions={[
-                          question.material && question.start_offset !== null ? (
-                            <Button key="source" type="link" icon={<EyeOutlined />} onClick={() => navigate(`/topics/${topic.id}/materials/${question.material}?anchor=${question.start_offset}&question=${question.id}`)}>
-                              查看原文
-                            </Button>
-                          ) : null,
-                          <Popconfirm key="delete" title="删除这条问答？" okText="删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void handleDeleteQuestion(question.id)}>
-                            <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
-                          </Popconfirm>,
-                        ]}
-                      >
-                        <List.Item.Meta title={question.question_text} description={question.selected_text ? `原文：“${question.selected_text}”` : question.ai_responses[0]?.content || 'AI 回答仍在生成或不可用。'} />
-                      </List.Item>
-                    )}
-                  />
+                  <>
+                    <List
+                      size="small"
+                      dataSource={paginate(filteredQuestions)}
+                      locale={{ emptyText: '没有匹配的已沉淀问答。' }}
+                      renderItem={(question) => (
+                        <List.Item
+                          actions={[
+                            question.material && question.start_offset !== null ? (
+                              <Button key="source" type="link" icon={<EyeOutlined />} onClick={() => navigate(`/topics/${topic.id}/materials/${question.material}?anchor=${question.start_offset}&question=${question.id}`)}>
+                                查看原文
+                              </Button>
+                            ) : null,
+                            <Popconfirm key="delete" title="删除这条问答？" okText="删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void handleDeleteQuestion(question.id)}>
+                              <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
+                            </Popconfirm>,
+                          ]}
+                        >
+                          <List.Item.Meta
+                            title={renderHighlightedText(
+                              question.question_text,
+                              normalizedKeyword,
+                            )}
+                            description={
+                              question.selected_text ? (
+                                <Space direction="vertical" size={2}>
+                                  <Typography.Text>
+                                    原文：“
+                                    {renderHighlightedText(
+                                      question.selected_text,
+                                      normalizedKeyword,
+                                    )}
+                                    ”
+                                  </Typography.Text>
+                                  <Typography.Text type="secondary">
+                                    来自：《
+                                    {renderHighlightedText(
+                                      getMaterialTitle(question.material),
+                                      normalizedKeyword,
+                                    )}
+                                    》
+                                  </Typography.Text>
+                                  {renderMatchedFieldNames(
+                                    questionFields(question),
+                                  )}
+                                </Space>
+                              ) : (
+                                <Space direction="vertical" size={2}>
+                                  <Typography.Text>
+                                    {renderHighlightedText(
+                                      question.ai_responses[0]?.content ||
+                                        'AI 回答仍在生成或不可用。',
+                                      normalizedKeyword,
+                                    )}
+                                  </Typography.Text>
+                                  <Typography.Text type="secondary">
+                                    来自：《
+                                    {renderHighlightedText(
+                                      getMaterialTitle(question.material),
+                                      normalizedKeyword,
+                                    )}
+                                    》
+                                  </Typography.Text>
+                                  {renderMatchedFieldNames(
+                                    questionFields(question),
+                                  )}
+                                </Space>
+                              )
+                            }
+                          />
+                        </List.Item>
+                      )}
+                    />
+                    {renderOutputPagination(filteredQuestions.length)}
+                  </>
                 ),
               },
               {
                 key: 'concepts',
-                label: `概念 (${topic.concepts.length})`,
+                label: `概念 (${filteredConcepts.length})`,
                 children: (
+                  <>
                   <List
                     size="small"
-                    dataSource={topic.concepts}
-                    locale={{ emptyText: '还没有概念。' }}
+                    dataSource={paginate(filteredConcepts)}
+                    locale={{ emptyText: '没有匹配的概念。' }}
                     renderItem={(concept) => {
                       const anchor = concept.anchors[0];
                       return (
-                        <List.Item actions={anchor ? [<Button key="source" type="link" icon={<EyeOutlined />} onClick={() => navigate(`/topics/${topic.id}/materials/${anchor.material}?anchor=${anchor.start_offset}`)}>查看原文</Button>] : undefined}>
-                          <List.Item.Meta title={concept.title} description={concept.definition || '概念草稿正在生成或等待补全。'} />
+                        <List.Item
+                          actions={
+                            anchor
+                              ? [
+                                  <Button
+                                    key="source"
+                                    type="link"
+                                    icon={<EyeOutlined />}
+                                    onClick={() =>
+                                      navigate(
+                                        `/topics/${topic.id}/materials/${anchor.material}?anchor=${anchor.start_offset}&concept=${concept.id}`,
+                                      )
+                                    }
+                                  >
+                                    查看原文
+                                  </Button>,
+                                ]
+                              : undefined
+                          }
+                        >
+                          <List.Item.Meta
+                            title={renderHighlightedText(
+                              concept.title,
+                              normalizedKeyword,
+                            )}
+                            description={
+                              <Space direction="vertical" size={2}>
+                                <Typography.Text>
+                                  {renderHighlightedText(
+                                    concept.definition ||
+                                      '概念草稿正在生成或等待补全。',
+                                    normalizedKeyword,
+                                  )}
+                                </Typography.Text>
+                                {anchor && (
+                                  <>
+                                    <Typography.Text>
+                                      原文：“
+                                      {renderHighlightedText(
+                                        anchor.source_text,
+                                        normalizedKeyword,
+                                      )}
+                                      ”
+                                    </Typography.Text>
+                                    <Typography.Text type="secondary">
+                                      来自：《
+                                      {renderHighlightedText(
+                                        anchor.material_title,
+                                        normalizedKeyword,
+                                      )}
+                                      》
+                                    </Typography.Text>
+                                  </>
+                                )}
+                                {renderMatchedFieldNames(
+                                  conceptFields(concept),
+                                )}
+                              </Space>
+                            }
+                          />
                         </List.Item>
                       );
                     }}
                   />
+                  {renderOutputPagination(filteredConcepts.length)}
+                  </>
                 ),
               },
               {
                 key: 'highlights',
-                label: `高亮 (${topic.highlights.length})`,
+                label: `高亮 (${filteredHighlights.length})`,
                 children: (
+                  <>
                   <List
                     size="small"
-                    dataSource={topic.highlights}
-                    locale={{ emptyText: '还没有高亮。' }}
+                    dataSource={paginate(filteredHighlights)}
+                    locale={{ emptyText: '没有匹配的高亮。' }}
                     renderItem={(highlight) => (
-                      <List.Item actions={[<Button key="source" type="link" icon={<EyeOutlined />} onClick={() => navigate(`/topics/${topic.id}/materials/${highlight.material}?anchor=${highlight.start_offset}`)}>查看原文</Button>]}>
-                        <Typography.Paragraph style={{ margin: 0 }}>{highlight.source_text}</Typography.Paragraph>
+                      <List.Item
+                        actions={[
+                          <Button
+                            key="source"
+                            type="link"
+                            icon={<EyeOutlined />}
+                            onClick={() =>
+                              navigate(
+                                `/topics/${topic.id}/materials/${highlight.material}?anchor=${highlight.start_offset}&highlight=${highlight.id}`,
+                              )
+                            }
+                          >
+                            查看原文
+                          </Button>,
+                        ]}
+                      >
+                        <Space direction="vertical" size={2}>
+                          <Typography.Paragraph style={{ margin: 0 }}>
+                            原文：“
+                            {renderHighlightedText(
+                              highlight.source_text,
+                              normalizedKeyword,
+                            )}
+                            ”
+                          </Typography.Paragraph>
+                          <Typography.Text type="secondary">
+                            来自：《
+                            {renderHighlightedText(
+                              getMaterialTitle(highlight.material),
+                              normalizedKeyword,
+                            )}
+                            》
+                          </Typography.Text>
+                          {highlight.user_note && (
+                            <Typography.Text type="secondary">
+                              备注：
+                              {renderHighlightedText(
+                                highlight.user_note,
+                                normalizedKeyword,
+                              )}
+                            </Typography.Text>
+                          )}
+                          {renderMatchedFieldNames(highlightFields(highlight))}
+                        </Space>
                       </List.Item>
                     )}
                   />
+                  {renderOutputPagination(filteredHighlights.length)}
+                  </>
                 ),
               },
             ]}
@@ -277,6 +568,8 @@ const TopicDetail: React.FC = () => {
             locale={{ emptyText: '暂无材料，请先导入学习材料' }}
           />
         </Card>
+
+        <TopicDiscussion topicId={topic.id} />
       </Space>
 
       <Modal
