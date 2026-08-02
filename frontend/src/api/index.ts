@@ -18,6 +18,7 @@ export interface Material {
   clean_text: string;
   import_status: 'pending' | 'success' | 'failed';
   import_status_display: string;
+  import_error: string;
   created_at: string;
   chunks: MaterialChunk[];
   ai_responses: AIResponse[];
@@ -50,6 +51,8 @@ export interface Topic {
   discussion_outcome: 'pending' | 'learn' | 'not_learn';
   discussion_outcome_display: string;
   discussion_rationale: string;
+  discussion_stage: 'explore' | 'frame' | 'decide';
+  discussion_context: Record<string, unknown>;
   status: 'draft' | 'learning' | 'exam_ready' | 'reviewing' | 'archived';
   status_display: string;
   mastery_level: 'unknown' | 'weak' | 'pass' | 'strong';
@@ -105,7 +108,11 @@ export interface DiscussionMessage {
   message_type: 'opening' | 'assessment' | 'discussion' | 'learning_path';
   message_type_display: string;
   content: string;
+  suggested_stage: 'explore' | 'frame' | 'decide' | null;
+  stage_suggestion_reason: string;
   source_task: number | null;
+  source_task_model: string;
+  source_task_stage: 'explore' | 'frame' | 'decide' | null;
   created_at: string;
 }
 
@@ -195,6 +202,11 @@ export interface AITask {
   task_type_display: string;
   status: AITaskStatus;
   status_display: string;
+  blocking_task: {
+    id: number;
+    task_type_display: string;
+    model: string;
+  } | null;
   topic: number | null;
   material: number | null;
   question: number | null;
@@ -248,6 +260,8 @@ export const updateTopic = (id: number, data: Partial<Topic>) => api.patch<Topic
 export const deleteTopic = (id: number) => api.delete(`topics/${id}/`);
 export const createMaterial = (data: Partial<Material>) => api.post<Material>('materials/', data);
 export const deleteMaterial = (id: number) => api.delete(`materials/${id}/`);
+export const retryMaterialImport = (id: number) =>
+  api.post<Material>(`materials/${id}/retry-import/`);
 export const getDiscussion = (topicId: number) =>
   api.get<DiscussionResponse>(`topics/${topicId}/discussion/`);
 export const createDiscussionMessage = (topicId: number, content: string) =>
@@ -255,6 +269,10 @@ export const createDiscussionMessage = (topicId: number, content: string) =>
     `topics/${topicId}/discussion-messages/`,
     { content },
   );
+export const updateDiscussionStage = (
+  topicId: number,
+  stage: Topic['discussion_stage'],
+) => api.post<Topic>(`topics/${topicId}/discussion-stage/`, { stage });
 export const createDiscussionAssessment = (topicId: number) =>
   api.post<TaskResponse>(`topics/${topicId}/discussion-assessment/`);
 export const createLearningPath = (topicId: number) =>

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -10,7 +11,8 @@ from openai import OpenAI
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
+DISCUSSION_STAGES = ("explore", "frame", "decide")
 
 
 class LLMProvider(ABC):
@@ -25,6 +27,13 @@ class OpenAIProvider(LLMProvider):
         self.model = model
 
     def generate_response(self, messages: List[Dict[str, str]], **kwargs) -> str:
+        if os.getenv("LLM_PROVIDER_TYPE", "openai").lower() == "ollama":
+            keep_alive = os.getenv("OLLAMA_KEEP_ALIVE", "").strip()
+            if keep_alive:
+                kwargs["extra_body"] = {
+                    **kwargs.pop("extra_body", {}),
+                    "keep_alive": keep_alive,
+                }
         response = self.client.chat.completions.create(
             model=self.model, messages=messages, **kwargs
         )
@@ -44,6 +53,13 @@ class AIGateway:
     @classmethod
     def get_model_for_task(cls, task_type: str) -> str:
         override = os.getenv(f"LLM_MODEL_{task_type.upper()}", "").strip()
+        return override or cls.get_default_model()
+
+    @classmethod
+    def get_model_for_discussion_stage(cls, stage: str) -> str:
+        if stage not in DISCUSSION_STAGES:
+            raise ValueError(f"不支持的讨论阶段：{stage}")
+        override = os.getenv(f"LLM_MODEL_DISCUSSION_{stage.upper()}", "").strip()
         return override or cls.get_default_model()
 
     @classmethod
@@ -164,15 +180,30 @@ class AIGateway:
         material_context: str,
         history: str,
         user_message: str,
+        stage: str,
+        discussion_context: dict[str, Any],
         model: Optional[str] = None,
-    ) -> str:
+    ) -> dict[str, Any]:
+        if stage not in DISCUSSION_STAGES:
+            raise ValueError(f"不支持的讨论阶段：{stage}")
         provider = cls.get_provider(model)
+        stage_instructions = {
+            "explore": "接住不完整表达，区分已知与猜测，推动一个最有价值的下一步，不要强迫用户形成学习决策。",
+            "frame": "将已有探索收敛成可检验的问题、约束或选择；先回应用户的具体问题，再决定是否提出一个追问。",
+            "decide": "基于已有对话和材料，比较现在学习、暂缓或先补前置知识等选项，不要虚构事实。",
+        }
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "你是学习决策助手。讨论始终围绕“是否应该学、为什么现在学、如何开始”推进。"
-                    "结合提供的材料和对话回应用户；区分材料事实与建议，不要把讨论直接扩写成课程。"
+                    "你是帮助用户探索学习问题的助手。不要使用固定标题、固定三段式、"
+                    "连续问题清单或无依据的用户画像。一次最多提出一个明确问题。"
+                    f"当前阶段：{stage}。{stage_instructions[stage]}"
+                    "只输出合法 JSON："
+                    '{"reply":"自然语言回复","context":{"confirmed_context":[],"open_questions":[],'
+                    '"working_hypotheses":[],"next_focus":""},"suggested_stage":null,'
+                    '"stage_suggestion_reason":""}。'
+                    "suggested_stage 只能是下一阶段（explore 时为 frame，frame 时为 decide）或 null。"
                 ),
             },
             {
@@ -180,11 +211,42 @@ class AIGateway:
                 "content": (
                     f"讨论话题：{topic_title}\n学习目标：{goal or '未提供'}\n"
                     f"材料上下文：{material_context or '暂无材料'}\n"
+                    f"当前工作记忆：{json.dumps(discussion_context, ensure_ascii=False)}\n"
                     f"最近对话：\n{history or '暂无'}\n\n用户新消息：{user_message}"
                 ),
             },
         ]
-        return provider.generate_response(messages)
+        raw_response = provider.generate_response(messages)
+        try:
+            response = json.loads(_extract_json_object(raw_response))
+        except (json.JSONDecodeError, ValueError):
+            return _fallback_discussion_response(raw_response, discussion_context)
+        if not isinstance(response, dict) or not str(response.get("reply", "")).strip():
+            return _fallback_discussion_response(raw_response, discussion_context)
+        context = response.get("context")
+        if not isinstance(context, dict):
+            raise ValueError("讨论回复缺少 context。")
+        suggested_stage = response.get("suggested_stage")
+        allowed_suggestion = {
+            "explore": {"frame", None},
+            "frame": {"decide", None},
+            "decide": {None},
+        }[stage]
+        if suggested_stage not in allowed_suggestion:
+            raise ValueError("讨论回复包含无效的阶段建议。")
+        return {
+            "reply": str(response["reply"]).strip(),
+            "context": {
+                "confirmed_context": response["context"].get("confirmed_context", []),
+                "open_questions": response["context"].get("open_questions", []),
+                "working_hypotheses": response["context"].get("working_hypotheses", []),
+                "next_focus": str(response["context"].get("next_focus", "")),
+            },
+            "suggested_stage": suggested_stage,
+            "stage_suggestion_reason": str(
+                response.get("stage_suggestion_reason", "")
+            ).strip(),
+        }
 
     @classmethod
     def generate_learning_path(
@@ -396,3 +458,44 @@ class AIGateway:
         if not isinstance(items, list) or not items:
             raise ValueError("AI 出题结果格式不正确")
         return items
+
+
+def _extract_json_object(raw_response: str) -> str:
+    content = raw_response.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[-1]
+        if content.endswith("```"):
+            content = content[:-3].strip()
+    start = content.find("{")
+    end = content.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("回复中未找到 JSON 对象。")
+    return content[start : end + 1]
+
+
+def _fallback_discussion_response(
+    raw_response: str, discussion_context: dict[str, Any]
+) -> dict[str, Any]:
+    match = re.search(
+        r'"reply"\s*:\s*("(?:\\.|[^"\\])*")',
+        raw_response,
+        flags=re.DOTALL,
+    )
+    if match:
+        try:
+            reply = json.loads(match.group(1)).strip()
+        except json.JSONDecodeError:
+            reply = ""
+        if reply:
+            return {
+                "reply": reply,
+                "context": discussion_context,
+                "suggested_stage": None,
+                "stage_suggestion_reason": "",
+            }
+    return {
+        "reply": raw_response.strip(),
+        "context": discussion_context,
+        "suggested_stage": None,
+        "stage_suggestion_reason": "",
+    }

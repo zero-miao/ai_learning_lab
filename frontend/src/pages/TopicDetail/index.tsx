@@ -16,6 +16,7 @@ import {
   Popconfirm,
   Radio,
   Tabs,
+  Tooltip,
   message,
 } from 'antd';
 import {
@@ -26,6 +27,7 @@ import {
   EyeOutlined,
   FormOutlined,
   PlusOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import {
   createMaterial,
@@ -33,6 +35,7 @@ import {
   deleteQuestion,
   getTopic,
   listAITasks,
+  retryMaterialImport,
 } from '../../api';
 import type { Topic } from '../../api';
 import TopicDiscussion from '../../components/TopicDiscussion';
@@ -130,6 +133,17 @@ const TopicDetail: React.FC = () => {
     } catch (error) {
       console.error('Failed to delete material:', error);
       message.error('删除材料失败');
+    }
+  };
+
+  const handleRetryMaterialImport = async (materialId: number) => {
+    try {
+      await retryMaterialImport(materialId);
+      message.success('材料已重新导入');
+      fetchTopic();
+    } catch (error) {
+      console.error('Failed to retry material import:', error);
+      message.error('重新导入材料失败');
     }
   };
 
@@ -538,6 +552,18 @@ const TopicDetail: React.FC = () => {
                   <Link key="read" to={`/topics/${topic.id}/materials/${item.id}`}>
                     <Button type="link" icon={<BookOutlined />}>开始学习</Button>
                   </Link>,
+                  ...(item.import_status === 'failed'
+                    ? [
+                        <Button
+                          key="retry-import"
+                          type="link"
+                          icon={<ReloadOutlined />}
+                          onClick={() => handleRetryMaterialImport(item.id)}
+                        >
+                          重新导入
+                        </Button>,
+                      ]
+                    : []),
                   <Button
                     key="delete"
                     type="text"
@@ -555,9 +581,19 @@ const TopicDetail: React.FC = () => {
                       <Tag color={item.source_type === 'manual' ? 'default' : 'purple'}>
                         {item.source_type_display}
                       </Tag>
-                      <Tag color={item.import_status === 'success' ? 'success' : 'warning'}>
-                        {item.import_status_display}
-                      </Tag>
+                      <Tooltip title={item.import_error || undefined}>
+                        <Tag
+                          color={
+                            item.import_status === 'success'
+                              ? 'success'
+                              : item.import_status === 'failed'
+                                ? 'error'
+                                : 'processing'
+                          }
+                        >
+                          {item.import_status_display}
+                        </Tag>
+                      </Tooltip>
                       {briefingMaterialIds.includes(item.id) && <Tag color="processing">AI 前导生成中</Tag>}
                       {item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer">查看来源</a>}
                     </Space>

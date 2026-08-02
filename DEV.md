@@ -95,6 +95,8 @@ ai-learning-lab/
 | `LLM_API_KEY` | OpenAI SDK 兼容要求使用的 API Key，本地 Ollama 可填固定值 | `ollama` |
 | `LLM_MODEL` | 当前后端默认调用模型 | `qwen3.6:35b-a3b` |
 | `LLM_MODEL_<TASK_TYPE>` | 指定 AI 任务类型的模型，未设置时回退 `LLM_MODEL` | `LLM_MODEL_CONCEPT_DRAFT=qwen3.6:35b-a3b` |
+| `LLM_MODEL_DISCUSSION_<STAGE>` | 按讨论阶段选择模型 | `EXPLORE=qwen2.5:14b`、`FRAME=qwen3:30b-a3b`、`DECIDE=qwen3.6:35b-a3b` |
+| `OLLAMA_KEEP_ALIVE` | Ollama 模型空闲保留时间 | `10m` |
 | `OLLAMA_CHAT_MODEL` | 正式聊天模型 | `qwen3.6:35b-a3b` |
 | `OLLAMA_FAST_MODEL` | 快速任务模型 | `qwen3:30b-a3b` |
 | `OLLAMA_EMBED_MODEL` | Embedding 模型 | `nomic-embed-text:latest` |
@@ -108,6 +110,7 @@ cp .env.example .env
 `<TASK_TYPE>` 使用任务类型的大写名称，例如 `briefing` 对应
 `LLM_MODEL_BRIEFING`，`answer_question` 对应 `LLM_MODEL_ANSWER_QUESTION`。
 完整可配置任务类型见 `.env.example`；任务入队时会将实际选用模型写入 `AITask`，后续重试继续使用同一模型。
+讨论型话题按 `explore`、`frame`、`decide` 阶段路由模型；48 GB 统一内存下保持单 worker，不要让多个大模型长期同时驻留。修改 `.env` 后需重启 Django 服务。
 
 ## 本地启动步骤
 

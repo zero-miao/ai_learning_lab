@@ -72,6 +72,16 @@ class DiscussionMessageSerializer(serializers.ModelSerializer):
     message_type_display = serializers.CharField(
         source="get_message_type_display", read_only=True
     )
+    source_task_model = serializers.CharField(
+        source="source_task.model", read_only=True
+    )
+    source_task_stage = serializers.SerializerMethodField()
+
+    def get_source_task_stage(self, message):
+        if message.source_task is None:
+            return None
+        stage = message.source_task.input_json.get("stage")
+        return stage if stage in {"explore", "frame", "decide"} else None
 
     class Meta:
         model = DiscussionMessage
@@ -83,7 +93,11 @@ class DiscussionMessageSerializer(serializers.ModelSerializer):
             "message_type",
             "message_type_display",
             "content",
+            "suggested_stage",
+            "stage_suggestion_reason",
             "source_task",
+            "source_task_model",
+            "source_task_stage",
             "created_at",
         ]
         read_only_fields = [
@@ -239,11 +253,17 @@ class MaterialSerializer(serializers.ModelSerializer):
             "clean_text",
             "import_status",
             "import_status_display",
+            "import_error",
             "created_at",
             "chunks",
             "ai_responses",
         ]
-        read_only_fields = ["created_at", "clean_text", "import_status"]
+        read_only_fields = [
+            "created_at",
+            "clean_text",
+            "import_status",
+            "import_error",
+        ]
 
 
 class TopicSerializer(serializers.ModelSerializer):
@@ -279,6 +299,8 @@ class TopicSerializer(serializers.ModelSerializer):
             "discussion_outcome",
             "discussion_outcome_display",
             "discussion_rationale",
+            "discussion_stage",
+            "discussion_context",
             "goal",
             "scope",
             "status",
@@ -294,7 +316,12 @@ class TopicSerializer(serializers.ModelSerializer):
             "highlights",
             "learning_output",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = [
+            "discussion_stage",
+            "discussion_context",
+            "created_at",
+            "updated_at",
+        ]
 
 
 class ExamQuestionSerializer(serializers.ModelSerializer):
@@ -394,6 +421,24 @@ class AITaskSerializer(serializers.ModelSerializer):
         source="get_task_type_display", read_only=True
     )
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    blocking_task = serializers.SerializerMethodField()
+
+    def get_blocking_task(self, task):
+        if task.status != "pending":
+            return None
+        blocking_task = (
+            AITask.objects.filter(status="running")
+            .exclude(pk=task.pk)
+            .order_by("started_at", "id")
+            .first()
+        )
+        if blocking_task is None:
+            return None
+        return {
+            "id": blocking_task.id,
+            "task_type_display": blocking_task.get_task_type_display(),
+            "model": blocking_task.model,
+        }
 
     class Meta:
         model = AITask
@@ -403,6 +448,8 @@ class AITaskSerializer(serializers.ModelSerializer):
             "task_type_display",
             "status",
             "status_display",
+            "blocking_task",
+            "priority",
             "topic",
             "material",
             "question",

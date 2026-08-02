@@ -4,6 +4,7 @@ from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 
+from .ai_gateway import AIGateway
 from .models import (
     AITask,
     Concept,
@@ -31,7 +32,7 @@ from .serializers import (
     TopicSerializer,
 )
 from .services import MaterialService
-from .task_service import enqueue_or_reuse, retry_task
+from .task_service import INTERACTIVE_TASK_PRIORITY, enqueue_or_reuse, retry_task
 
 
 @api_view(["GET"])
@@ -86,6 +87,25 @@ def _build_discussion_history(topic):
     )[:8000]
 
 
+def _enqueue_material_tasks(material):
+    enqueue_or_reuse(
+        "briefing",
+        topic=material.topic,
+        material=material,
+        input_json={"material_id": material.id},
+    )
+    if material.topic.type == "discussion":
+        enqueue_or_reuse(
+            "discussion_assessment",
+            topic=material.topic,
+            material=material,
+            input_json={
+                "material_context": _build_discussion_material_context(material.topic),
+                "stage": material.topic.discussion_stage,
+            },
+        )
+
+
 def _get_anchor_data(topic, data):
     try:
         material_id = int(data.get("material"))
@@ -122,13 +142,7 @@ class TopicViewSet(viewsets.ModelViewSet):
     serializer_class = TopicSerializer
 
     def perform_create(self, serializer):
-        topic = serializer.save()
-        if topic.type == "discussion":
-            enqueue_or_reuse(
-                "discussion_opening",
-                topic=topic,
-                input_json={"topic_id": topic.id},
-            )
+        serializer.save()
 
     @action(detail=True, methods=["post"], url_path="concepts")
     def create_concept(self, request, pk=None):
@@ -213,7 +227,7 @@ class TopicViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], url_path="discussion")
     def discussion(self, request, pk=None):
         topic = self.get_object()
-        messages = topic.discussion_messages.all()
+        messages = topic.discussion_messages.select_related("source_task")
         return Response(
             {
                 "topic": TopicSerializer(topic).data,
@@ -239,10 +253,14 @@ class TopicViewSet(viewsets.ModelViewSet):
             "discussion_reply",
             topic=topic,
             discussion_message=message,
+            priority=INTERACTIVE_TASK_PRIORITY,
+            model=AIGateway.get_model_for_discussion_stage(topic.discussion_stage),
             input_json={
                 "message_id": message.id,
                 "material_context": _build_discussion_material_context(topic),
                 "history": _build_discussion_history(topic),
+                "stage": topic.discussion_stage,
+                "discussion_context": topic.discussion_context,
             },
         )
         return Response(
@@ -252,6 +270,19 @@ class TopicViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_202_ACCEPTED,
         )
+
+    @action(detail=True, methods=["post"], url_path="discussion-stage")
+    def update_discussion_stage(self, request, pk=None):
+        topic = self.get_object()
+        stage = str(request.data.get("stage", "")).strip()
+        valid_stages = {choice[0] for choice in Topic.DISCUSSION_STAGE_CHOICES}
+        if stage not in valid_stages:
+            return Response(
+                {"detail": "不支持的讨论阶段。"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        topic.discussion_stage = stage
+        topic.save(update_fields=["discussion_stage", "updated_at"])
+        return Response(TopicSerializer(topic).data)
 
     @action(detail=True, methods=["post"], url_path="discussion-assessment")
     def create_discussion_assessment(self, request, pk=None):
@@ -270,7 +301,10 @@ class TopicViewSet(viewsets.ModelViewSet):
         task, _ = enqueue_or_reuse(
             "discussion_assessment",
             topic=topic,
-            input_json={"material_context": material_context},
+            input_json={
+                "material_context": material_context,
+                "stage": topic.discussion_stage,
+            },
         )
         return Response(
             {"task": AITaskSerializer(task).data}, status=status.HTTP_202_ACCEPTED
@@ -286,6 +320,7 @@ class TopicViewSet(viewsets.ModelViewSet):
             input_json={
                 "material_context": _build_discussion_material_context(topic),
                 "history": history,
+                "stage": topic.discussion_stage,
             },
         )
         return Response(
@@ -322,23 +357,20 @@ class MaterialViewSet(viewsets.ModelViewSet):
         material = serializer.save()
         MaterialService.process_material(material)
         if material.import_status == "success":
-            enqueue_or_reuse(
-                "briefing",
-                topic=material.topic,
-                material=material,
-                input_json={"material_id": material.id},
+            _enqueue_material_tasks(material)
+
+    @action(detail=True, methods=["post"], url_path="retry-import")
+    def retry_import(self, request, pk=None):
+        material = self.get_object()
+        if material.import_status != "failed":
+            return Response(
+                {"detail": "只有导入失败的材料可以重新导入。"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-            if material.topic.type == "discussion":
-                enqueue_or_reuse(
-                    "discussion_assessment",
-                    topic=material.topic,
-                    material=material,
-                    input_json={
-                        "material_context": _build_discussion_material_context(
-                            material.topic
-                        )
-                    },
-                )
+        MaterialService.process_material(material)
+        if material.import_status == "success":
+            _enqueue_material_tasks(material)
+        return Response(MaterialSerializer(material).data)
 
 
 class QuestionViewSet(viewsets.ModelViewSet):

@@ -1,0 +1,104 @@
+<main>
+  <style>
+    :root { color: #1f2937; background: #f5f7fb; font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; }
+    main { max-width: 980px; margin: 0 auto; padding: 48px 24px 72px; }
+    header { padding: 40px; border-radius: 20px; color: #fff; background: linear-gradient(135deg, #1d4ed8, #7c3aed); }
+    h1 { margin: 0 0 8px; font-size: 36px; line-height: 1.2; }
+    h2 { margin-top: 48px; font-size: 25px; }
+    h3 { margin: 24px 0 8px; font-size: 19px; }
+    p, li { max-width: 780px; }
+    section { padding: 8px 28px 28px; margin-top: 24px; border-radius: 16px; background: #fff; box-shadow: 0 3px 18px rgb(15 23 42 / 7%); }
+    img { display: block; width: 100%; margin: 20px 0 8px; border: 1px solid #dbe3f0; border-radius: 12px; }
+    figcaption { color: #64748b; font-size: 14px; }
+    figure { margin: 20px 0; }
+    .lead { margin: 0; font-size: 18px; opacity: .9; }
+    .note { padding: 14px 16px; border-left: 4px solid #2563eb; border-radius: 8px; background: #eff6ff; }
+    .steps { counter-reset: step; list-style: none; padding: 0; }
+    .steps li { position: relative; padding: 12px 12px 12px 52px; margin: 10px 0; border-radius: 10px; background: #f8fafc; }
+    .steps li::before { position: absolute; left: 14px; top: 11px; counter-increment: step; content: counter(step); width: 26px; height: 26px; color: #fff; text-align: center; line-height: 26px; border-radius: 50%; background: #2563eb; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+    th { color: #475569; background: #f8fafc; }
+    code { padding: 2px 6px; border-radius: 5px; color: #334155; background: #e2e8f0; }
+  </style>
+
+  <header>
+    <h1>讨论型话题使用说明</h1>
+    <p class="lead">从一个模糊的念头开始，逐步探索、定义问题，并在准备好后进入系统学习。</p>
+  </header>
+
+  <section>
+    <h2>它适合做什么？</h2>
+    <p>讨论型话题适合“我有一个方向，但还不确定是否值得系统学习、也不知道如何开始”的场景。你可以只写一个想法、困惑、经历、顾虑，或导入一份想判断价值的材料。</p>
+    <div class="note">它不是完整课程，也不会替你作决定。它帮助你把想法说清楚，判断下一步最值得做什么。</div>
+  </section>
+
+  <section>
+    <h2>1. 创建讨论型话题</h2>
+    <ol class="steps">
+      <li>进入“我的话题”，点击右上角“新建话题”。</li>
+      <li>将话题类型选择为“讨论”，填写标题。学习目标和初始材料都可以暂时留空。</li>
+      <li>创建后进入讨论页。也可以在创建时直接粘贴文本或提供网页链接。</li>
+    </ol>
+    <figure>
+      <img src="assets/topic-list.jpg" alt="话题列表和新建话题入口">
+      <figcaption>话题列表入口：从“新建话题”开始，创建时选择“讨论”。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. 从探索开始对话</h2>
+    <p>没有准备好问题也没关系。页面会提供起步提示，例如“表达困惑”“从具体例子开始”“拆解一个模糊想法”。点击后可继续编辑，再发送。</p>
+    <p>发送后消息会自动滚到最新位置；AI 回复完成后也会自动滚到底部。聊天记录有最大高度，历史内容可在消息区域内滚动，输入框会保持在下方。</p>
+    <figure>
+      <img src="assets/discussion-topic-page.jpg" alt="讨论型话题页面">
+      <figcaption>讨论页面：左侧为对话，右侧可管理材料和讨论结论。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. 理解讨论阶段和模型</h2>
+    <p>讨论默认从“探索”开始。AI 可以建议进入下一阶段，但只有你点击确认后才会切换；你也可以随时回到探索。</p>
+    <table>
+      <thead><tr><th>阶段</th><th>作用</th><th>默认模型</th></tr></thead>
+      <tbody>
+        <tr><td>探索</td><td>接住碎片化表达，识别关键信息和疑问</td><td><code>qwen2.5:14b</code></td></tr>
+        <tr><td>定义问题</td><td>把对话收敛为可检验的问题、约束或选择</td><td><code>qwen3:30b-a3b</code></td></tr>
+        <tr><td>形成决策</td><td>比较现在学习、暂缓或补充前置知识等方案</td><td><code>qwen3.6:35b-a3b</code></td></tr>
+      </tbody>
+    </table>
+    <p>每条 AI 回复下方会显示<strong>实际生成模型</strong>和<strong>该消息生成时所处的阶段</strong>。它们在任务入队时固定，因此历史消息不会因之后切换阶段而被改写。</p>
+  </section>
+
+  <section>
+    <h2>4. 处理等待和失败</h2>
+    <p>AI 请求都在后台运行。输入框上方会显示当前状态：</p>
+    <ul>
+      <li><strong>正在使用某模型生成回复</strong>：任务已开始执行。</li>
+      <li><strong>正在等待“某任务”完成</strong>：本机单 worker 正在处理另一项 AI 工作，提示会显示该任务类型和模型；当前对话任务会在其完成后继续。</li>
+      <li><strong>任务失败</strong>：页面会展示失败信息。重新发送消息即可创建新的讨论回复任务。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>5. 导入、评估和重新导入材料</h2>
+    <h3>导入材料</h3>
+    <p>右侧“材料”卡片可以导入网页链接或粘贴文本。材料导入成功后，才可用于快速评估和学习路线。</p>
+    <h3>导入失败</h3>
+    <p>将鼠标悬浮在材料的“失败”状态标签上可查看具体原因。点击“重新导入”会复用原材料记录，清理旧正文、分块和错误信息后重新处理。</p>
+    <h3>快速评估</h3>
+    <p>适用于已有成功导入材料时。AI 会概括材料、判断它与当前话题的关联度，并指出仍需要澄清的问题。它帮助判断<strong>材料是否有价值</strong>，不会自动生成学习计划。</p>
+  </section>
+
+  <section>
+    <h2>6. 生成学习路线与转为学习型</h2>
+    <p>当你决定继续学习时，可点击“生成学习路线”。它会结合话题目标、成功导入的材料和近期讨论，生成 3 到 5 个递进步骤、优先阅读的现有材料和第一天可执行的小行动。</p>
+    <p>确认要系统学习后，点击“转为学习型”。已有材料、讨论消息、材料评估和话题目标都会保留，之后可继续使用阅读、概念、问答、考试和复习功能。</p>
+  </section>
+
+  <section>
+    <h2>当前范围</h2>
+    <p>讨论型话题当前不包含自动联网搜索、自动补充外部材料、PDF/音频/视频导入、多用户协作、云同步或逐字流式输出。它支持通过标题、网页、文本材料和自由对话完成探索、判断与进入系统学习。</p>
+  </section>
+</main>

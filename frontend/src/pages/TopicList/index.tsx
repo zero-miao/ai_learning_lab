@@ -7,6 +7,7 @@ import {
   Input,
   List,
   Modal,
+  Popconfirm,
   Radio,
   Segmented,
   Space,
@@ -14,9 +15,9 @@ import {
   Typography,
   message,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { createMaterial, createTopic, getTopics } from '../../api';
+import { createMaterial, createTopic, deleteTopic, getTopics } from '../../api';
 import type { Topic } from '../../api';
 
 const { Title, Paragraph } = Typography;
@@ -40,6 +41,7 @@ const TopicList: React.FC = () => {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [filter, setFilter] = useState<TopicFilter>('all');
   const [keyword, setKeyword] = useState('');
+  const [deletingTopicId, setDeletingTopicId] = useState<number | null>(null);
   const [form] = Form.useForm<CreateTopicValues>();
   const navigate = useNavigate();
 
@@ -118,6 +120,20 @@ const TopicList: React.FC = () => {
     form.resetFields();
   };
 
+  const handleDelete = async (topic: Topic) => {
+    try {
+      setDeletingTopicId(topic.id);
+      await deleteTopic(topic.id);
+      setTopics((current) => current.filter((item) => item.id !== topic.id));
+      message.success(`已删除话题“${topic.title}”`);
+    } catch (error) {
+      console.error('Failed to delete topic:', error);
+      message.error('删除话题失败');
+    } finally {
+      setDeletingTopicId(null);
+    }
+  };
+
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
       <div
@@ -191,9 +207,27 @@ const TopicList: React.FC = () => {
               hoverable
               title={item.title}
               extra={
-                <Tag color={item.type === 'learning' ? 'blue' : 'purple'}>
-                  {item.type_display}
-                </Tag>
+                <Space size={4} onClick={(event) => event.stopPropagation()}>
+                  <Tag color={item.type === 'learning' ? 'blue' : 'purple'}>
+                    {item.type_display}
+                  </Tag>
+                  <Popconfirm
+                    title={`删除“${item.title}”？`}
+                    description="相关材料、讨论记录、概念和任务都会一并删除，此操作不可恢复。"
+                    okText="删除"
+                    okButtonProps={{ danger: true, loading: deletingTopicId === item.id }}
+                    cancelText="取消"
+                    onConfirm={() => void handleDelete(item)}
+                  >
+                    <Button
+                      danger
+                      size="small"
+                      type="text"
+                      icon={<DeleteOutlined />}
+                      aria-label={`删除话题 ${item.title}`}
+                    />
+                  </Popconfirm>
+                </Space>
               }
               onClick={() =>
                 navigate(

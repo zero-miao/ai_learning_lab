@@ -11,9 +11,11 @@ from .models import (
     Exam,
     ExamQuestion,
     ReviewRecord,
+    Topic,
 )
 
 RETRY_DELAYS_SECONDS = (5, 15, 45)
+INTERACTIVE_TASK_PRIORITY = 100
 
 
 def enqueue_or_reuse(
@@ -27,6 +29,8 @@ def enqueue_or_reuse(
     exam=None,
     review=None,
     input_json=None,
+    priority=0,
+    model=None,
 ):
     filters = {"task_type": task_type, "status__in": ("pending", "running")}
     if material is not None:
@@ -60,8 +64,9 @@ def enqueue_or_reuse(
             review=review,
             input_json=input_json or {},
             next_run_at=timezone.now(),
-            model=AIGateway.get_model_for_task(task_type),
+            model=model or AIGateway.get_model_for_task(task_type),
             prompt_version=PROMPT_VERSION,
+            priority=priority,
         )
         return task, True
 
@@ -100,7 +105,7 @@ def claim_due_task():
         task = (
             AITask.objects.select_for_update()
             .filter(status="pending", next_run_at__lte=timezone.now())
-            .order_by("next_run_at", "id")
+            .order_by("-priority", "next_run_at", "id")
             .first()
         )
         if task is None:
@@ -239,7 +244,9 @@ def _generate_concept_draft(task):
     return {"concept_id": concept.id, **draft}
 
 
-def _create_discussion_message(task, content, message_type):
+def _create_discussion_message(
+    task, content, message_type, suggested_stage=None, stage_suggestion_reason=""
+):
     topic = task.topic
     if topic is None:
         raise ValueError("讨论话题不存在。")
@@ -248,6 +255,8 @@ def _create_discussion_message(task, content, message_type):
         role="assistant",
         message_type=message_type,
         content=content.strip(),
+        suggested_stage=suggested_stage,
+        stage_suggestion_reason=stage_suggestion_reason,
         source_task=task,
     )
     return {"discussion_message_id": message.id, "topic_id": topic.id}
@@ -281,15 +290,32 @@ def _generate_discussion_reply(task):
     user_message = task.discussion_message
     if topic is None or user_message is None:
         raise ValueError("讨论消息不存在。")
-    content = AIGateway.reply_to_discussion(
+    response = AIGateway.reply_to_discussion(
         topic.title,
         topic.goal,
         str(task.input_json.get("material_context", "")).strip(),
         str(task.input_json.get("history", "")).strip(),
         user_message.content,
+        str(task.input_json.get("stage", topic.discussion_stage)),
+        task.input_json.get("discussion_context", topic.discussion_context),
         task.model,
     )
-    return _create_discussion_message(task, content, "discussion")
+    with transaction.atomic():
+        Topic.objects.filter(pk=topic.pk).update(
+            discussion_context=response["context"], updated_at=timezone.now()
+        )
+        result = _create_discussion_message(
+            task,
+            response["reply"],
+            "discussion",
+            response["suggested_stage"],
+            response["stage_suggestion_reason"],
+        )
+    return {
+        **result,
+        "stage": task.input_json.get("stage"),
+        "suggested_stage": response["suggested_stage"],
+    }
 
 
 def _generate_learning_path(task):

@@ -6,9 +6,12 @@ from .models import Material, MaterialChunk
 class MaterialService:
     @staticmethod
     def process_material(material: Material):
-        # ... existing logic ...
         try:
-            # ... existing scraper logic ...
+            MaterialChunk.objects.filter(material=material).delete()
+            material.clean_text = ""
+            material.import_error = ""
+            material.import_status = "pending"
+            material.save(update_fields=["clean_text", "import_error", "import_status"])
             if material.type == "url":
                 downloaded = trafilatura.fetch_url(material.source_url)
                 if downloaded:
@@ -17,21 +20,21 @@ class MaterialService:
                     )
                 else:
                     material.import_status = "failed"
-                    material.save()
+                    material.import_error = "无法获取网页内容，请检查链接是否可访问。"
+                    material.save(update_fields=["import_status", "import_error"])
                     return
             else:
                 material.clean_text = material.raw_text
 
             if not material.clean_text:
                 material.import_status = "failed"
-                material.save()
+                material.import_error = "未能从材料中提取到可阅读的正文。"
+                material.save(update_fields=["import_status", "import_error"])
                 return
 
             material.import_status = "success"
-            material.save()
+            material.save(update_fields=["clean_text", "import_status", "import_error"])
 
-            # Simple chunking logic: split by paragraphs
-            # ... rest of chunking logic ...
             paragraphs = material.clean_text.split("\n\n")
             offset = 0
             for i, para in enumerate(paragraphs):
@@ -51,7 +54,7 @@ class MaterialService:
                 )
                 offset = end_offset
 
-        except Exception as e:
-            print(f"Error processing material: {e}")
+        except Exception as error:
             material.import_status = "failed"
-            material.save()
+            material.import_error = f"导入时发生错误：{str(error)[:300]}"
+            material.save(update_fields=["import_status", "import_error"])

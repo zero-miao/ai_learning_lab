@@ -25,6 +25,11 @@ class Topic(models.Model):
         ("learn", "学习"),
         ("not_learn", "暂不学习"),
     ]
+    DISCUSSION_STAGE_CHOICES = [
+        ("explore", "探索"),
+        ("frame", "定义问题"),
+        ("decide", "形成决策"),
+    ]
 
     title = models.CharField(max_length=255, verbose_name="标题")
     type = models.CharField(
@@ -52,6 +57,15 @@ class Topic(models.Model):
         verbose_name="讨论结论",
     )
     discussion_rationale = models.TextField(blank=True, verbose_name="判断依据")
+    discussion_stage = models.CharField(
+        max_length=20,
+        choices=DISCUSSION_STAGE_CHOICES,
+        default="explore",
+        verbose_name="讨论阶段",
+    )
+    discussion_context = models.JSONField(
+        default=dict, blank=True, verbose_name="讨论工作记忆"
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
 
@@ -106,6 +120,7 @@ class Material(models.Model):
         default="pending",
         verbose_name="导入状态",
     )
+    import_error = models.TextField(blank=True, verbose_name="导入失败原因")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
 
     class Meta:
@@ -160,6 +175,14 @@ class DiscussionMessage(models.Model):
         verbose_name="消息类型",
     )
     content = models.TextField(verbose_name="消息内容")
+    suggested_stage = models.CharField(
+        max_length=20,
+        choices=Topic.DISCUSSION_STAGE_CHOICES,
+        null=True,
+        blank=True,
+        verbose_name="建议讨论阶段",
+    )
+    stage_suggestion_reason = models.TextField(blank=True, verbose_name="阶段建议理由")
     source_task = models.ForeignKey(
         "AITask",
         related_name="generated_discussion_messages",
@@ -584,6 +607,7 @@ class AITask(models.Model):
         db_index=True,
         verbose_name="任务状态",
     )
+    priority = models.IntegerField(default=0, db_index=True, verbose_name="优先级")
     topic = models.ForeignKey(
         Topic,
         related_name="ai_tasks",
