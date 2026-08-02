@@ -167,7 +167,7 @@ const TopicDetail: React.FC = () => {
             items={[
               {
                 key: 'questions',
-                label: `问答 ${topic.questions.filter((question) => question.is_saved).length}`,
+                label: `问答 (${topic.questions.filter((question) => question.is_saved).length})`,
                 children: (
                   <List
                     size="small"
@@ -194,7 +194,7 @@ const TopicDetail: React.FC = () => {
               },
               {
                 key: 'concepts',
-                label: `概念 ${topic.concepts.length}`,
+                label: `概念 (${topic.concepts.length})`,
                 children: (
                   <List
                     size="small"
@@ -213,7 +213,7 @@ const TopicDetail: React.FC = () => {
               },
               {
                 key: 'highlights',
-                label: `高亮 ${topic.highlights.length}`,
+                label: `高亮 (${topic.highlights.length})`,
                 children: (
                   <List
                     size="small"

@@ -17,6 +17,7 @@ import {
   Popconfirm,
   Space,
   Tabs,
+  Tooltip,
   Typography,
 } from 'antd';
 import {
@@ -26,6 +27,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
+  MoreOutlined,
   ReloadOutlined,
   SendOutlined,
 } from '@ant-design/icons';
@@ -880,33 +882,17 @@ const MaterialReader: React.FC = () => {
                   ? { background: '#fff7e6', padding: '8px' }
                   : undefined
               }
-              actions={[
-                <Button
-                  key="source"
-                  type="link"
-                  icon={<EyeOutlined />}
-                  disabled={item.start_offset === null}
-                  onClick={() => handleJumpToQuestion(item.id)}
-                >
-                  查看原文
-                </Button>,
-                <Popconfirm
-                  key="delete"
-                  title="删除这条问答？"
-                  okText="删除"
-                  cancelText="取消"
-                  okButtonProps={{ danger: true }}
-                  onConfirm={() => void handleDeleteQuestion(item.id)}
-                >
-                  <Button type="link" danger>
-                    <DeleteOutlined />
-                    删除
-                  </Button>
-                </Popconfirm>,
-              ]}
             >
               <List.Item.Meta
-                title={item.question_text}
+                title={
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Typography.Text strong style={{ flex: 1 }}>{item.question_text}</Typography.Text>
+                    <Tooltip title="查看原文"><Button type="text" size="small" icon={<EyeOutlined />} disabled={item.start_offset === null} onClick={() => handleJumpToQuestion(item.id)} /></Tooltip>
+                    <Popconfirm title="删除这条问答？" okText="删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void handleDeleteQuestion(item.id)}>
+                      <Tooltip title="删除问答"><Button type="text" size="small" danger icon={<DeleteOutlined />} /></Tooltip>
+                    </Popconfirm>
+                  </div>
+                }
                 description={
                   item.ai_responses[0]?.content ||
                   'AI 回答正在生成或尚未可用。'
@@ -928,17 +914,26 @@ const MaterialReader: React.FC = () => {
                     ? { background: '#e6f4ff', padding: '8px' }
                     : undefined
                 }
-                actions={[
-                  <Button
-                    key="source"
-                    type="link"
-                    icon={<EyeOutlined />}
-                    onClick={() => handleJumpToConcept(concept)}
-                  >
-                    查看来源
-                  </Button>,
-                  <Dropdown
-                    key="more"
+              >
+                <List.Item.Meta
+                  title={
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <Space size={6} style={{ flex: 1 }}>
+                        <span>{concept.title}</span>
+                        <Typography.Text
+                          style={{
+                            color: pendingConceptIds.has(concept.id)
+                              ? '#389e0d'
+                              : concept.status === 'confirmed'
+                                ? '#0958d9'
+                                : '#389e0d',
+                          }}
+                        >
+                          {pendingConceptIds.has(concept.id) ? '草稿生成中' : concept.status_display}
+                        </Typography.Text>
+                      </Space>
+                      <Tooltip title="查看来源"><Button type="text" size="small" icon={<EyeOutlined />} onClick={() => handleJumpToConcept(concept)} /></Tooltip>
+                      <Dropdown
                     menu={{
                       items: [
                         { key: 'edit', label: '编辑概念', icon: <EditOutlined /> },
@@ -957,28 +952,9 @@ const MaterialReader: React.FC = () => {
                       },
                     }}
                   >
-                    <Button type="link">更多</Button>
-                  </Dropdown>,
-                ]}
-              >
-                <List.Item.Meta
-                  title={
-                    <Space size={6}>
-                      <span>{concept.title}</span>
-                      <Typography.Text
-                        style={{
-                          color: pendingConceptIds.has(concept.id)
-                            ? '#389e0d'
-                            : concept.status === 'confirmed'
-                              ? '#0958d9'
-                              : '#389e0d',
-                        }}
-                      >
-                        {pendingConceptIds.has(concept.id)
-                          ? '草稿生成中'
-                          : concept.status_display}
-                      </Typography.Text>
-                    </Space>
+                        <Tooltip title="更多操作"><Button type="text" size="small" icon={<MoreOutlined />} /></Tooltip>
+                      </Dropdown>
+                    </div>
                   }
                   description={
                     <Typography.Paragraph>
@@ -1006,31 +982,17 @@ const MaterialReader: React.FC = () => {
                     ? { background: '#fffbe6', padding: '8px' }
                     : undefined
                 }
-              actions={[
-                <Button
-                  key="jump"
-                  type="link"
-                  icon={<EyeOutlined />}
-                  onClick={() => handleJumpToHighlight(highlight.id)}
-                >
-                  查看原文
-                </Button>,
-                <Popconfirm
-                  key="delete"
-                  title="删除这条高亮？"
-                  okText="删除"
-                  okButtonProps={{ danger: true }}
-                  cancelText="取消"
-                  onConfirm={() => void handleDeleteHighlight(highlight.id)}
-                >
-                  <Button type="link" danger icon={<DeleteOutlined />}>
-                    删除
-                  </Button>
-                </Popconfirm>,
-              ]}
             >
               <List.Item.Meta
-                title={`高亮于 ${new Date(highlight.created_at).toLocaleString()}`}
+                title={
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Typography.Text strong style={{ flex: 1 }}>高亮于 {new Date(highlight.created_at).toLocaleString()}</Typography.Text>
+                    <Tooltip title="查看原文"><Button type="text" size="small" icon={<EyeOutlined />} onClick={() => handleJumpToHighlight(highlight.id)} /></Tooltip>
+                    <Popconfirm title="删除这条高亮？" okText="删除" okButtonProps={{ danger: true }} cancelText="取消" onConfirm={() => void handleDeleteHighlight(highlight.id)}>
+                      <Tooltip title="删除高亮"><Button type="text" size="small" danger icon={<DeleteOutlined />} /></Tooltip>
+                    </Popconfirm>
+                  </div>
+                }
                 description={
                   <Typography.Paragraph>
                     {highlight.source_text}
