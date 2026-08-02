@@ -6,6 +6,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from .ai_gateway import AIGateway
 from .models import (
     AIResponse,
     AITask,
@@ -22,7 +23,13 @@ from .models import (
     ReviewRecord,
     Topic,
 )
-from .task_service import enqueue_or_reuse, execute_task, recover_interrupted_tasks
+from .task_service import (
+    INTERACTIVE_TASK_PRIORITY,
+    claim_due_task,
+    enqueue_or_reuse,
+    execute_task,
+    recover_interrupted_tasks,
+)
 
 
 class AsyncTaskApiTests(TestCase):
@@ -67,6 +74,45 @@ class AsyncTaskApiTests(TestCase):
 
         self.assertEqual(concept_task.model, "concept-model")
         self.assertEqual(question_task.model, "default-model")
+
+    @patch("api.ai_gateway.AIGateway.get_provider")
+    def test_discussion_reply_falls_back_to_plain_text(self, get_provider):
+        get_provider.return_value.generate_response.return_value = (
+            "先说说这个想法与你当前最在意的问题有什么关系。"
+        )
+        response = AIGateway.reply_to_discussion(
+            "人生规划",
+            "",
+            "",
+            "",
+            "我有点迷茫。",
+            "explore",
+            {},
+            "qwen2.5:14b",
+        )
+        self.assertEqual(
+            response["reply"], "先说说这个想法与你当前最在意的问题有什么关系。"
+        )
+        self.assertEqual(response["context"], {})
+        self.assertIsNone(response["suggested_stage"])
+
+    @patch("api.ai_gateway.AIGateway.get_provider")
+    def test_discussion_reply_extracts_reply_from_malformed_json(self, get_provider):
+        get_provider.return_value.generate_response.return_value = (
+            '{"reply":"先明确你最想改变的部分。","context":{}},"suggested_stage":null}'
+        )
+        response = AIGateway.reply_to_discussion(
+            "人生规划",
+            "",
+            "",
+            "",
+            "我有点迷茫。",
+            "explore",
+            {},
+            "qwen2.5:14b",
+        )
+        self.assertEqual(response["reply"], "先明确你最想改变的部分。")
+        self.assertEqual(response["context"], {})
 
     def test_question_anchor_and_save_to_concept(self):
         MaterialChunk.objects.create(
@@ -157,11 +203,9 @@ class AsyncTaskApiTests(TestCase):
         self.assertEqual(invalid_response.status_code, 400)
 
     @patch("api.task_service.AIGateway.reply_to_discussion")
-    @patch("api.task_service.AIGateway.generate_discussion_opening")
     def test_discussion_workflow_persists_messages_and_converts_topic(
-        self, generate_discussion_opening, reply_to_discussion
+        self, reply_to_discussion
     ):
-        generate_discussion_opening.return_value = "你为什么想在现在了解向量数据库？"
         topic_response = self.client.post(
             "/api/topics/",
             {
@@ -173,17 +217,20 @@ class AsyncTaskApiTests(TestCase):
         )
         self.assertEqual(topic_response.status_code, 201)
         topic = Topic.objects.get(pk=topic_response.data["id"])
-        opening_task = AITask.objects.get(topic=topic, task_type="discussion_opening")
-        opening_task.status = "running"
-        opening_task.attempt_count = 1
-        opening_task.save()
-        execute_task(opening_task.id)
-        self.assertEqual(
-            DiscussionMessage.objects.get(topic=topic, role="assistant").content,
-            generate_discussion_opening.return_value,
-        )
+        self.assertFalse(AITask.objects.filter(topic=topic).exists())
+        self.assertEqual(topic.discussion_stage, "explore")
 
-        reply_to_discussion.return_value = "先从你的检索需求和数据规模判断。"
+        reply_to_discussion.return_value = {
+            "reply": "先从你的检索需求和数据规模判断。",
+            "context": {
+                "confirmed_context": ["需要本地检索"],
+                "open_questions": ["数据规模"],
+                "working_hypotheses": [],
+                "next_focus": "明确检索场景",
+            },
+            "suggested_stage": "frame",
+            "stage_suggestion_reason": "已经有明确的使用场景。",
+        }
         message_response = self.client.post(
             f"/api/topics/{topic.id}/discussion-messages/",
             {"content": "我需要为本地知识库做检索。"},
@@ -191,14 +238,27 @@ class AsyncTaskApiTests(TestCase):
         )
         self.assertEqual(message_response.status_code, 202)
         reply_task = AITask.objects.get(pk=message_response.data["task"]["id"])
+        self.assertEqual(reply_task.priority, INTERACTIVE_TASK_PRIORITY)
         reply_task.status = "running"
         reply_task.attempt_count = 1
         reply_task.save()
         execute_task(reply_task.id)
         self.assertEqual(
             DiscussionMessage.objects.filter(topic=topic, role="assistant").count(),
-            2,
+            1,
         )
+        topic.refresh_from_db()
+        self.assertEqual(topic.discussion_context["next_focus"], "明确检索场景")
+        assistant_message = DiscussionMessage.objects.get(topic=topic, role="assistant")
+        self.assertEqual(assistant_message.suggested_stage, "frame")
+
+        stage_response = self.client.post(
+            f"/api/topics/{topic.id}/discussion-stage/",
+            {"stage": "frame"},
+            format="json",
+        )
+        self.assertEqual(stage_response.status_code, 200)
+        self.assertEqual(stage_response.data["discussion_stage"], "frame")
 
         convert_response = self.client.post(
             f"/api/topics/{topic.id}/convert-to-learning/", format="json"
@@ -207,16 +267,94 @@ class AsyncTaskApiTests(TestCase):
         topic.refresh_from_db()
         self.assertEqual(topic.type, "learning")
         self.assertEqual(topic.discussion_outcome, "learn")
-        self.assertEqual(topic.discussion_messages.count(), 3)
+        self.assertEqual(topic.discussion_messages.count(), 2)
         history_response = self.client.get(f"/api/topics/{topic.id}/discussion/")
         self.assertEqual(history_response.status_code, 200)
-        self.assertEqual(len(history_response.data["messages"]), 3)
+        self.assertEqual(len(history_response.data["messages"]), 2)
+        assistant_payload = history_response.data["messages"][1]
+        self.assertEqual(assistant_payload["source_task_model"], reply_task.model)
+        self.assertEqual(assistant_payload["source_task_stage"], "explore")
         follow_up_response = self.client.post(
             f"/api/topics/{topic.id}/discussion-messages/",
             {"content": "转换后如何继续安排学习？"},
             format="json",
         )
         self.assertEqual(follow_up_response.status_code, 202)
+
+    def test_discussion_stage_model_route_and_priority_queue(self):
+        with patch.dict(
+            os.environ,
+            {
+                "LLM_MODEL": "default-model",
+                "LLM_MODEL_DISCUSSION_EXPLORE": "explore-model",
+                "LLM_MODEL_DISCUSSION_FRAME": "frame-model",
+                "LLM_MODEL_DISCUSSION_DECIDE": "decide-model",
+            },
+        ):
+            topic = Topic.objects.create(title="探索", type="discussion")
+            response = self.client.post(
+                f"/api/topics/{topic.id}/discussion-messages/",
+                {"content": "我有个想法"},
+                format="json",
+            )
+            self.assertEqual(response.data["task"]["model"], "explore-model")
+            AITask.objects.filter(pk=response.data["task"]["id"]).update(
+                status="succeeded"
+            )
+            self.client.post(
+                f"/api/topics/{topic.id}/discussion-stage/",
+                {"stage": "frame"},
+                format="json",
+            )
+            response = self.client.post(
+                f"/api/topics/{topic.id}/discussion-messages/",
+                {"content": "我想明确问题"},
+                format="json",
+            )
+            self.assertEqual(response.data["task"]["model"], "frame-model")
+
+        background_task, _ = enqueue_or_reuse("briefing", topic=self.topic)
+        claimed = claim_due_task()
+        self.assertEqual(claimed.id, response.data["task"]["id"])
+        self.assertNotEqual(claimed.id, background_task.id)
+
+    def test_pending_task_exposes_running_blocking_task(self):
+        pending_task, _ = enqueue_or_reuse("discussion_reply", topic=self.topic)
+        AITask.objects.create(
+            task_type="briefing",
+            status="running",
+            topic=self.topic,
+            next_run_at=timezone.now(),
+            started_at=timezone.now(),
+            model="blocking-model",
+        )
+
+        response = self.client.get(f"/api/ai-tasks/{pending_task.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["blocking_task"]["task_type_display"], "阅读前导"
+        )
+        self.assertEqual(response.data["blocking_task"]["model"], "blocking-model")
+
+    @patch("api.views.MaterialService.process_material")
+    def test_failed_material_can_be_reimported(self, process_material):
+        material = Material.objects.create(
+            topic=self.topic,
+            type="url",
+            source_url="https://example.com/unavailable",
+            title="失败材料",
+            import_status="failed",
+            import_error="无法获取网页内容，请检查链接是否可访问。",
+        )
+
+        response = self.client.post(
+            f"/api/materials/{material.id}/retry-import/", format="json"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        process_material.assert_called_once_with(material)
+        self.assertEqual(response.data["import_error"], material.import_error)
 
     @patch("api.task_service.AIGateway.assess_discussion_material")
     def test_discussion_assessment_updates_rationale(self, assess_discussion_material):

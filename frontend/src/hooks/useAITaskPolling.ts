@@ -5,6 +5,7 @@ import type { AITask } from '../api';
 interface Options {
   onSucceeded?: (task: AITask) => void;
   onFailed?: (task: AITask) => void;
+  intervalMs?: number;
 }
 
 export function useAITaskPolling(taskId: number | null, options: Options = {}) {
@@ -43,7 +44,7 @@ export function useAITaskPolling(taskId: number | null, options: Options = {}) {
       if (!terminal) {
         void poll();
       }
-    }, 2000);
+    }, options.intervalMs ?? 2000);
 
     return () => {
       active = false;
