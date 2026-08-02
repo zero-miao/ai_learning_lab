@@ -1,11 +1,17 @@
-import os
 from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
 
 from .ai_gateway import PROMPT_VERSION, AIGateway
-from .models import AIResponse, AITask, Exam, ExamQuestion, ReviewRecord
+from .models import (
+    AIResponse,
+    AITask,
+    DiscussionMessage,
+    Exam,
+    ExamQuestion,
+    ReviewRecord,
+)
 
 RETRY_DELAYS_SECONDS = (5, 15, 45)
 
@@ -16,6 +22,8 @@ def enqueue_or_reuse(
     topic=None,
     material=None,
     question=None,
+    concept=None,
+    discussion_message=None,
     exam=None,
     review=None,
     input_json=None,
@@ -27,6 +35,10 @@ def enqueue_or_reuse(
         filters["topic"] = topic
     if question is not None:
         filters["question"] = question
+    if concept is not None:
+        filters["concept"] = concept
+    if discussion_message is not None:
+        filters["discussion_message"] = discussion_message
     if exam is not None:
         filters["exam"] = exam
     if review is not None:
@@ -42,11 +54,13 @@ def enqueue_or_reuse(
             topic=topic,
             material=material,
             question=question,
+            concept=concept,
+            discussion_message=discussion_message,
             exam=exam,
             review=review,
             input_json=input_json or {},
             next_run_at=timezone.now(),
-            model=os.getenv("LLM_MODEL", ""),
+            model=AIGateway.get_model_for_task(task_type),
             prompt_version=PROMPT_VERSION,
         )
         return task, True
@@ -109,7 +123,14 @@ def claim_due_task():
 
 def execute_task(task_id):
     task = AITask.objects.select_related(
-        "topic", "material", "question", "exam__topic", "review__topic", "review__exam"
+        "topic",
+        "material",
+        "question",
+        "concept__topic",
+        "discussion_message__topic",
+        "exam__topic",
+        "review__topic",
+        "review__exam",
     ).get(pk=task_id)
     try:
         result = _run_task(task)
@@ -130,14 +151,24 @@ def _run_task(task):
         return _generate_briefing(task)
     if task.task_type == "answer_question":
         return _answer_question(task)
-    if task.task_type == "note_draft":
-        return _generate_note_draft(task)
+    if task.task_type == "concept_draft":
+        return _generate_concept_draft(task)
+    if task.task_type == "discussion_opening":
+        return _generate_discussion_opening(task)
+    if task.task_type == "discussion_assessment":
+        return _generate_discussion_assessment(task)
+    if task.task_type == "discussion_reply":
+        return _generate_discussion_reply(task)
+    if task.task_type == "learning_path":
+        return _generate_learning_path(task)
     if task.task_type == "generate_exam":
         return _generate_exam(task)
     if task.task_type == "grade_exam":
         return _grade_exam(task)
     if task.task_type == "review_prompt":
         return _generate_review_prompt(task)
+    if task.task_type == "grade_review":
+        return _grade_review(task)
     raise ValueError(f"不支持的 AI 任务类型：{task.task_type}")
 
 
@@ -145,7 +176,7 @@ def _generate_briefing(task):
     material = task.material
     if material is None or not material.clean_text:
         raise ValueError("材料正文不存在，无法生成阅读前导。")
-    content = AIGateway.generate_briefing(material.clean_text[:2000])
+    content = AIGateway.generate_briefing(material.clean_text[:2000], task.model)
     response = AIResponse.objects.create(
         material=material,
         task_type="briefing",
@@ -163,7 +194,9 @@ def _answer_question(task):
     context = task.input_json.get("context", "")
     if not context:
         raise ValueError("问题缺少材料上下文。")
-    content = AIGateway.ask_question(context, question.question_text)
+    content = AIGateway.ask_question(
+        context, question.question_text, question.selected_text, task.model
+    )
     response = AIResponse.objects.create(
         question=question,
         task_type="answer_question",
@@ -174,28 +207,103 @@ def _answer_question(task):
     return {"ai_response_id": response.id, "question_id": question.id}
 
 
-def _generate_note_draft(task):
+def _generate_concept_draft(task):
+    concept = task.concept
+    if concept is None:
+        raise ValueError("概念不存在。")
+    source_text = str(task.input_json.get("source_text", "")).strip()
+    context = str(task.input_json.get("context", "")).strip()
+    if not source_text or not context:
+        raise ValueError("概念草稿缺少来源文本或材料上下文。")
+
+    draft = AIGateway.generate_concept_draft(
+        concept.title, source_text, context, task.model
+    )
+    concept.definition = draft["definition"]
+    concept.principle = draft["principle"]
+    concept.pitfalls = draft["pitfalls"]
+    concept.applications = draft["applications"]
+    concept.status = "draft"
+    concept.source_task = task
+    concept.save(
+        update_fields=[
+            "definition",
+            "principle",
+            "pitfalls",
+            "applications",
+            "status",
+            "source_task",
+            "updated_at",
+        ]
+    )
+    return {"concept_id": concept.id, **draft}
+
+
+def _create_discussion_message(task, content, message_type):
     topic = task.topic
     if topic is None:
-        raise ValueError("学习主题不存在。")
-    context = task.input_json.get("context", "")
-    if not context:
-        raise ValueError("学习主题没有可用于生成笔记的材料。")
+        raise ValueError("讨论话题不存在。")
+    message = DiscussionMessage.objects.create(
+        topic=topic,
+        role="assistant",
+        message_type=message_type,
+        content=content.strip(),
+        source_task=task,
+    )
+    return {"discussion_message_id": message.id, "topic_id": topic.id}
 
-    content = AIGateway.generate_note_draft(
+
+def _generate_discussion_opening(task):
+    topic = task.topic
+    if topic is None:
+        raise ValueError("讨论话题不存在。")
+    content = AIGateway.generate_discussion_opening(topic.title, topic.goal, task.model)
+    return _create_discussion_message(task, content, "opening")
+
+
+def _generate_discussion_assessment(task):
+    topic = task.topic
+    if topic is None:
+        raise ValueError("讨论话题不存在。")
+    material_context = str(task.input_json.get("material_context", "")).strip()
+    if not material_context:
+        raise ValueError("快速评估缺少可用材料。")
+    content = AIGateway.assess_discussion_material(
+        topic.title, topic.goal, material_context, task.model
+    )
+    topic.discussion_rationale = content
+    topic.save(update_fields=["discussion_rationale", "updated_at"])
+    return _create_discussion_message(task, content, "assessment")
+
+
+def _generate_discussion_reply(task):
+    topic = task.topic
+    user_message = task.discussion_message
+    if topic is None or user_message is None:
+        raise ValueError("讨论消息不存在。")
+    content = AIGateway.reply_to_discussion(
         topic.title,
         topic.goal,
-        context,
-        str(task.input_json.get("instructions", "")),
+        str(task.input_json.get("material_context", "")).strip(),
+        str(task.input_json.get("history", "")).strip(),
+        user_message.content,
+        task.model,
     )
-    if not content.strip():
-        raise ValueError("AI 未生成笔记草稿。")
-    return {
-        "topic_id": topic.id,
-        "title": f"{topic.title} 学习笔记",
-        "content": content,
-        "material_fingerprint": task.input_json.get("material_fingerprint", ""),
-    }
+    return _create_discussion_message(task, content, "discussion")
+
+
+def _generate_learning_path(task):
+    topic = task.topic
+    if topic is None:
+        raise ValueError("讨论话题不存在。")
+    content = AIGateway.generate_learning_path(
+        topic.title,
+        topic.goal,
+        str(task.input_json.get("material_context", "")).strip(),
+        str(task.input_json.get("history", "")).strip(),
+        task.model,
+    )
+    return _create_discussion_message(task, content, "learning_path")
 
 
 def _generate_exam(task):
@@ -206,7 +314,9 @@ def _generate_exam(task):
     if not context:
         raise ValueError("学习主题没有可用于出题的材料。")
 
-    generated_questions = AIGateway.generate_exam(topic.title, topic.goal, context)
+    generated_questions = AIGateway.generate_exam(
+        topic.title, topic.goal, context, task.model
+    )
     with transaction.atomic():
         exam = Exam.objects.create(topic=topic)
         for generated in generated_questions[:5]:
@@ -241,7 +351,7 @@ def _grade_exam(task):
         }
         for question in questions
     ]
-    grading = AIGateway.grade_exam(exam.topic.title, payload)
+    grading = AIGateway.grade_exam(exam.topic.title, payload, task.model)
     grades_by_id = {
         item.get("id"): item
         for item in grading["questions"]
@@ -294,7 +404,7 @@ def _generate_review_prompt(task):
 
     exam_feedback = review.exam.feedback if review.exam else ""
     content = AIGateway.generate_review_prompt(
-        topic.title, topic.goal, context, exam_feedback
+        topic.title, topic.goal, context, exam_feedback, task.model
     ).strip()
     if not content:
         raise ValueError("AI 未生成复习提示。")
@@ -307,6 +417,70 @@ def _generate_review_prompt(task):
     if not updated:
         raise ValueError("复习记录已完成，无法写入新的复习提示。")
     return {"review_id": review.id, "content": content}
+
+
+def _review_interval_days(score):
+    if score >= 85:
+        return 14
+    if score >= 60:
+        return 7
+    return 2
+
+
+def _grade_review(task):
+    review = task.review
+    if review is None:
+        raise ValueError("复习记录不存在。")
+    context = str(task.input_json.get("context", "")).strip()
+    response_text = str(task.input_json.get("response_text", "")).strip()
+    if not context or not response_text:
+        raise ValueError("复盘反馈缺少学习上下文或用户回答。")
+
+    grading = AIGateway.grade_review(
+        review.topic.title, context, response_text, task.model
+    )
+    completed_at = timezone.now()
+    with transaction.atomic():
+        review = ReviewRecord.objects.select_for_update().get(pk=review.id)
+        if review.result == "completed":
+            raise ValueError("该复习记录已经完成。")
+        interval_days = _review_interval_days(grading["score"])
+        next_due_at = completed_at + timedelta(days=interval_days)
+        review.response_text = response_text
+        review.feedback = grading["feedback"]
+        review.score = grading["score"]
+        review.result = "completed"
+        review.completed_at = completed_at
+        review.graded_at = completed_at
+        review.next_due_at = next_due_at
+        review.save(
+            update_fields=[
+                "response_text",
+                "feedback",
+                "score",
+                "result",
+                "completed_at",
+                "graded_at",
+                "next_due_at",
+            ]
+        )
+        next_review, created = ReviewRecord.objects.get_or_create(
+            previous_review=review,
+            defaults={
+                "topic": review.topic,
+                "exam": review.exam,
+                "due_at": next_due_at,
+            },
+        )
+        if not created and next_review.due_at != next_due_at:
+            next_review.due_at = next_due_at
+            next_review.save(update_fields=["due_at"])
+    return {
+        "review_id": review.id,
+        "score": grading["score"],
+        "next_review_id": next_review.id,
+        "next_due_at": next_due_at.isoformat(),
+    }
 
 
 def _handle_failure(task_id, error):

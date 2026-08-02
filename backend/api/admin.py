@@ -3,11 +3,15 @@ from django.contrib import admin
 from .models import (
     AIResponse,
     AITask,
+    Concept,
+    ConceptAnchor,
+    ConceptRelation,
+    DiscussionMessage,
     Exam,
     ExamQuestion,
+    Highlight,
     Material,
     MaterialChunk,
-    Note,
     Question,
     ReviewRecord,
     Topic,
@@ -16,15 +20,30 @@ from .models import (
 
 @admin.register(Topic)
 class TopicAdmin(admin.ModelAdmin):
-    list_display = ("title", "status", "mastery_level", "created_at", "updated_at")
-    list_filter = ("status", "mastery_level")
+    list_display = (
+        "title",
+        "type",
+        "status",
+        "discussion_outcome",
+        "mastery_level",
+        "created_at",
+        "updated_at",
+    )
+    list_filter = ("type", "status", "mastery_level", "discussion_outcome")
     search_fields = ("title", "goal", "scope")
 
 
 @admin.register(Material)
 class MaterialAdmin(admin.ModelAdmin):
-    list_display = ("title", "topic", "type", "import_status", "created_at")
-    list_filter = ("type", "import_status")
+    list_display = (
+        "title",
+        "topic",
+        "type",
+        "source_type",
+        "import_status",
+        "created_at",
+    )
+    list_filter = ("type", "source_type", "import_status")
     search_fields = ("title", "source_url", "raw_text")
 
 
@@ -37,17 +56,71 @@ class MaterialChunkAdmin(admin.ModelAdmin):
 
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):
-    list_display = ("topic", "material", "question_text", "created_at")
-    list_filter = ("topic", "material")
+    list_display = (
+        "topic",
+        "material",
+        "concept",
+        "is_saved",
+        "question_text",
+        "created_at",
+    )
+    list_filter = ("topic", "material", "concept", "is_saved")
     search_fields = ("question_text", "selected_text")
 
 
-@admin.register(Note)
-class NoteAdmin(admin.ModelAdmin):
-    list_display = ("title", "topic", "source_task", "created_at", "updated_at")
-    list_filter = ("topic",)
-    search_fields = ("title", "content", "topic__title")
+@admin.register(Concept)
+class ConceptAdmin(admin.ModelAdmin):
+    list_display = ("title", "topic", "status", "source_task", "updated_at")
+    list_filter = ("status", "topic")
+    search_fields = ("title", "definition", "principle", "topic__title")
     readonly_fields = ("source_task", "created_at", "updated_at")
+
+
+@admin.register(ConceptAnchor)
+class ConceptAnchorAdmin(admin.ModelAdmin):
+    list_display = (
+        "concept",
+        "material",
+        "chunk",
+        "start_offset",
+        "end_offset",
+        "created_at",
+    )
+    list_filter = ("material",)
+    search_fields = ("concept__title", "source_text", "material__title")
+
+
+@admin.register(ConceptRelation)
+class ConceptRelationAdmin(admin.ModelAdmin):
+    list_display = ("from_concept", "relation_type", "to_concept", "updated_at")
+    list_filter = ("relation_type",)
+    search_fields = (
+        "from_concept__title",
+        "to_concept__title",
+        "description",
+    )
+
+
+@admin.register(DiscussionMessage)
+class DiscussionMessageAdmin(admin.ModelAdmin):
+    list_display = ("topic", "role", "message_type", "source_task", "created_at")
+    list_filter = ("role", "message_type")
+    search_fields = ("topic__title", "content")
+    readonly_fields = ("source_task", "created_at")
+
+
+@admin.register(Highlight)
+class HighlightAdmin(admin.ModelAdmin):
+    list_display = (
+        "topic",
+        "material",
+        "chunk",
+        "start_offset",
+        "end_offset",
+        "created_at",
+    )
+    list_filter = ("topic", "material")
+    search_fields = ("source_text", "user_note", "material__title")
 
 
 @admin.register(AIResponse)
@@ -66,6 +139,8 @@ class AITaskAdmin(admin.ModelAdmin):
         "topic",
         "material",
         "question",
+        "concept",
+        "discussion_message",
         "exam",
         "review",
         "attempt_count",
@@ -104,10 +179,13 @@ class ReviewRecordAdmin(admin.ModelAdmin):
     list_display = (
         "topic",
         "exam",
+        "previous_review",
         "due_at",
         "result",
+        "score",
+        "graded_at",
         "review_prompt_generated_at",
         "completed_at",
     )
     list_filter = ("result",)
-    search_fields = ("topic__title",)
+    search_fields = ("topic__title", "response_text", "feedback")

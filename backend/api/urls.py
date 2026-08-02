@@ -3,9 +3,11 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     AITaskViewSet,
+    ConceptRelationViewSet,
+    ConceptViewSet,
     ExamViewSet,
+    HighlightViewSet,
     MaterialViewSet,
-    NoteViewSet,
     QuestionViewSet,
     ReviewRecordViewSet,
     TopicViewSet,
@@ -16,7 +18,9 @@ router = DefaultRouter()
 router.register(r"topics", TopicViewSet)
 router.register(r"materials", MaterialViewSet)
 router.register(r"questions", QuestionViewSet)
-router.register(r"notes", NoteViewSet)
+router.register(r"concepts", ConceptViewSet)
+router.register(r"concept-relations", ConceptRelationViewSet)
+router.register(r"highlights", HighlightViewSet)
 router.register(r"exams", ExamViewSet)
 router.register(r"reviews", ReviewRecordViewSet)
 router.register(r"ai-tasks", AITaskViewSet)

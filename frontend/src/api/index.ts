@@ -10,6 +10,8 @@ export interface Material {
   topic: number;
   type: 'url' | 'text';
   type_display: string;
+  source_type: 'manual' | 'ai_recommended';
+  source_type_display: string;
   source_url: string;
   title: string;
   raw_text: string;
@@ -17,8 +19,16 @@ export interface Material {
   import_status: 'pending' | 'success' | 'failed';
   import_status_display: string;
   created_at: string;
-  chunks: any[];
+  chunks: MaterialChunk[];
   ai_responses: AIResponse[];
+}
+
+export interface MaterialChunk {
+  id: number;
+  chunk_index: number;
+  content: string;
+  start_offset: number;
+  end_offset: number;
 }
 
 export interface AIResponse {
@@ -33,8 +43,13 @@ export interface AIResponse {
 export interface Topic {
   id: number;
   title: string;
+  type: 'learning' | 'discussion';
+  type_display: string;
   goal: string;
   scope: string;
+  discussion_outcome: 'pending' | 'learn' | 'not_learn';
+  discussion_outcome_display: string;
+  discussion_rationale: string;
   status: 'draft' | 'learning' | 'exam_ready' | 'reviewing' | 'archived';
   status_display: string;
   mastery_level: 'unknown' | 'weak' | 'pass' | 'strong';
@@ -42,19 +57,86 @@ export interface Topic {
   created_at: string;
   updated_at: string;
   materials: Material[];
-  notes: Note[];
-  has_current_note: boolean;
+  concepts: Concept[];
+  questions: Question[];
+  concept_relations: ConceptRelation[];
+  highlights: Highlight[];
+  learning_output: LearningOutput;
 }
 
-export interface Note {
+export interface LearningOutput {
+  concept_count: number;
+  saved_question_count: number;
+  map_node_count: number;
+}
+
+export interface ConceptAnchor {
+  id: number;
+  material: number;
+  material_title: string;
+  chunk: number | null;
+  source_text: string;
+  start_offset: number;
+  end_offset: number;
+  created_at: string;
+}
+
+export interface Concept {
   id: number;
   topic: number;
   title: string;
-  content: string;
-  material_fingerprint: string;
+  definition: string;
+  principle: string;
+  pitfalls: string;
+  applications: string;
+  status: 'draft' | 'confirmed';
+  status_display: string;
   source_task: number | null;
+  anchors: ConceptAnchor[];
   created_at: string;
   updated_at: string;
+}
+
+export interface DiscussionMessage {
+  id: number;
+  topic: number;
+  role: 'user' | 'assistant';
+  role_display: string;
+  message_type: 'opening' | 'assessment' | 'discussion' | 'learning_path';
+  message_type_display: string;
+  content: string;
+  source_task: number | null;
+  created_at: string;
+}
+
+export interface DiscussionResponse {
+  topic: Topic;
+  messages: DiscussionMessage[];
+}
+
+export interface ConceptRelation {
+  id: number;
+  topic: number;
+  from_concept: number;
+  from_concept_title: string;
+  to_concept: number;
+  to_concept_title: string;
+  relation_type: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Highlight {
+  id: number;
+  topic: number;
+  material: number;
+  chunk: number | null;
+  source_text: string;
+  user_note: string;
+  start_offset: number;
+  end_offset: number;
+  created_at: string;
 }
 
 export interface ExamQuestion {
@@ -91,6 +173,7 @@ export interface ReviewRecord {
   topic_mastery_level_display: string;
   exam: number | null;
   exam_score: number | null;
+  previous_review: number | null;
   due_at: string;
   completed_at: string | null;
   result: 'pending' | 'completed';
@@ -98,19 +181,25 @@ export interface ReviewRecord {
   next_due_at: string | null;
   review_prompt: string;
   review_prompt_generated_at: string | null;
+  response_text: string;
+  feedback: string;
+  score: number | null;
+  graded_at: string | null;
 }
 
 export type AITaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 export interface AITask {
   id: number;
-  task_type: 'briefing' | 'answer_question' | 'generate_exam' | 'grade_exam' | 'note_draft' | 'review_prompt';
+  task_type: 'briefing' | 'answer_question' | 'concept_draft' | 'generate_exam' | 'grade_exam' | 'review_prompt' | 'grade_review' | 'discussion_opening' | 'discussion_assessment' | 'discussion_reply' | 'learning_path';
   task_type_display: string;
   status: AITaskStatus;
   status_display: string;
   topic: number | null;
   material: number | null;
   question: number | null;
+  concept: number | null;
+  discussion_message: number | null;
   exam: number | null;
   review: number | null;
   result_json: Record<string, unknown>;
@@ -131,14 +220,25 @@ export interface Question {
   topic: number;
   material: number | null;
   chunk: number | null;
+  concept: number | null;
+  concept_title: string;
   selected_text: string;
+  start_offset: number | null;
+  end_offset: number | null;
   question_text: string;
+  is_saved: boolean;
+  saved_at: string | null;
   created_at: string;
   ai_responses: AIResponse[];
 }
 
 export interface TaskResponse {
   task: AITask;
+}
+
+export interface ConceptTaskResponse extends TaskResponse {
+  concept: Concept;
+  created: boolean;
 }
 
 export const getTopics = () => api.get<Topic[]>('topics/');
@@ -148,25 +248,84 @@ export const updateTopic = (id: number, data: Partial<Topic>) => api.patch<Topic
 export const deleteTopic = (id: number) => api.delete(`topics/${id}/`);
 export const createMaterial = (data: Partial<Material>) => api.post<Material>('materials/', data);
 export const deleteMaterial = (id: number) => api.delete(`materials/${id}/`);
-export const createNoteDraft = (topicId: number, instructions = '') =>
-  api.post<TaskResponse>(`topics/${topicId}/note-drafts/`, { instructions });
-export const createNote = (data: Partial<Note>) => api.post<Note>('notes/', data);
-export const updateNote = (id: number, data: Partial<Note>) =>
-  api.patch<Note>(`notes/${id}/`, data);
-export const deleteNote = (id: number) => api.delete(`notes/${id}/`);
+export const getDiscussion = (topicId: number) =>
+  api.get<DiscussionResponse>(`topics/${topicId}/discussion/`);
+export const createDiscussionMessage = (topicId: number, content: string) =>
+  api.post<{ message: DiscussionMessage; task: AITask }>(
+    `topics/${topicId}/discussion-messages/`,
+    { content },
+  );
+export const createDiscussionAssessment = (topicId: number) =>
+  api.post<TaskResponse>(`topics/${topicId}/discussion-assessment/`);
+export const createLearningPath = (topicId: number) =>
+  api.post<TaskResponse>(`topics/${topicId}/learning-path/`);
+export const convertToLearning = (topicId: number) =>
+  api.post<Topic>(`topics/${topicId}/convert-to-learning/`);
 export const checkHealth = () => api.get('health/');
 export const getQuestion = (id: number) => api.get<Question>(`questions/${id}/`);
 export const createQuestion = (data: Partial<Question>) => api.post<{ question: Question; task: AITask }>('questions/', data);
+export const saveQuestion = (id: number, concept?: number) =>
+  api.post<Question>(`questions/${id}/save/`, concept ? { concept } : {});
+export const deleteQuestion = (id: number) => api.delete(`questions/${id}/`);
+export const createConcept = (
+  topicId: number,
+  data: {
+    title: string;
+    material: number;
+    start_offset: number;
+    end_offset: number;
+  },
+) => api.post<ConceptTaskResponse>(`topics/${topicId}/concepts/`, data);
+export const getConcept = (id: number) => api.get<Concept>(`concepts/${id}/`);
+export const updateConcept = (id: number, data: Partial<Concept>) =>
+  api.patch<Concept>(`concepts/${id}/`, data);
+export const deleteConcept = (id: number) => api.delete(`concepts/${id}/`);
+export const createConceptRelation = (
+  data: Pick<
+    ConceptRelation,
+    'topic' | 'from_concept' | 'to_concept' | 'relation_type' | 'description'
+  >,
+) => api.post<ConceptRelation>('concept-relations/', data);
+export const updateConceptRelation = (
+  id: number,
+  data: Partial<ConceptRelation>,
+) => api.patch<ConceptRelation>(`concept-relations/${id}/`, data);
+export const deleteConceptRelation = (id: number) =>
+  api.delete(`concept-relations/${id}/`);
+export const createHighlight = (
+  topicId: number,
+  data: {
+    material: number;
+    start_offset: number;
+    end_offset: number;
+    user_note?: string;
+  },
+) => api.post<{ highlight: number; created: boolean }>(`topics/${topicId}/highlights/`, data);
+export const deleteHighlight = (id: number) => api.delete(`highlights/${id}/`);
+export const updateHighlightUserNote = (id: number, userNote: string) =>
+  api.patch<Highlight>(`highlights/${id}/user-note/`, {
+    user_note: userNote,
+  });
 export const getExam = (id: number) => api.get<Exam>(`exams/${id}/`);
+export const getExams = (params?: { topic?: number }) =>
+  api.get<Exam[]>('exams/', { params });
 export const createExam = (topic: number) => api.post<TaskResponse>('exams/', { topic });
 export const submitExam = (id: number, answers: Array<{ id: number; answer_text: string }>) =>
   api.post<TaskResponse>(`exams/${id}/submit/`, { answers });
+export const saveExamAnswers = (
+  id: number,
+  answers: Array<{ id: number; answer_text: string }>,
+) => api.post<Exam>(`exams/${id}/save/`, { answers });
 export const getReviews = (params?: { result?: ReviewRecord['result'] }) =>
   api.get<ReviewRecord[]>('reviews/', { params });
 export const completeReview = (id: number) =>
   api.post<ReviewRecord>(`reviews/${id}/complete/`);
 export const createReviewPrompt = (id: number) =>
   api.post<TaskResponse>(`reviews/${id}/prompt/`);
+export const submitReview = (id: number, responseText: string) =>
+  api.post<TaskResponse>(`reviews/${id}/submit/`, {
+    response_text: responseText,
+  });
 export const getAITask = (id: number) => api.get<AITask>(`ai-tasks/${id}/`);
 export const listAITasks = (params: Record<string, number>) => api.get<AITask[]>('ai-tasks/', { params });
 export const retryAITask = (id: number) => api.post<AITask>(`ai-tasks/${id}/retry/`);

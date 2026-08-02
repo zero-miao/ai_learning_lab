@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { Navigate, useParams, useNavigate, Link } from 'react-router-dom';
 import {
-  Alert,
   Layout,
   Typography,
   Button,
@@ -11,40 +10,61 @@ import {
   Tag,
   List,
   Modal,
+  Pagination,
   Form,
   Input,
   Popconfirm,
   Radio,
+  Tabs,
   message,
 } from 'antd';
 import {
   ArrowLeftOutlined,
+  ApartmentOutlined,
   BookOutlined,
   DeleteOutlined,
-  EditOutlined,
+  EyeOutlined,
   FormOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import {
   createMaterial,
-  createNote,
-  createNoteDraft,
   deleteMaterial,
-  deleteNote,
+  deleteQuestion,
   getTopic,
   listAITasks,
-  updateNote,
 } from '../../api';
-import type { AITask, Note, Topic } from '../../api';
-import { useAITaskPolling } from '../../hooks/useAITaskPolling';
+import type { Topic } from '../../api';
+import TopicDiscussion from '../../components/TopicDiscussion';
 
 const { Title } = Typography;
 const { Content } = Layout;
+const OUTPUT_PAGE_SIZE = 5;
+type LearningOutputTab = 'questions' | 'concepts' | 'highlights';
 
-interface NoteDraft {
-  taskId: number;
-  title: string;
-  content: string;
+interface SearchField {
+  label: string;
+  value?: string;
+}
+
+function getMatchingFields(fields: SearchField[], keyword: string) {
+  if (!keyword) return [];
+  return fields.filter((field) =>
+    field.value?.toLowerCase().includes(keyword),
+  );
+}
+
+function renderHighlightedText(value: string, keyword: string): React.ReactNode {
+  if (!keyword) return value;
+  const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`(${escapedKeyword})`, 'gi');
+  return value.split(pattern).map((part, index) =>
+    part.toLowerCase() === keyword ? (
+      <mark key={index}>{part}</mark>
+    ) : (
+      part
+    ),
+  );
 }
 
 const TopicDetail: React.FC = () => {
@@ -53,15 +73,10 @@ const TopicDetail: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [briefingMaterialIds, setBriefingMaterialIds] = useState<number[]>([]);
-  const [noteTaskId, setNoteTaskId] = useState<number | null>(null);
-  const [noteDraft, setNoteDraft] = useState<NoteDraft | null>(null);
-  const [noteSubmitting, setNoteSubmitting] = useState(false);
-  const [isRegenerateVisible, setIsRegenerateVisible] = useState(false);
-  const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [outputTab, setOutputTab] = useState<LearningOutputTab>('questions');
+  const [outputKeyword, setOutputKeyword] = useState('');
+  const [outputPage, setOutputPage] = useState(1);
   const [form] = Form.useForm();
-  const [noteForm] = Form.useForm();
-  const [regenerateForm] = Form.useForm();
-  const [editNoteForm] = Form.useForm();
   const navigate = useNavigate();
 
   const fetchTopic = async () => {
@@ -75,12 +90,6 @@ const TopicDetail: React.FC = () => {
         .filter((task) => task.task_type === 'briefing' && (task.status === 'pending' || task.status === 'running'))
         .map((task) => task.material)
         .filter((materialId): materialId is number => materialId !== null));
-      const pendingNoteTask = tasksResponse.data.find(
-        (task) =>
-          task.task_type === 'note_draft' &&
-          (task.status === 'pending' || task.status === 'running'),
-      );
-      setNoteTaskId(pendingNoteTask?.id ?? null);
     } catch (error) {
       console.error('Failed to fetch topic:', error);
       message.error('获取主题详情失败');
@@ -92,20 +101,6 @@ const TopicDetail: React.FC = () => {
   useEffect(() => {
     fetchTopic();
   }, [id]);
-
-  const noteTask = useAITaskPolling(noteTaskId, {
-    onSucceeded: (task: AITask) => {
-      const title = String(task.result_json.title ?? `${topic?.title ?? '学习'} 学习笔记`);
-      const content = String(task.result_json.content ?? '');
-      setNoteDraft({ taskId: task.id, title, content });
-      noteForm.setFieldsValue({ title, content });
-      setNoteTaskId(null);
-    },
-    onFailed: (task: AITask) => {
-      message.error(task.error_message || '笔记草稿生成失败');
-      setNoteTaskId(null);
-    },
-  });
 
   const handleImport = async (values: any) => {
     if (!topic) return;
@@ -138,89 +133,110 @@ const TopicDetail: React.FC = () => {
     }
   };
 
-  const handleGenerateNoteDraft = async (instructions = '') => {
-    if (!topic) return;
+  const handleDeleteQuestion = async (questionId: number) => {
     try {
-      const response = await createNoteDraft(topic.id, instructions);
-      setNoteTaskId(response.data.task.id);
-      message.info('已提交笔记草稿生成任务');
-    } catch (error) {
-      console.error('Failed to create note draft:', error);
-      message.error('提交笔记草稿任务失败');
-    }
-  };
-
-  const handleGenerateButton = () => {
-    if (topic?.has_current_note) {
-      setIsRegenerateVisible(true);
-      return;
-    }
-    void handleGenerateNoteDraft();
-  };
-
-  const handleRegenerate = (values: { instructions: string }) => {
-    setIsRegenerateVisible(false);
-    regenerateForm.resetFields();
-    void handleGenerateNoteDraft(values.instructions);
-  };
-
-  const handleConfirmNote = async (values: { title: string; content: string }) => {
-    if (!topic || !noteDraft) return;
-    try {
-      setNoteSubmitting(true);
-      await createNote({
-        topic: topic.id,
-        title: values.title,
-        content: values.content,
-        source_task: noteDraft.taskId,
-      });
-      message.success('结构化笔记已保存');
-      setNoteDraft(null);
-      noteForm.resetFields();
+      await deleteQuestion(questionId);
+      message.success('问答已删除');
       fetchTopic();
     } catch (error) {
-      console.error('Failed to save note:', error);
-      message.error('保存结构化笔记失败');
-    } finally {
-      setNoteSubmitting(false);
-    }
-  };
-
-  const handleEditNote = (note: Note) => {
-    setEditingNote(note);
-    editNoteForm.setFieldsValue({ title: note.title, content: note.content });
-  };
-
-  const handleUpdateNote = async (values: { title: string; content: string }) => {
-    if (!editingNote) return;
-    try {
-      setNoteSubmitting(true);
-      await updateNote(editingNote.id, values);
-      message.success('结构化笔记已更新');
-      setEditingNote(null);
-      editNoteForm.resetFields();
-      fetchTopic();
-    } catch (error) {
-      console.error('Failed to update note:', error);
-      message.error('更新结构化笔记失败');
-    } finally {
-      setNoteSubmitting(false);
-    }
-  };
-
-  const handleDeleteNote = async (noteId: number) => {
-    try {
-      await deleteNote(noteId);
-      message.success('结构化笔记已删除');
-      fetchTopic();
-    } catch (error) {
-      console.error('Failed to delete note:', error);
-      message.error('删除结构化笔记失败');
+      console.error('Failed to delete question:', error);
+      message.error('删除问答失败');
     }
   };
 
   if (loading && !topic) return <div style={{ padding: '24px' }}>加载中...</div>;
   if (!topic) return <div style={{ padding: '24px' }}>未找到主题</div>;
+  if (topic.type === 'discussion') {
+    return <Navigate to={`/topics/${topic.id}/discussion`} replace />;
+  }
+  const getMaterialTitle = (materialId: number | null) =>
+    topic.materials.find((material) => material.id === materialId)?.title ??
+    '未知材料';
+  const normalizedKeyword = outputKeyword.trim().toLowerCase();
+  const savedQuestions = topic.questions.filter(
+    (question) => question.is_saved,
+  );
+  const questionFields = (question: (typeof savedQuestions)[number]) => [
+    { label: '问题', value: question.question_text },
+    ...(question.selected_text
+      ? [{ label: '原文', value: question.selected_text }]
+      : [{ label: 'AI 回答', value: question.ai_responses[0]?.content }]),
+    { label: '出处', value: getMaterialTitle(question.material) },
+  ];
+  const conceptFields = (concept: Topic['concepts'][number]) => {
+    const anchor = concept.anchors[0];
+    return [
+      { label: '概念名称', value: concept.title },
+      { label: '定义', value: concept.definition },
+      { label: '原文', value: anchor?.source_text },
+      { label: '出处', value: anchor?.material_title },
+    ];
+  };
+  const highlightFields = (highlight: Topic['highlights'][number]) => [
+    { label: '原文', value: highlight.source_text },
+    { label: '出处', value: getMaterialTitle(highlight.material) },
+    { label: '备注', value: highlight.user_note },
+  ];
+  const matchesFields = (fields: SearchField[], keyword = normalizedKeyword) =>
+    !keyword || getMatchingFields(fields, keyword).length > 0;
+  const renderMatchedFieldNames = (fields: SearchField[]) => {
+    const matchedFields = getMatchingFields(fields, normalizedKeyword);
+    return matchedFields.length ? (
+      <Typography.Text type="secondary">
+        匹配字段：{matchedFields.map((field) => field.label).join('、')}
+      </Typography.Text>
+    ) : null;
+  };
+  const filteredQuestions = savedQuestions.filter((question) =>
+    matchesFields(questionFields(question)),
+  );
+  const filteredConcepts = topic.concepts.filter((concept) =>
+    matchesFields(conceptFields(concept)),
+  );
+  const filteredHighlights = topic.highlights.filter((highlight) =>
+    matchesFields(highlightFields(highlight)),
+  );
+  const paginate = <Item,>(items: Item[]) =>
+    items.slice(
+      (outputPage - 1) * OUTPUT_PAGE_SIZE,
+      outputPage * OUTPUT_PAGE_SIZE,
+    );
+  const renderOutputPagination = (total: number) =>
+    total > OUTPUT_PAGE_SIZE ? (
+      <Pagination
+        current={outputPage}
+        pageSize={OUTPUT_PAGE_SIZE}
+        total={total}
+        showSizeChanger={false}
+        onChange={setOutputPage}
+        style={{ marginTop: 16, textAlign: 'right' }}
+      />
+    ) : null;
+  const handleOutputTabChange = (nextTab: string) => {
+    setOutputTab(nextTab as LearningOutputTab);
+    setOutputPage(1);
+  };
+  const handleOutputKeywordChange = (value: string) => {
+    setOutputKeyword(value);
+    setOutputPage(1);
+    const nextKeyword = value.trim().toLowerCase();
+    if (!nextKeyword) return;
+    const matchingTabs = {
+      questions: savedQuestions.some((question) =>
+        matchesFields(questionFields(question), nextKeyword),
+      ),
+      concepts: topic.concepts.some((concept) =>
+        matchesFields(conceptFields(concept), nextKeyword),
+      ),
+      highlights: topic.highlights.some((highlight) =>
+        matchesFields(highlightFields(highlight), nextKeyword),
+      ),
+    };
+    const nextTab = (
+      [outputTab, 'questions', 'concepts', 'highlights'] as LearningOutputTab[]
+    ).find((tab) => matchingTabs[tab]);
+    if (nextTab) setOutputTab(nextTab);
+  };
 
   return (
     <Content style={{ padding: '24px' }}>
@@ -229,21 +245,22 @@ const TopicDetail: React.FC = () => {
           返回列表
         </Button>
 
-        <Card>
+        <Card size="small">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <Title level={2}>{topic.title}</Title>
+            <Space size={8}>
+              <Tag color={topic.type === 'learning' ? 'blue' : 'purple'}>
+                {topic.type === 'learning' ? '学习类' : '讨论类'}
+              </Tag>
+              <Title level={3} style={{ margin: 0 }}>{topic.title}</Title>
+            </Space>
             <Space>
               <Tag color="blue">{topic.status_display}</Tag>
               <Tag color="green">掌握度: {topic.mastery_level_display}</Tag>
               <Button
-                onClick={handleGenerateButton}
-                disabled={!topic.materials.some((material) => material.import_status === 'success') || Boolean(noteTask)}
+                icon={<ApartmentOutlined />}
+                onClick={() => navigate(`/topics/${topic.id}/map`)}
               >
-                {topic.has_current_note
-                  ? '按要求再生成'
-                  : topic.notes.length
-                    ? '更新结构化笔记'
-                    : '生成结构化笔记'}
+                查看思维导图
               </Button>
               <Button
                 type="primary"
@@ -256,62 +273,252 @@ const TopicDetail: React.FC = () => {
             </Space>
           </div>
 
-          <Descriptions column={1} bordered style={{ marginTop: '24px' }}>
+          <Descriptions size="small" column={2} style={{ marginTop: '16px' }}>
             <Descriptions.Item label="学习目标">{topic.goal || '未设置'}</Descriptions.Item>
             <Descriptions.Item label="学习范围">{topic.scope || '未设置'}</Descriptions.Item>
             <Descriptions.Item label="创建时间">{new Date(topic.created_at).toLocaleString()}</Descriptions.Item>
-            <Descriptions.Item label="更新时间">{new Date(topic.updated_at).toLocaleString()}</Descriptions.Item>
           </Descriptions>
         </Card>
 
-        <Card title="结构化笔记">
-          {noteTask && (
-            <Alert
-              type="info"
-              showIcon
-              message="AI 正在根据学习材料生成笔记草稿，可继续浏览其他内容。"
-              style={{ marginBottom: 16 }}
+        <Card
+          title="学习产出"
+          extra={
+            <Input.Search
+              allowClear
+              placeholder="搜索当前学习产出"
+              style={{ width: 260 }}
+              value={outputKeyword}
+              onChange={(event) => handleOutputKeywordChange(event.target.value)}
             />
-          )}
-          <List
-            dataSource={topic.notes}
-            renderItem={(item) => (
-              <List.Item
-                actions={[
-                  <Button
-                    key="edit"
-                    type="link"
-                    icon={<EditOutlined />}
-                    onClick={() => handleEditNote(item)}
-                  >
-                    编辑
-                  </Button>,
-                  <Popconfirm
-                    key="delete"
-                    title="删除这条结构化笔记？"
-                    description="删除后无法恢复。"
-                    okText="删除"
-                    okButtonProps={{ danger: true }}
-                    cancelText="取消"
-                    onConfirm={() => handleDeleteNote(item.id)}
-                  >
-                    <Button type="link" danger icon={<DeleteOutlined />}>
-                      删除
-                    </Button>
-                  </Popconfirm>,
-                ]}
-              >
-                <List.Item.Meta
-                  title={item.title}
-                  description={
-                    <Typography.Paragraph ellipsis={{ rows: 3 }}>
-                      {item.content}
-                    </Typography.Paragraph>
-                  }
-                />
-              </List.Item>
-            )}
-            locale={{ emptyText: '暂无结构化笔记，可先生成 AI 草稿并确认保存' }}
+          }
+        >
+          <Tabs
+            activeKey={outputTab}
+            onChange={handleOutputTabChange}
+            items={[
+              {
+                key: 'questions',
+                label: `问答 (${filteredQuestions.length})`,
+                children: (
+                  <>
+                    <List
+                      size="small"
+                      dataSource={paginate(filteredQuestions)}
+                      locale={{ emptyText: '没有匹配的已沉淀问答。' }}
+                      renderItem={(question) => (
+                        <List.Item
+                          actions={[
+                            question.material && question.start_offset !== null ? (
+                              <Button key="source" type="link" icon={<EyeOutlined />} onClick={() => navigate(`/topics/${topic.id}/materials/${question.material}?anchor=${question.start_offset}&question=${question.id}`)}>
+                                查看原文
+                              </Button>
+                            ) : null,
+                            <Popconfirm key="delete" title="删除这条问答？" okText="删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void handleDeleteQuestion(question.id)}>
+                              <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
+                            </Popconfirm>,
+                          ]}
+                        >
+                          <List.Item.Meta
+                            title={renderHighlightedText(
+                              question.question_text,
+                              normalizedKeyword,
+                            )}
+                            description={
+                              question.selected_text ? (
+                                <Space direction="vertical" size={2}>
+                                  <Typography.Text>
+                                    原文：“
+                                    {renderHighlightedText(
+                                      question.selected_text,
+                                      normalizedKeyword,
+                                    )}
+                                    ”
+                                  </Typography.Text>
+                                  <Typography.Text type="secondary">
+                                    来自：《
+                                    {renderHighlightedText(
+                                      getMaterialTitle(question.material),
+                                      normalizedKeyword,
+                                    )}
+                                    》
+                                  </Typography.Text>
+                                  {renderMatchedFieldNames(
+                                    questionFields(question),
+                                  )}
+                                </Space>
+                              ) : (
+                                <Space direction="vertical" size={2}>
+                                  <Typography.Text>
+                                    {renderHighlightedText(
+                                      question.ai_responses[0]?.content ||
+                                        'AI 回答仍在生成或不可用。',
+                                      normalizedKeyword,
+                                    )}
+                                  </Typography.Text>
+                                  <Typography.Text type="secondary">
+                                    来自：《
+                                    {renderHighlightedText(
+                                      getMaterialTitle(question.material),
+                                      normalizedKeyword,
+                                    )}
+                                    》
+                                  </Typography.Text>
+                                  {renderMatchedFieldNames(
+                                    questionFields(question),
+                                  )}
+                                </Space>
+                              )
+                            }
+                          />
+                        </List.Item>
+                      )}
+                    />
+                    {renderOutputPagination(filteredQuestions.length)}
+                  </>
+                ),
+              },
+              {
+                key: 'concepts',
+                label: `概念 (${filteredConcepts.length})`,
+                children: (
+                  <>
+                  <List
+                    size="small"
+                    dataSource={paginate(filteredConcepts)}
+                    locale={{ emptyText: '没有匹配的概念。' }}
+                    renderItem={(concept) => {
+                      const anchor = concept.anchors[0];
+                      return (
+                        <List.Item
+                          actions={
+                            anchor
+                              ? [
+                                  <Button
+                                    key="source"
+                                    type="link"
+                                    icon={<EyeOutlined />}
+                                    onClick={() =>
+                                      navigate(
+                                        `/topics/${topic.id}/materials/${anchor.material}?anchor=${anchor.start_offset}&concept=${concept.id}`,
+                                      )
+                                    }
+                                  >
+                                    查看原文
+                                  </Button>,
+                                ]
+                              : undefined
+                          }
+                        >
+                          <List.Item.Meta
+                            title={renderHighlightedText(
+                              concept.title,
+                              normalizedKeyword,
+                            )}
+                            description={
+                              <Space direction="vertical" size={2}>
+                                <Typography.Text>
+                                  {renderHighlightedText(
+                                    concept.definition ||
+                                      '概念草稿正在生成或等待补全。',
+                                    normalizedKeyword,
+                                  )}
+                                </Typography.Text>
+                                {anchor && (
+                                  <>
+                                    <Typography.Text>
+                                      原文：“
+                                      {renderHighlightedText(
+                                        anchor.source_text,
+                                        normalizedKeyword,
+                                      )}
+                                      ”
+                                    </Typography.Text>
+                                    <Typography.Text type="secondary">
+                                      来自：《
+                                      {renderHighlightedText(
+                                        anchor.material_title,
+                                        normalizedKeyword,
+                                      )}
+                                      》
+                                    </Typography.Text>
+                                  </>
+                                )}
+                                {renderMatchedFieldNames(
+                                  conceptFields(concept),
+                                )}
+                              </Space>
+                            }
+                          />
+                        </List.Item>
+                      );
+                    }}
+                  />
+                  {renderOutputPagination(filteredConcepts.length)}
+                  </>
+                ),
+              },
+              {
+                key: 'highlights',
+                label: `高亮 (${filteredHighlights.length})`,
+                children: (
+                  <>
+                  <List
+                    size="small"
+                    dataSource={paginate(filteredHighlights)}
+                    locale={{ emptyText: '没有匹配的高亮。' }}
+                    renderItem={(highlight) => (
+                      <List.Item
+                        actions={[
+                          <Button
+                            key="source"
+                            type="link"
+                            icon={<EyeOutlined />}
+                            onClick={() =>
+                              navigate(
+                                `/topics/${topic.id}/materials/${highlight.material}?anchor=${highlight.start_offset}&highlight=${highlight.id}`,
+                              )
+                            }
+                          >
+                            查看原文
+                          </Button>,
+                        ]}
+                      >
+                        <Space direction="vertical" size={2}>
+                          <Typography.Paragraph style={{ margin: 0 }}>
+                            原文：“
+                            {renderHighlightedText(
+                              highlight.source_text,
+                              normalizedKeyword,
+                            )}
+                            ”
+                          </Typography.Paragraph>
+                          <Typography.Text type="secondary">
+                            来自：《
+                            {renderHighlightedText(
+                              getMaterialTitle(highlight.material),
+                              normalizedKeyword,
+                            )}
+                            》
+                          </Typography.Text>
+                          {highlight.user_note && (
+                            <Typography.Text type="secondary">
+                              备注：
+                              {renderHighlightedText(
+                                highlight.user_note,
+                                normalizedKeyword,
+                              )}
+                            </Typography.Text>
+                          )}
+                          {renderMatchedFieldNames(highlightFields(highlight))}
+                        </Space>
+                      </List.Item>
+                    )}
+                  />
+                  {renderOutputPagination(filteredHighlights.length)}
+                  </>
+                ),
+              },
+            ]}
           />
         </Card>
 
@@ -345,6 +552,9 @@ const TopicDetail: React.FC = () => {
                   description={
                     <Space>
                       <Tag>{item.type_display}</Tag>
+                      <Tag color={item.source_type === 'manual' ? 'default' : 'purple'}>
+                        {item.source_type_display}
+                      </Tag>
                       <Tag color={item.import_status === 'success' ? 'success' : 'warning'}>
                         {item.import_status_display}
                       </Tag>
@@ -358,6 +568,8 @@ const TopicDetail: React.FC = () => {
             locale={{ emptyText: '暂无材料，请先导入学习材料' }}
           />
         </Card>
+
+        <TopicDiscussion topicId={topic.id} />
       </Space>
 
       <Modal
@@ -396,76 +608,6 @@ const TopicDetail: React.FC = () => {
         </Form>
       </Modal>
 
-      <Modal
-        title="确认结构化笔记"
-        open={Boolean(noteDraft)}
-        onCancel={() => {
-          setNoteDraft(null);
-          noteForm.resetFields();
-        }}
-        onOk={() => noteForm.submit()}
-        confirmLoading={noteSubmitting}
-        width={760}
-      >
-        <Alert
-          type="info"
-          showIcon
-          message="这是 AI 草稿。请检查、修改后再保存为正式笔记。"
-          style={{ marginBottom: 16 }}
-        />
-        <Form form={noteForm} layout="vertical" onFinish={handleConfirmNote}>
-          <Form.Item name="title" label="笔记标题" rules={[{ required: true, message: '请输入笔记标题' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="content" label="笔记内容" rules={[{ required: true, message: '请输入笔记内容' }]}>
-            <Input.TextArea rows={16} />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal
-        title="按要求重新生成笔记"
-        open={isRegenerateVisible}
-        onCancel={() => {
-          setIsRegenerateVisible(false);
-          regenerateForm.resetFields();
-        }}
-        onOk={() => regenerateForm.submit()}
-      >
-        <Form form={regenerateForm} layout="vertical" onFinish={handleRegenerate}>
-          <Form.Item
-            name="instructions"
-            label="新的生成要求"
-            rules={[{ required: true, message: '请说明本次希望如何调整笔记' }]}
-          >
-            <Input.TextArea
-              rows={5}
-              placeholder="例如：重点梳理 Django ORM 的查询优化，并补充常见误区。"
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal
-        title="编辑结构化笔记"
-        open={Boolean(editingNote)}
-        onCancel={() => {
-          setEditingNote(null);
-          editNoteForm.resetFields();
-        }}
-        onOk={() => editNoteForm.submit()}
-        confirmLoading={noteSubmitting}
-        width={760}
-      >
-        <Form form={editNoteForm} layout="vertical" onFinish={handleUpdateNote}>
-          <Form.Item name="title" label="笔记标题" rules={[{ required: true, message: '请输入笔记标题' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="content" label="笔记内容" rules={[{ required: true, message: '请输入笔记内容' }]}>
-            <Input.TextArea rows={16} />
-          </Form.Item>
-        </Form>
-      </Modal>
     </Content>
   );
 };

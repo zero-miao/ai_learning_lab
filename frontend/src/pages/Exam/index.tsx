@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Alert, Button, Card, Descriptions, Input, Layout, Result, Space, Spin, Tag, Typography, message } from 'antd';
 import { ArrowLeftOutlined, CheckCircleOutlined, FileTextOutlined, ReloadOutlined } from '@ant-design/icons';
-import { createExam, getExam, getTopic, listAITasks, retryAITask, submitExam } from '../../api';
+import { createExam, getExam, getExams, getTopic, listAITasks, retryAITask, saveExamAnswers, submitExam } from '../../api';
 import type { Exam, Topic } from '../../api';
 import { useAITaskPolling } from '../../hooks/useAITaskPolling';
 
@@ -18,17 +18,35 @@ const ExamPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [taskId, setTaskId] = useState<number | null>(null);
   const [taskKind, setTaskKind] = useState<'generate_exam' | 'grade_exam' | null>(null);
+  const [draftState, setDraftState] = useState<'saved' | 'unsaved' | 'saving' | 'failed'>('saved');
+  const draftSaveInFlight = useRef(false);
+
+  const setLoadedExam = useCallback((nextExam: Exam) => {
+    setExam(nextExam);
+    setAnswers(
+      Object.fromEntries(
+        nextExam.questions.map((question) => [
+          question.id,
+          question.answer_text,
+        ]),
+      ),
+    );
+    setDraftState('saved');
+  }, []);
 
   const loadTopic = useCallback(async () => {
     if (!topicId) return;
     const response = await getTopic(Number(topicId));
     setTopic(response.data);
-  }, [topicId]);
+    const examsResponse = await getExams({ topic: Number(topicId) });
+    const draft = examsResponse.data.find((item) => item.status === 'draft');
+    if (draft) setLoadedExam(draft);
+  }, [setLoadedExam, topicId]);
 
   const loadExam = useCallback(async (examId: number) => {
     const response = await getExam(examId);
-    setExam(response.data);
-  }, []);
+    setLoadedExam(response.data);
+  }, [setLoadedExam]);
 
   const task = useAITaskPolling(taskId, {
     onSucceeded: (nextTask) => {
@@ -94,6 +112,57 @@ const ExamPage: React.FC = () => {
     }
   };
 
+  const saveDraft = useCallback(async (notify = false) => {
+    if (!exam) return;
+    if (draftSaveInFlight.current) return;
+    try {
+      draftSaveInFlight.current = true;
+      setDraftState('saving');
+      await saveExamAnswers(
+        exam.id,
+        exam.questions.map((question) => ({
+          id: question.id,
+          answer_text: answers[question.id] ?? '',
+        })),
+      );
+      if (notify) message.success('答题草稿已保存，下次可继续作答');
+      setDraftState('saved');
+    } catch (error) {
+      console.error('Failed to save exam draft:', error);
+      if (notify) message.error('保存答题草稿失败');
+      setDraftState('failed');
+    } finally {
+      draftSaveInFlight.current = false;
+    }
+  }, [answers, exam]);
+
+  useEffect(() => {
+    if (exam?.status !== 'draft') return;
+    const timer = window.setTimeout(() => {
+      void saveDraft();
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [answers, exam?.status, saveDraft]);
+
+  useEffect(() => {
+    if (exam?.status !== 'draft') return;
+    const timer = window.setInterval(() => {
+      void saveDraft();
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [exam?.status, saveDraft]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        void saveDraft(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [saveDraft]);
+
   const handleRetry = async () => {
     if (!task) return;
     const response = await retryAITask(task.id);
@@ -120,6 +189,18 @@ const ExamPage: React.FC = () => {
             <Descriptions.Item label="学习主题">{topic.title}</Descriptions.Item>
             <Descriptions.Item label="当前掌握度"><Tag color="blue">{topic.mastery_level_display}</Tag></Descriptions.Item>
           </Descriptions>
+          {exam?.status === 'draft' && (
+            <Text type={draftState === 'failed' ? 'danger' : 'secondary'}>
+              {draftState === 'saving'
+                ? '正在保存草稿...'
+                : draftState === 'unsaved'
+                  ? '有未保存的修改'
+                  : draftState === 'failed'
+                    ? '自动保存失败，请手动保存'
+                    : '草稿已保存'}
+              {'，按 Ctrl+S 可立即保存'}
+            </Text>
+          )}
         </Space>
       </Card>
 
@@ -156,10 +237,15 @@ const ExamPage: React.FC = () => {
             <Card key={question.id} title={`第 ${index + 1} 题`}>
               {question.scenario && <Alert type="info" showIcon message="迁移场景" description={question.scenario} style={{ marginBottom: 16 }} />}
               <Paragraph strong>{question.question_text}</Paragraph>
-              <Input.TextArea rows={6} value={answers[question.id]} placeholder="请用自己的话分析并作答..." onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} />
+              <Input.TextArea rows={6} value={answers[question.id]} placeholder="请用自己的话分析并作答..." onChange={(event) => {
+                setDraftState('unsaved');
+                setAnswers((current) => ({ ...current, [question.id]: event.target.value }));
+              }} />
             </Card>
           ))}
-          <Button type="primary" size="large" onClick={() => void handleSubmit()}>提交并获取反馈</Button>
+          <Button type="primary" size="large" onClick={() => void handleSubmit()}>
+            提交并获取反馈
+          </Button>
         </Space>
       )}
 
