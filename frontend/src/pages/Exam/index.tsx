@@ -19,6 +19,7 @@ const ExamPage: React.FC = () => {
   const [taskId, setTaskId] = useState<number | null>(null);
   const [taskKind, setTaskKind] = useState<'generate_exam' | 'grade_exam' | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
+  const [draftState, setDraftState] = useState<'saved' | 'unsaved' | 'saving' | 'failed'>('saved');
   const draftSaveInFlight = useRef(false);
 
   const setLoadedExam = useCallback((nextExam: Exam) => {
@@ -31,6 +32,7 @@ const ExamPage: React.FC = () => {
         ]),
       ),
     );
+    setDraftState('saved');
   }, []);
 
   const loadTopic = useCallback(async () => {
@@ -117,6 +119,7 @@ const ExamPage: React.FC = () => {
     try {
       draftSaveInFlight.current = true;
       setSavingDraft(true);
+      setDraftState('saving');
       await saveExamAnswers(
         exam.id,
         exam.questions.map((question) => ({
@@ -125,9 +128,11 @@ const ExamPage: React.FC = () => {
         })),
       );
       if (notify) message.success('答题草稿已保存，下次可继续作答');
+      setDraftState('saved');
     } catch (error) {
       console.error('Failed to save exam draft:', error);
       if (notify) message.error('保存答题草稿失败');
+      setDraftState('failed');
     } finally {
       draftSaveInFlight.current = false;
       setSavingDraft(false);
@@ -149,6 +154,17 @@ const ExamPage: React.FC = () => {
     }, 10000);
     return () => window.clearInterval(timer);
   }, [exam?.status, saveDraft]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        void saveDraft(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [saveDraft]);
 
   const handleRetry = async () => {
     if (!task) return;
@@ -176,6 +192,18 @@ const ExamPage: React.FC = () => {
             <Descriptions.Item label="学习主题">{topic.title}</Descriptions.Item>
             <Descriptions.Item label="当前掌握度"><Tag color="blue">{topic.mastery_level_display}</Tag></Descriptions.Item>
           </Descriptions>
+          {exam?.status === 'draft' && (
+            <Text type={draftState === 'failed' ? 'danger' : 'secondary'}>
+              {draftState === 'saving'
+                ? '正在保存草稿...'
+                : draftState === 'unsaved'
+                  ? '有未保存的修改'
+                  : draftState === 'failed'
+                    ? '自动保存失败，请手动保存'
+                    : '草稿已保存'}
+              {'，按 Ctrl+S 可立即保存'}
+            </Text>
+          )}
         </Space>
       </Card>
 
@@ -212,7 +240,10 @@ const ExamPage: React.FC = () => {
             <Card key={question.id} title={`第 ${index + 1} 题`}>
               {question.scenario && <Alert type="info" showIcon message="迁移场景" description={question.scenario} style={{ marginBottom: 16 }} />}
               <Paragraph strong>{question.question_text}</Paragraph>
-              <Input.TextArea rows={6} value={answers[question.id]} placeholder="请用自己的话分析并作答..." onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} />
+              <Input.TextArea rows={6} value={answers[question.id]} placeholder="请用自己的话分析并作答..." onChange={(event) => {
+                setDraftState('unsaved');
+                setAnswers((current) => ({ ...current, [question.id]: event.target.value }));
+              }} />
             </Card>
           ))}
           <Space>

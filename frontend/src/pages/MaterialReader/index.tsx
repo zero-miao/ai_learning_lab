@@ -31,6 +31,7 @@ import {
   createQuestion,
   deleteConcept,
   deleteHighlight,
+  deleteQuestion,
   getQuestion,
   getTopic,
   listAITasks,
@@ -424,6 +425,7 @@ const MaterialReader: React.FC = () => {
       message.success(
         conceptId ? '问答已沉淀到概念卡片' : '问答已保存到材料记录',
       );
+      await loadData();
     } catch (error) {
       console.error('Failed to save question:', error);
       message.error('保存问答失败');
@@ -459,6 +461,31 @@ const MaterialReader: React.FC = () => {
     } else {
       setAssistantTab('highlights');
       setSelectedHighlightId(id);
+    }
+  };
+
+  const handleJumpToQuestion = (questionId: number) => {
+    const item = topic?.questions.find((question) => question.id === questionId);
+    if (!item || item.start_offset === null) return;
+    const target = document.querySelector<HTMLElement>(
+      `[data-question-ids~="${questionId}"]`,
+    );
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setAssistantVisible(false);
+  };
+
+  const handleDeleteQuestion = async (questionId: number) => {
+    try {
+      await deleteQuestion(questionId);
+      if (selectedQuestionId === questionId) setSelectedQuestionId(null);
+      setChatHistory((current) =>
+        current.filter((item) => item.questionId !== questionId),
+      );
+      message.success('问答已删除');
+      await loadData();
+    } catch (error) {
+      console.error('Failed to delete question:', error);
+      message.error('删除问答失败');
     }
   };
 
@@ -663,6 +690,28 @@ const MaterialReader: React.FC = () => {
                     'AI 回答正在生成或尚未可用。'}
                 </div>
               }
+              action={
+                <Space direction="vertical" size={0}>
+                  <Button
+                    size="small"
+                    type="link"
+                    onClick={() => handleJumpToQuestion(selectedQuestion.id)}
+                  >
+                    查看原文
+                  </Button>
+                  <Popconfirm
+                    title="删除这条问答？"
+                    okText="删除"
+                    cancelText="取消"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => void handleDeleteQuestion(selectedQuestion.id)}
+                  >
+                    <Button size="small" type="link" danger>
+                      删除
+                    </Button>
+                  </Popconfirm>
+                </Space>
+              }
               closable
               onClose={() => setSelectedQuestionId(null)}
               style={{ marginBottom: 12 }}
@@ -843,36 +892,28 @@ const MaterialReader: React.FC = () => {
                   >
                     查看来源
                   </Button>,
-                  <Button
-                    key="edit"
-                    type="link"
-                    onClick={() => openConceptEditor(concept)}
+                  <Dropdown
+                    key="more"
+                    menu={{
+                      items: [
+                        { key: 'edit', label: '编辑概念' },
+                        ...(concept.status === 'draft' &&
+                        !pendingConceptIds.has(concept.id)
+                          ? [{ key: 'confirm', label: '确认概念' }]
+                          : []),
+                        { key: 'delete', label: '删除概念', danger: true },
+                      ],
+                      onClick: ({ key }) => {
+                        if (key === 'edit') openConceptEditor(concept);
+                        if (key === 'confirm') {
+                          void saveConcept(concept, true, concept);
+                        }
+                        if (key === 'delete') void handleDeleteConcept(concept.id);
+                      },
+                    }}
                   >
-                    编辑
-                  </Button>,
-                  concept.status === 'draft' && !pendingConceptIds.has(concept.id) ? (
-                    <Button
-                      key="confirm"
-                      type="link"
-                      onClick={() => {
-                        void saveConcept(concept, true, concept);
-                      }}
-                    >
-                      确认
-                    </Button>
-                  ) : null,
-                  <Popconfirm
-                    key="delete"
-                    title="删除这个概念？"
-                    okText="删除"
-                    cancelText="取消"
-                    okButtonProps={{ danger: true }}
-                    onConfirm={() => void handleDeleteConcept(concept.id)}
-                  >
-                    <Button type="link" danger>
-                      删除
-                    </Button>
-                  </Popconfirm>,
+                    <Button type="link">更多</Button>
+                  </Dropdown>,
                 ]}
               >
                 <List.Item.Meta

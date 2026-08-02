@@ -201,6 +201,10 @@ function renderChunk(
             (range) => `universal-reader__annotation--${range.variant}`,
           ),
         ].join(' ')}
+        data-question-ids={activeRanges
+          .filter((range) => range.type === 'question')
+          .map((range) => range.id)
+          .join(' ')}
         onClick={(event) => {
           if (!clickTarget) return;
           event.stopPropagation();

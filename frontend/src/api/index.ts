@@ -285,6 +285,7 @@ export const getQuestion = (id: number) => api.get<Question>(`questions/${id}/`)
 export const createQuestion = (data: Partial<Question>) => api.post<{ question: Question; task: AITask }>('questions/', data);
 export const saveQuestion = (id: number, concept?: number) =>
   api.post<Question>(`questions/${id}/save/`, concept ? { concept } : {});
+export const deleteQuestion = (id: number) => api.delete(`questions/${id}/`);
 export const createConcept = (
   topicId: number,
   data: {

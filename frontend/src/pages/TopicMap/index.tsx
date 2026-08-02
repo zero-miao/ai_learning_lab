@@ -21,7 +21,6 @@ import {
   ArrowLeftOutlined,
   DeleteOutlined,
   EditOutlined,
-  PlusOutlined,
 } from '@ant-design/icons';
 import {
   createConceptRelation,
@@ -120,16 +119,6 @@ const TopicMap: React.FC = () => {
     [topic?.concepts],
   );
 
-  const openCreateRelation = () => {
-    setEditingRelation(null);
-    relationForm.setFieldsValue({
-      from_concept: selectedConcept?.id,
-      relation_type: '关联',
-      description: '',
-    });
-    setRelationModalOpen(true);
-  };
-
   const openEditRelation = (relation: ConceptRelation) => {
     setEditingRelation(relation);
     relationForm.setFieldsValue(relation);
@@ -175,6 +164,18 @@ const TopicMap: React.FC = () => {
 
   const handleDropOnConcept = (target: Concept) => {
     if (!draggedConceptId || draggedConceptId === target.id) return;
+    const existingRelation = topic?.concept_relations.find(
+      (relation) =>
+        (relation.from_concept === draggedConceptId &&
+          relation.to_concept === target.id) ||
+        (relation.from_concept === target.id &&
+          relation.to_concept === draggedConceptId),
+    );
+    if (existingRelation) {
+      openEditRelation(existingRelation);
+      setDraggedConceptId(null);
+      return;
+    }
     setEditingRelation(null);
     relationForm.setFieldsValue({
       from_concept: draggedConceptId,
@@ -249,17 +250,10 @@ const TopicMap: React.FC = () => {
               <Tag>{topic.concept_relations.length} 条关系</Tag>
             </Space>
           }
-          extra={
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              disabled={topic.concepts.length < 2}
-              onClick={openCreateRelation}
-            >
-              建立关系
-            </Button>
-          }
         >
+          <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+            拖拽一个概念节点到另一个节点上，即可建立关联；重复拖拽会打开已有关系进行编辑。
+          </Typography.Text>
           {topic.concepts.length ? (
             <div
               style={{
