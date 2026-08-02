@@ -12,7 +12,6 @@ import {
   Modal,
   Form,
   Input,
-  Popconfirm,
   Radio,
   Statistic,
   message,
@@ -22,19 +21,16 @@ import {
   ApartmentOutlined,
   BookOutlined,
   DeleteOutlined,
-  EditOutlined,
   FormOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import {
   createMaterial,
   deleteMaterial,
-  deleteNote,
   getTopic,
   listAITasks,
-  updateNote,
 } from '../../api';
-import type { Note, Topic } from '../../api';
+import type { Topic } from '../../api';
 
 const { Title } = Typography;
 const { Content } = Layout;
@@ -45,10 +41,7 @@ const TopicDetail: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [briefingMaterialIds, setBriefingMaterialIds] = useState<number[]>([]);
-  const [noteSubmitting, setNoteSubmitting] = useState(false);
-  const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [form] = Form.useForm();
-  const [editNoteForm] = Form.useForm();
   const navigate = useNavigate();
 
   const fetchTopic = async () => {
@@ -102,39 +95,6 @@ const TopicDetail: React.FC = () => {
     } catch (error) {
       console.error('Failed to delete material:', error);
       message.error('删除材料失败');
-    }
-  };
-
-  const handleEditNote = (note: Note) => {
-    setEditingNote(note);
-    editNoteForm.setFieldsValue({ title: note.title, content: note.content });
-  };
-
-  const handleUpdateNote = async (values: { title: string; content: string }) => {
-    if (!editingNote) return;
-    try {
-      setNoteSubmitting(true);
-      await updateNote(editingNote.id, values);
-      message.success('结构化笔记已更新');
-      setEditingNote(null);
-      editNoteForm.resetFields();
-      fetchTopic();
-    } catch (error) {
-      console.error('Failed to update note:', error);
-      message.error('更新结构化笔记失败');
-    } finally {
-      setNoteSubmitting(false);
-    }
-  };
-
-  const handleDeleteNote = async (noteId: number) => {
-    try {
-      await deleteNote(noteId);
-      message.success('结构化笔记已删除');
-      fetchTopic();
-    } catch (error) {
-      console.error('Failed to delete note:', error);
-      message.error('删除结构化笔记失败');
     }
   };
 
@@ -205,59 +165,11 @@ const TopicDetail: React.FC = () => {
               suffix="条"
             />
             <Statistic
-              title="总结"
-              value={topic.learning_output.summary_count}
-              suffix="篇"
-            />
-            <Statistic
               title="主图节点"
               value={topic.learning_output.map_node_count}
               suffix="个"
             />
           </Space>
-        </Card>
-
-        <Card title="结构化笔记">
-          <List
-            dataSource={topic.notes}
-            renderItem={(item) => (
-              <List.Item
-                actions={[
-                  <Button
-                    key="edit"
-                    type="link"
-                    icon={<EditOutlined />}
-                    onClick={() => handleEditNote(item)}
-                  >
-                    编辑
-                  </Button>,
-                  <Popconfirm
-                    key="delete"
-                    title="删除这条结构化笔记？"
-                    description="删除后无法恢复。"
-                    okText="删除"
-                    okButtonProps={{ danger: true }}
-                    cancelText="取消"
-                    onConfirm={() => handleDeleteNote(item.id)}
-                  >
-                    <Button type="link" danger icon={<DeleteOutlined />}>
-                      删除
-                    </Button>
-                  </Popconfirm>,
-                ]}
-              >
-                <List.Item.Meta
-                  title={item.title}
-                  description={
-                    <Typography.Paragraph ellipsis={{ rows: 3 }}>
-                      {item.content}
-                    </Typography.Paragraph>
-                  }
-                />
-              </List.Item>
-            )}
-            locale={{ emptyText: '暂无结构化笔记，可先生成 AI 草稿并确认保存' }}
-          />
         </Card>
 
         <Card
@@ -344,26 +256,6 @@ const TopicDetail: React.FC = () => {
         </Form>
       </Modal>
 
-      <Modal
-        title="编辑结构化笔记"
-        open={Boolean(editingNote)}
-        onCancel={() => {
-          setEditingNote(null);
-          editNoteForm.resetFields();
-        }}
-        onOk={() => editNoteForm.submit()}
-        confirmLoading={noteSubmitting}
-        width={760}
-      >
-        <Form form={editNoteForm} layout="vertical" onFinish={handleUpdateNote}>
-          <Form.Item name="title" label="笔记标题" rules={[{ required: true, message: '请输入笔记标题' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="content" label="笔记内容" rules={[{ required: true, message: '请输入笔记内容' }]}>
-            <Input.TextArea rows={16} />
-          </Form.Item>
-        </Form>
-      </Modal>
     </Content>
   );
 };

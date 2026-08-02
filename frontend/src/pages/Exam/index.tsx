@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Alert, Button, Card, Descriptions, Input, Layout, Result, Space, Spin, Tag, Typography, message } from 'antd';
 import { ArrowLeftOutlined, CheckCircleOutlined, FileTextOutlined, ReloadOutlined } from '@ant-design/icons';
-import { createExam, getExam, getTopic, listAITasks, retryAITask, submitExam } from '../../api';
+import { createExam, getExam, getExams, getTopic, listAITasks, retryAITask, saveExamAnswers, submitExam } from '../../api';
 import type { Exam, Topic } from '../../api';
 import { useAITaskPolling } from '../../hooks/useAITaskPolling';
 
@@ -18,17 +18,33 @@ const ExamPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [taskId, setTaskId] = useState<number | null>(null);
   const [taskKind, setTaskKind] = useState<'generate_exam' | 'grade_exam' | null>(null);
+  const [savingDraft, setSavingDraft] = useState(false);
+
+  const setLoadedExam = useCallback((nextExam: Exam) => {
+    setExam(nextExam);
+    setAnswers(
+      Object.fromEntries(
+        nextExam.questions.map((question) => [
+          question.id,
+          question.answer_text,
+        ]),
+      ),
+    );
+  }, []);
 
   const loadTopic = useCallback(async () => {
     if (!topicId) return;
     const response = await getTopic(Number(topicId));
     setTopic(response.data);
-  }, [topicId]);
+    const examsResponse = await getExams({ topic: Number(topicId) });
+    const draft = examsResponse.data.find((item) => item.status === 'draft');
+    if (draft) setLoadedExam(draft);
+  }, [setLoadedExam, topicId]);
 
   const loadExam = useCallback(async (examId: number) => {
     const response = await getExam(examId);
-    setExam(response.data);
-  }, []);
+    setLoadedExam(response.data);
+  }, [setLoadedExam]);
 
   const task = useAITaskPolling(taskId, {
     onSucceeded: (nextTask) => {
@@ -91,6 +107,27 @@ const ExamPage: React.FC = () => {
     } catch (error) {
       console.error('Failed to submit exam:', error);
       message.error('阅卷任务提交失败');
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!exam) return;
+    try {
+      setSavingDraft(true);
+      const response = await saveExamAnswers(
+        exam.id,
+        exam.questions.map((question) => ({
+          id: question.id,
+          answer_text: answers[question.id] ?? '',
+        })),
+      );
+      setLoadedExam(response.data);
+      message.success('答题草稿已保存，下次可继续作答');
+    } catch (error) {
+      console.error('Failed to save exam draft:', error);
+      message.error('保存答题草稿失败');
+    } finally {
+      setSavingDraft(false);
     }
   };
 
@@ -159,7 +196,14 @@ const ExamPage: React.FC = () => {
               <Input.TextArea rows={6} value={answers[question.id]} placeholder="请用自己的话分析并作答..." onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} />
             </Card>
           ))}
-          <Button type="primary" size="large" onClick={() => void handleSubmit()}>提交并获取反馈</Button>
+          <Space>
+            <Button loading={savingDraft} onClick={() => void handleSaveDraft()}>
+              保存草稿
+            </Button>
+            <Button type="primary" size="large" onClick={() => void handleSubmit()}>
+              提交并获取反馈
+            </Button>
+          </Space>
         </Space>
       )}
 

@@ -627,6 +627,33 @@ class ExamViewSet(viewsets.ReadOnlyModelViewSet):
             {"task": AITaskSerializer(task).data}, status=status.HTTP_202_ACCEPTED
         )
 
+    @action(detail=True, methods=["post"], url_path="save")
+    def save_answers(self, request, pk=None):
+        exam = self.get_object()
+        if exam.status != "draft":
+            return Response(
+                {"detail": "只有待作答的考试可以保存草稿。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        answers = request.data.get("answers")
+        if not isinstance(answers, list):
+            return Response(
+                {"detail": "answers 必须是作答列表。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        questions = {question.id: question for question in exam.questions.all()}
+        for item in answers:
+            if not isinstance(item, dict) or item.get("id") not in questions:
+                return Response(
+                    {"detail": "答案包含不属于当前考试的题目。"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        for item in answers:
+            question = questions[item["id"]]
+            question.answer_text = str(item.get("answer_text", ""))
+            question.save(update_fields=["answer_text"])
+        return Response(ExamSerializer(exam).data)
+
 
 class ReviewRecordViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = ReviewRecord.objects.select_related("topic", "exam")

@@ -314,9 +314,15 @@ export const createHighlight = (
 ) => api.post<{ highlight: number; created: boolean }>(`topics/${topicId}/highlights/`, data);
 export const deleteHighlight = (id: number) => api.delete(`highlights/${id}/`);
 export const getExam = (id: number) => api.get<Exam>(`exams/${id}/`);
+export const getExams = (params?: { topic?: number }) =>
+  api.get<Exam[]>('exams/', { params });
 export const createExam = (topic: number) => api.post<TaskResponse>('exams/', { topic });
 export const submitExam = (id: number, answers: Array<{ id: number; answer_text: string }>) =>
   api.post<TaskResponse>(`exams/${id}/submit/`, { answers });
+export const saveExamAnswers = (
+  id: number,
+  answers: Array<{ id: number; answer_text: string }>,
+) => api.post<Exam>(`exams/${id}/save/`, { answers });
 export const getReviews = (params?: { result?: ReviewRecord['result'] }) =>
   api.get<ReviewRecord[]>('reviews/', { params });
 export const completeReview = (id: number) =>

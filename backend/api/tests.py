@@ -13,6 +13,7 @@ from .models import (
     ConceptRelation,
     DiscussionMessage,
     Exam,
+    ExamQuestion,
     Highlight,
     Material,
     MaterialChunk,
@@ -380,6 +381,29 @@ class AsyncTaskApiTests(TestCase):
         self.assertEqual(first.status_code, 202)
         self.assertEqual(second.status_code, 202)
         self.assertEqual(first.data["task"]["id"], second.data["task"]["id"])
+
+    def test_exam_draft_answers_can_be_saved_before_submission(self):
+        exam = Exam.objects.create(topic=self.topic)
+        question = ExamQuestion.objects.create(
+            exam=exam,
+            question_type="transfer",
+            question_text="如何在新场景中应用 QuerySet？",
+        )
+        response = self.client.post(
+            f"/api/exams/{exam.id}/save/",
+            {
+                "answers": [
+                    {
+                        "id": question.id,
+                        "answer_text": "先组合条件，再在需要结果时执行查询。",
+                    }
+                ]
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        question.refresh_from_db()
+        self.assertEqual(question.answer_text, "先组合条件，再在需要结果时执行查询。")
 
     @patch("api.task_service.AIGateway.generate_note_draft")
     def test_note_draft_worker_and_confirmation(self, generate_note_draft):

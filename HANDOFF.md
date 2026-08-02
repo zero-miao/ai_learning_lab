@@ -84,6 +84,9 @@ LLM_API_KEY=ollama
   支持编辑、删除和携带用户要求的再次生成。
 - 复习工作流：复习计划页按待复习、后续计划和已完成展示 `ReviewRecord`；用户可异步生成
   Markdown 复习提示，提交主动回忆/应用回答后获得 AI 反馈和下一轮复习安排。
+- 考试草稿：待作答考试支持保存部分答案；再次进入评估页自动加载最新草稿并恢复已保存内容。
+- 阅读体验：阅读前导独立显示在材料正文前；概念列表可从阅读页打开。概念草稿提交后在后台生成，
+  不再锁定阅读；无来源锚点参数进入阅读页时保持在文首。
 
 ## 5. 异步任务架构
 
@@ -126,6 +129,7 @@ pending -> running -> succeeded
 | 阅卷 | `POST /api/exams/{id}/submit/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 复习提示 | `POST /api/reviews/{id}/prompt/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
 | 复盘提交 | `POST /api/reviews/{id}/submit/` | `202`，`{task}` | `GET /api/ai-tasks/{id}/` |
+| 保存答题草稿 | `POST /api/exams/{id}/save/` | `200`，考试及已保存答案 | 无 |
 | 失败重试 | `POST /api/ai-tasks/{id}/retry/` | `202`，任务重置为 `pending` | - |
 
 不要让前端等待 LLM 的完成响应。页面应先显示任务提交状态，再通过轮询展示成功、失败或重试入口。
@@ -202,7 +206,7 @@ cd /Users/meiao/ai_workspace/ai-learning-lab
 (cd frontend && npm run build)
 ```
 
-当前已通过 Ruff、Django API 测试（19 项）、Django check、TypeScript `tsc -b` 与
+当前已通过 Ruff、Django API 测试（20 项）、Django check、TypeScript `tsc -b` 与
 Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超过 500 kB，
 后续可通过代码分割优化。
 
@@ -238,6 +242,8 @@ Node v20.20.2 下的 `npm run build`。Vite 会报告主 JavaScript bundle 超�
 8. `api.0016_reviewrecord_feedback_reviewrecord_graded_at_and_more` 已应用。复盘回答由
    `grade_review` 异步反馈；原记录保存得分、反馈与完成时间，并按服务端规则创建下一条记录：
    `>=85` 分 14 天、`>=60` 分 7 天、其余 2 天。
+9. 考试支持部分作答的草稿保存与恢复；阅读页面独立展示前导内容，提供概念列表并修复无
+   anchor 参数时的自动滚动。结构化笔记已从学习型 Topic UI 移除，历史数据仅为兼容复习上下文保留。
 
 V1-alpha 六个阶段均已完成。后续优先项为 AI 关系推荐、阶段总结和更丰富的学习内容类型。
 所有长耗时 AI 能力继续走
