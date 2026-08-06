@@ -26,6 +26,7 @@ const statusColor: Record<MaterialStatus, string> = {
   importing: 'processing',
   cleaning: 'processing',
   summarizing: 'processing',
+  generating_audio: 'processing',
   ready: 'success',
   failed: 'error',
 };

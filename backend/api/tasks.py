@@ -365,11 +365,18 @@ class BriefingTask(BaseTask):
         if not material:
             raise ValueError("找不到触发任务的材料。")
 
+        from .task_service import enqueue_or_reuse
+
         # 如果摘要已存在，跳过执行
         if material.digest:
-            if material.status != "ready":
-                material.status = "ready"
-                material.save(update_fields=["status", "updated_at"])
+            material.status = "generating_audio"
+            material.save(update_fields=["status", "updated_at"])
+            enqueue_or_reuse(
+                "edge_tts",
+                trigger_type="Material",
+                trigger_id=material.id,
+                model="edge-tts",
+            )
             return {"material_id": material.id, "skipped": True}
 
         material.status = "summarizing"
@@ -388,9 +395,48 @@ class BriefingTask(BaseTask):
         
         digest = self._call_llm(messages)
         material.digest = digest
-        material.status = "ready"
+        material.status = "generating_audio"
         material.save(update_fields=["digest", "status", "updated_at"])
+        enqueue_or_reuse(
+            "edge_tts",
+            trigger_type="Material",
+            trigger_id=material.id,
+            model="edge-tts",
+        )
         return {"material_id": material.id, "digest": digest}
+
+
+class EdgeTTSTask(BaseTask):
+    task_type = "edge_tts"
+    verbose_name = "生成朗读音频"
+
+    def run(self) -> Dict[str, Any]:
+        material = self._get_trigger()
+        if not material:
+            raise ValueError("找不到触发任务的材料。")
+        if material.media_type not in {"text", "web_page"}:
+            material.status = "ready"
+            material.save(update_fields=["status", "updated_at"])
+            return {"material_id": material.id, "skipped": True}
+
+        from .tts_service import synthesize_material
+
+        material.status = "generating_audio"
+        material.save(update_fields=["status", "updated_at"])
+        tts_meta, successful = synthesize_material(
+            material, force=bool(self.task_data.get("force"))
+        )
+        if successful == 0:
+            raise RuntimeError("所有配置音色均生成失败。")
+
+        material.status = "ready"
+        material.error = ""
+        material.save(update_fields=["status", "error", "updated_at"])
+        return {
+            "material_id": material.id,
+            "successful": successful,
+            "voices": tts_meta["voices"],
+        }
 
 
 class ProcessTask(BaseTask):

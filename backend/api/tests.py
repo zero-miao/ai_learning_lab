@@ -3,6 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -352,3 +353,90 @@ class V2ErApiTests(TestCase):
         self.assertEqual(task.task_type, "review_prompt")
         self.assertEqual(task.trigger_type, "ReviewRecord")
         self.assertEqual(task.trigger_id, review.id)
+
+    def test_edge_tts_allows_partial_voice_success(self):
+        class FakeCommunicate:
+            def __init__(self, text, voice):
+                self.text = text
+                self.voice = voice
+
+            def save_sync(self, path):
+                if self.voice == "zh-CN-YunxiNeural":
+                    raise RuntimeError("voice unavailable")
+                Path(path).write_bytes(b"fake mp3")
+
+        task, _ = enqueue_or_reuse(
+            "edge_tts",
+            trigger_type="Material",
+            trigger_id=self.material.id,
+            model="edge-tts",
+        )
+        task_cls = TaskRegistry.get_task_class(task.task_type)
+        task_obj = task_cls(
+            task_id=task.id,
+            task_data=task.task_data,
+            trigger_type=task.trigger_type,
+            trigger_id=task.trigger_id,
+            model=task.model,
+        )
+
+        with (
+            TemporaryDirectory() as media_root,
+            self.settings(MEDIA_ROOT=media_root),
+            patch(
+                "api.tts_service.configured_voices",
+                return_value=(
+                    ("zh-CN-XiaoxiaoNeural", "晓晓"),
+                    ("zh-CN-YunxiNeural", "云希"),
+                ),
+            ),
+            patch("api.tts_service.edge_tts.Communicate", FakeCommunicate),
+        ):
+            result = task_obj.run()
+
+        self.material.refresh_from_db()
+        voices = self.material.media_meta["tts"]["voices"]
+        self.assertEqual(result["successful"], 1)
+        self.assertEqual(self.material.status, "ready")
+        self.assertEqual(voices["zh-CN-XiaoxiaoNeural"]["status"], "ready")
+        self.assertEqual(voices["zh-CN-YunxiNeural"]["status"], "failed")
+
+    def test_briefing_with_digest_queues_edge_tts(self):
+        self.material.digest = "已有摘要"
+        self.material.save(update_fields=["digest"])
+        task, _ = enqueue_or_reuse(
+            "briefing",
+            trigger_type="Material",
+            trigger_id=self.material.id,
+        )
+        task_cls = TaskRegistry.get_task_class(task.task_type)
+        result = task_cls(
+            task_id=task.id,
+            task_data=task.task_data,
+            trigger_type=task.trigger_type,
+            trigger_id=task.trigger_id,
+            model=task.model,
+        ).run()
+
+        self.material.refresh_from_db()
+        self.assertTrue(result["skipped"])
+        self.assertEqual(self.material.status, "generating_audio")
+        self.assertTrue(
+            AITask.objects.filter(
+                task_type="edge_tts",
+                trigger_type="Material",
+                trigger_id=self.material.id,
+            ).exists()
+        )
+
+    def test_backfill_tts_queues_existing_material(self):
+        call_command("backfill_tts")
+        self.material.refresh_from_db()
+        self.assertEqual(self.material.status, "generating_audio")
+        self.assertTrue(
+            AITask.objects.filter(
+                task_type="edge_tts",
+                trigger_type="Material",
+                trigger_id=self.material.id,
+            ).exists()
+        )

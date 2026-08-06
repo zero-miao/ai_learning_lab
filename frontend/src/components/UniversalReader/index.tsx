@@ -1,4 +1,7 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   MediaPlayer,
   MediaProvider,
@@ -16,10 +19,10 @@ import {
   CommentOutlined,
   HighlightOutlined,
   LinkOutlined,
-  MoonOutlined,
-  SunOutlined,
+  PauseCircleOutlined,
+  PlayCircleOutlined,
 } from '@ant-design/icons';
-import { Button, Divider, Space, Tag, Typography } from 'antd';
+import { Button, Divider, Popover, Space, Tag, Tooltip, Typography, message } from 'antd';
 import type { Concept, Highlight, Material, Question } from '../../api';
 import './styles.css';
 
@@ -31,13 +34,15 @@ export interface TextSelectionAnchor {
   endOffset: number;
 }
 
+export type ReaderTheme = 'paper' | 'sepia' | 'green' | 'gray' | 'dark';
+
 interface UniversalReaderProps {
   material: Material;
   highlights: Highlight[];
   concepts: Concept[];
   questions: Question[];
-  darkMode: boolean;
-  onDarkModeChange: (enabled: boolean) => void;
+  readerTheme: ReaderTheme;
+  onReaderThemeChange: (theme: ReaderTheme) => void;
   onMarkConcept: (selection: TextSelectionAnchor) => void;
   onAskQuestion: (selection: TextSelectionAnchor) => void;
   onHighlight: (selection: TextSelectionAnchor) => void;
@@ -51,6 +56,7 @@ interface UniversalReaderProps {
     id: number | null;
   }>;
   seekTime?: { time: number | null; nonce: string };
+  speechControlsTargetId?: string;
 }
 
 interface ReaderChunk {
@@ -74,6 +80,25 @@ function formatTimestamp(seconds: number) {
   const remainingSeconds = totalSeconds % 60;
   return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
 }
+
+const mediaTypeLabels: Record<Material['media_type'], string> = {
+  text: '文本',
+  web_page: '网页',
+  video: '视频',
+  audio: '音频',
+};
+
+const readerThemeOptions: Array<{
+  value: ReaderTheme;
+  label: string;
+  color: string;
+}> = [
+  { value: 'paper', label: '纯白', color: '#ffffff' },
+  { value: 'sepia', label: '暖黄', color: '#f7f1df' },
+  { value: 'green', label: '护眼绿', color: '#eaf4e2' },
+  { value: 'gray', label: '柔灰', color: '#edf0f2' },
+  { value: 'dark', label: '深色', color: '#171717' },
+];
 
 function getReaderChunks(material: Material): ReaderChunk[] {
   if (material.chunks.length) {
@@ -140,6 +165,45 @@ function getOffsetInElement(
   return fragment.textContent?.length ?? 0;
 }
 
+function getMarkdownSourceOffset(
+  container: Node,
+  offset: number,
+  isStart: boolean,
+): number | null {
+  const element =
+    container.nodeType === Node.ELEMENT_NODE
+      ? (container as HTMLElement)
+      : container.parentElement;
+  const sourceElement =
+    element?.closest<HTMLElement>('[data-source-start]') ?? null;
+  if (sourceElement) {
+    const sourceStart = Number(sourceElement.dataset.sourceStart);
+    if (container.nodeType === Node.TEXT_NODE) {
+      return sourceStart + offset;
+    }
+    return isStart
+      ? sourceStart
+      : Number(sourceElement.dataset.sourceEnd ?? sourceStart);
+  }
+
+  if (container.nodeType !== Node.ELEMENT_NODE) return null;
+  const sourceNodes = Array.from(
+    (container as HTMLElement).querySelectorAll<HTMLElement>('[data-source-start]'),
+  );
+  const candidate = isStart
+    ? sourceNodes.find((node) => {
+        const child = container.childNodes[offset];
+        return child ? child === node || child.contains(node) : false;
+      }) ?? sourceNodes[0]
+    : [...sourceNodes].reverse()[0];
+  if (!candidate) return null;
+  return Number(
+    isStart
+      ? candidate.dataset.sourceStart
+      : candidate.dataset.sourceEnd ?? candidate.dataset.sourceStart,
+  );
+}
+
 type AnnotationType = 'highlight' | 'concept' | 'question';
 
 interface AnnotationRange {
@@ -151,15 +215,31 @@ interface AnnotationRange {
   sourceStart: number;
 }
 
-function renderChunk(
-  chunk: ReaderChunk,
+interface MarkdownNode {
+  type: string;
+  value?: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: MarkdownNode[];
+  position?: {
+    start: { offset?: number };
+    end: { offset?: number };
+  };
+}
+
+interface ReaderMarkdownPluginOptions {
+  chunks: ReaderChunk[];
+  ranges: AnnotationRange[];
+  activeChunkId?: number | null;
+  selectedAnnotations: UniversalReaderProps['selectedAnnotations'];
+}
+
+function getAnnotationRanges(
   highlights: Highlight[],
   concepts: Concept[],
   questions: Question[],
-  onAnnotationClick: UniversalReaderProps['onAnnotationClick'],
-  selectedAnnotations: UniversalReaderProps['selectedAnnotations'],
-) {
-  const ranges: AnnotationRange[] = [
+): AnnotationRange[] {
+  return [
     ...highlights.flatMap((highlight) =>
       highlight.locators.map((locator) => ({
         type: 'highlight' as const,
@@ -193,7 +273,127 @@ function renderChunk(
         sourceStart: locator.start_offset,
       })),
     ),
-  ].filter(
+  ];
+}
+
+function readerMarkdownPlugin(options: ReaderMarkdownPluginOptions) {
+  return (tree: MarkdownNode) => {
+    const anchoredChunks = new Set<number>();
+
+    const transform = (node: MarkdownNode) => {
+      if (!node.children) return;
+      node.children = node.children.flatMap((child) => {
+        if (child.type !== 'text' || !child.value || !child.position) {
+          transform(child);
+          return [child];
+        }
+
+        const sourceStart = child.position.start.offset;
+        const sourceEnd = child.position.end.offset;
+        if (sourceStart === undefined || sourceEnd === undefined) return [child];
+
+        const overlappingRanges = options.ranges.filter(
+          (range) => range.start < sourceEnd && range.end > sourceStart,
+        );
+        const overlappingChunks = options.chunks.filter(
+          (chunk) => chunk.startOffset < sourceEnd && chunk.endOffset > sourceStart,
+        );
+        const boundaries = new Set([sourceStart, sourceEnd]);
+        overlappingRanges.forEach((range) => {
+          boundaries.add(Math.max(sourceStart, range.start));
+          boundaries.add(Math.min(sourceEnd, range.end));
+        });
+        overlappingChunks.forEach((chunk) => {
+          boundaries.add(Math.max(sourceStart, chunk.startOffset));
+          boundaries.add(Math.min(sourceEnd, chunk.endOffset));
+        });
+        const positions = Array.from(boundaries).sort((left, right) => left - right);
+
+        return positions.slice(0, -1).map((start, index) => {
+          const end = positions[index + 1];
+          const chunk = options.chunks.find(
+            (item) => item.startOffset <= start && start < item.endOffset,
+          );
+          const activeRanges = overlappingRanges.filter(
+            (range) => range.start < end && range.end > start,
+          );
+          const prioritizedRanges = (
+            ['concept', 'question', 'highlight'] as AnnotationType[]
+          ).flatMap((type) => activeRanges.filter((range) => range.type === type));
+          const clickTarget =
+            prioritizedRanges.find((range) => range.sourceStart === start) ??
+            prioritizedRanges[0];
+          const classNames = [
+            'universal-reader__source-text',
+            chunk?.id === options.activeChunkId
+              ? 'universal-reader__source-text--active'
+              : '',
+            ...activeRanges.map(
+              (range) => `universal-reader__annotation universal-reader__annotation--${range.variant}`,
+            ),
+            activeRanges.some((range) =>
+              options.selectedAnnotations.some(
+                (selected) =>
+                  selected.type === range.type && selected.id === range.id,
+              ),
+            )
+              ? 'universal-reader__annotation--selected'
+              : '',
+          ].filter(Boolean);
+          const properties: Record<string, unknown> = {
+            className: classNames,
+            'data-source-start': start,
+            'data-source-end': end,
+          };
+          if (chunk) {
+            properties['data-chunk-id'] = chunk.id;
+            if (!anchoredChunks.has(chunk.id)) {
+              properties.id = `reader-chunk-${chunk.id}`;
+              anchoredChunks.add(chunk.id);
+            }
+          }
+          if (clickTarget) {
+            properties.id =
+              clickTarget.sourceStart === start
+                ? `reader-${clickTarget.type}-${clickTarget.id}`
+                : properties.id;
+            properties['data-annotation-type'] = clickTarget.type;
+            properties['data-annotation-id'] = clickTarget.id;
+            properties.role = 'button';
+            properties.tabIndex = 0;
+          }
+
+          return {
+            type: 'element',
+            tagName: 'span',
+            properties,
+            children: [
+              {
+                type: 'text',
+                value: child.value?.slice(
+                  Math.max(0, start - sourceStart),
+                  Math.max(0, end - sourceStart),
+                ),
+              },
+            ],
+          };
+        });
+      });
+    };
+
+    transform(tree);
+  };
+}
+
+function renderChunk(
+  chunk: ReaderChunk,
+  highlights: Highlight[],
+  concepts: Concept[],
+  questions: Question[],
+  onAnnotationClick: UniversalReaderProps['onAnnotationClick'],
+  selectedAnnotations: UniversalReaderProps['selectedAnnotations'],
+) {
+  const ranges = getAnnotationRanges(highlights, concepts, questions).filter(
     (range) => range.start < chunk.endOffset && range.end > chunk.startOffset,
   );
 
@@ -256,8 +456,17 @@ function renderChunk(
           .filter((range) => range.type === 'highlight')
           .map((range) => range.id)
           .join(' ')}
+        role="button"
+        tabIndex={0}
+        aria-label={`查看${clickTarget.type === 'concept' ? '概念' : clickTarget.type === 'question' ? '问答' : '高亮'}`}
         onClick={(event) => {
           if (!clickTarget) return;
+          event.stopPropagation();
+          onAnnotationClick(clickTarget.type, clickTarget.id);
+        }}
+        onKeyDown={(event) => {
+          if (!clickTarget || !['Enter', ' '].includes(event.key)) return;
+          event.preventDefault();
           event.stopPropagation();
           onAnnotationClick(clickTarget.type, clickTarget.id);
         }}
@@ -273,8 +482,8 @@ export default function UniversalReader({
   highlights,
   concepts,
   questions,
-  darkMode,
-  onDarkModeChange,
+  readerTheme,
+  onReaderThemeChange,
   onMarkConcept,
   onAskQuestion,
   onHighlight,
@@ -282,15 +491,42 @@ export default function UniversalReader({
   onAnnotationClick,
   selectedAnnotations,
   seekTime,
+  speechControlsTargetId,
 }: UniversalReaderProps) {
-  const chunks = getReaderChunks(material);
+  const chunks = React.useMemo(() => getReaderChunks(material), [material]);
+  const speechVoices = React.useMemo(
+    () => material.tts_assets.filter(
+      (asset) => asset.status === 'ready' && Boolean(asset.url),
+    ),
+    [material.tts_assets],
+  );
+  const annotationRanges = React.useMemo(
+    () => getAnnotationRanges(highlights, concepts, questions),
+    [concepts, highlights, questions],
+  );
   const playerRef = React.useRef<MediaPlayerInstance | null>(null);
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const transcriptRef = React.useRef<HTMLDivElement | null>(null);
   const [selectionMenu, setSelectionMenu] = React.useState<SelectionMenu | null>(
     null,
   );
   const [currentTime, setCurrentTime] = React.useState(0);
+  const [speechState, setSpeechState] = React.useState<
+    'idle' | 'speaking' | 'paused'
+  >('idle');
+  const [speechRate, setSpeechRate] = React.useState(1);
+  const [speechVoiceURI, setSpeechVoiceURI] = React.useState('');
+  const [spokenChunkId, setSpokenChunkId] = React.useState<number | null>(null);
+  const [openToolPanel, setOpenToolPanel] = React.useState<
+    'theme' | 'voice' | 'rate' | null
+  >(null);
+  const [speechControlsTarget, setSpeechControlsTarget] =
+    React.useState<HTMLElement | null>(null);
   const isVideo = material.media_type === 'video' && Boolean(material.media_url);
+  const selectedVoice =
+    speechVoices.find((voice) => voice.voice === speechVoiceURI) ??
+    speechVoices[0];
+  const darkMode = readerTheme === 'dark';
   const activeChunkId = isVideo
     ? chunks.find(
         (chunk) =>
@@ -300,6 +536,7 @@ export default function UniversalReader({
           currentTime < chunk.endTime,
       )?.id
     : undefined;
+  const visibleActiveChunkId = isVideo ? activeChunkId : spokenChunkId;
   const seekTo = (time: number | null) => {
     if (time === null || !playerRef.current) return;
     playerRef.current.remoteControl.seek(time);
@@ -316,6 +553,33 @@ export default function UniversalReader({
     );
     chunk?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [activeChunkId, isVideo]);
+  React.useEffect(() => {
+    if (isVideo || spokenChunkId === null) return;
+    transcriptRef.current
+      ?.querySelector<HTMLElement>(`#reader-chunk-${spokenChunkId}`)
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [isVideo, spokenChunkId]);
+  React.useEffect(() => {
+    setSpeechVoiceURI((current) =>
+      speechVoices.some((voice) => voice.voice === current)
+        ? current
+        : speechVoices[0]?.voice ?? '',
+    );
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+    setSpeechState('idle');
+    setSpokenChunkId(null);
+  }, [material.id, speechVoices]);
+  React.useEffect(() => {
+    if (!speechControlsTargetId) {
+      setSpeechControlsTarget(null);
+      return;
+    }
+    setSpeechControlsTarget(document.getElementById(speechControlsTargetId));
+  }, [speechControlsTargetId]);
   const videoMarkers = isVideo
     ? [
         ...concepts.flatMap((concept) =>
@@ -355,11 +619,45 @@ export default function UniversalReader({
     setSelectionMenu(null);
   };
 
+  React.useEffect(() => {
+    const dismissWhenSelectionClears = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+        setSelectionMenu(null);
+      }
+    };
+    const dismissOnScroll = () => setSelectionMenu(null);
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') clearSelection();
+    };
+    document.addEventListener('selectionchange', dismissWhenSelectionClears);
+    document.addEventListener('scroll', dismissOnScroll, true);
+    document.addEventListener('keydown', dismissOnEscape);
+    return () => {
+      document.removeEventListener('selectionchange', dismissWhenSelectionClears);
+      document.removeEventListener('scroll', dismissOnScroll, true);
+      document.removeEventListener('keydown', dismissOnEscape);
+    };
+  }, []);
+
   const handleMouseUp = () => {
     const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+      setSelectionMenu(null);
+      return;
+    }
 
     const range = selection.getRangeAt(0);
+    const markdownStart = getMarkdownSourceOffset(
+      range.startContainer,
+      range.startOffset,
+      true,
+    );
+    const markdownEnd = getMarkdownSourceOffset(
+      range.endContainer,
+      range.endOffset,
+      false,
+    );
     const startElement = getParentChunkElement(
       range.startContainer,
       range.startOffset,
@@ -370,30 +668,39 @@ export default function UniversalReader({
       range.endOffset,
       false,
     );
-    if (!startElement || !endElement) return;
-
-    const startOffset =
-      Number(startElement.dataset.startOffset) +
-      (startElement.contains(range.startContainer)
-        ? getOffsetInElement(
-            startElement,
-            range.startContainer,
-            range.startOffset,
-          )
-        : 0);
-    const endOffset =
-      Number(endElement.dataset.startOffset) +
-      (endElement.contains(range.endContainer)
-        ? getOffsetInElement(endElement, range.endContainer, range.endOffset)
-        : endElement.textContent?.length ?? 0);
+    if (
+      (markdownStart === null || markdownEnd === null) &&
+      (!startElement || !endElement)
+    ) {
+      return;
+    }
+    const startOffset = markdownStart ??
+      (Number(startElement?.dataset.startOffset) +
+        (startElement?.contains(range.startContainer)
+          ? getOffsetInElement(
+              startElement,
+              range.startContainer,
+              range.startOffset,
+            )
+          : 0));
+    const endOffset = markdownEnd ??
+      (Number(endElement?.dataset.startOffset) +
+        (endElement?.contains(range.endContainer)
+          ? getOffsetInElement(endElement, range.endContainer, range.endOffset)
+          : endElement?.textContent?.length ?? 0));
     const text = selection.toString();
     if (!text.trim() || endOffset <= startOffset) return;
 
     const rect = range.getBoundingClientRect();
+    const menuWidth = 280;
+    const menuHeight = 42;
+    const preferredTop = rect.bottom + 8;
     setSelectionMenu({
       selection: { text, startOffset, endOffset },
-      top: rect.bottom + 8,
-      left: Math.max(12, Math.min(rect.left, window.innerWidth - 280)),
+      top: preferredTop + menuHeight <= window.innerHeight
+        ? preferredTop
+        : Math.max(12, rect.top - menuHeight - 8),
+      left: Math.max(12, Math.min(rect.left, window.innerWidth - menuWidth - 12)),
     });
   };
 
@@ -405,14 +712,261 @@ export default function UniversalReader({
     clearSelection();
   };
 
+  const stopSpeech = () => {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+    setSpeechState('idle');
+    setSpokenChunkId(null);
+  };
+
+  const toggleSpeech = () => {
+    const audio = audioRef.current;
+    if (!audio || !selectedVoice?.url) {
+      message.warning(
+        material.status === 'generating_audio'
+          ? '朗读音频正在生成，请稍后再试'
+          : '当前材料没有可用的朗读音频',
+      );
+      return;
+    }
+    if (speechState === 'speaking') {
+      audio.pause();
+      setSpeechState('paused');
+      return;
+    }
+    audio.playbackRate = speechRate;
+    void audio.play().then(() => {
+      setSpeechState('speaking');
+    }).catch(() => {
+      setSpeechState('idle');
+      message.error('朗读音频加载失败，请稍后重试');
+    });
+  };
+
+  const changeSpeechRate = (rate: number) => {
+    setSpeechRate(rate);
+    if (audioRef.current) audioRef.current.playbackRate = rate;
+  };
+
+  const changeSpeechVoice = (voiceURI: string) => {
+    stopSpeech();
+    setSpeechVoiceURI(voiceURI);
+  };
+
+  const syncSpokenChunk = () => {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+    const sourceOffset =
+      (audio.currentTime / audio.duration) * material.clean_text.length;
+    const chunk = chunks.find(
+      (item) =>
+        item.startOffset <= sourceOffset && sourceOffset < item.endOffset,
+    );
+    setSpokenChunkId(chunk?.id ?? null);
+  };
+
+  const openMarkdownAnnotation = (
+    target: EventTarget | null,
+    requireKeyboardActivation = false,
+  ) => {
+    const element =
+      target instanceof HTMLElement
+        ? target.closest<HTMLElement>('[data-annotation-type]')
+        : null;
+    if (!element) return;
+    if (!requireKeyboardActivation) {
+      const currentSelection = window.getSelection();
+      if (currentSelection && !currentSelection.isCollapsed) return;
+    }
+    const type = element.dataset.annotationType as AnnotationType | undefined;
+    const id = Number(element.dataset.annotationId);
+    if (!type || !id) return;
+    onAnnotationClick(type, id);
+  };
+
+  const speechDisabled = isVideo || !selectedVoice;
+  const selectedTheme = readerThemeOptions.find(
+    (item) => item.value === readerTheme,
+  );
+  const voiceLabel = selectedVoice?.label.slice(0, 4) || '音色';
+  const readerControls = (
+    <div className="universal-reader__reader-controls">
+      <Tooltip
+        title={
+          isVideo
+            ? '视频材料使用原始音轨'
+            : speechState === 'speaking'
+              ? '暂停朗读；双击停止'
+              : speechState === 'paused'
+                ? '继续朗读；双击停止'
+                : '开始朗读'
+        }
+      >
+        <Button
+          className="universal-reader__play-button"
+          type="primary"
+          shape="circle"
+          disabled={speechDisabled}
+          aria-label={
+            speechState === 'speaking'
+              ? '暂停朗读'
+              : speechState === 'paused'
+                ? '继续朗读'
+                : '开始朗读'
+          }
+          icon={
+            speechState === 'speaking'
+              ? <PauseCircleOutlined />
+              : <PlayCircleOutlined />
+          }
+          onClick={toggleSpeech}
+          onDoubleClick={stopSpeech}
+        />
+      </Tooltip>
+      <div className={`universal-reader__tool-dock ${darkMode ? 'universal-reader__tool-dock--dark' : ''}`}>
+        <Popover
+        trigger="click"
+        placement="leftTop"
+        arrow
+        open={openToolPanel === 'theme'}
+        onOpenChange={(open) => setOpenToolPanel(open ? 'theme' : null)}
+        content={
+          <div className="universal-reader__tool-panel">
+            {readerThemeOptions.map((option) => (
+              <Button
+                key={option.value}
+                type={readerTheme === option.value ? 'primary' : 'text'}
+                onClick={() => {
+                  onReaderThemeChange(option.value);
+                  setOpenToolPanel(null);
+                }}
+              >
+                <span
+                  className="universal-reader__theme-swatch"
+                  style={{ background: option.color }}
+                />
+                {option.label}
+              </Button>
+            ))}
+          </div>
+        }
+      >
+        <Button
+          type="text"
+          className="universal-reader__setting-button"
+          title={`阅读背景：${selectedTheme?.label}`}
+          aria-label="选择阅读背景"
+        >
+          <span
+            className="universal-reader__current-theme"
+            style={{ background: selectedTheme?.color }}
+          />
+        </Button>
+        </Popover>
+        <Popover
+        trigger="click"
+        placement="leftTop"
+        arrow
+        open={openToolPanel === 'voice'}
+        onOpenChange={(open) => setOpenToolPanel(open ? 'voice' : null)}
+        content={
+          <div className="universal-reader__tool-panel universal-reader__voice-panel">
+            {speechVoices.map((voice) => (
+              <Button
+                key={voice.voice}
+                type={speechVoiceURI === voice.voice ? 'primary' : 'text'}
+                onClick={() => {
+                  changeSpeechVoice(voice.voice);
+                  setOpenToolPanel(null);
+                }}
+              >
+                {voice.label}
+              </Button>
+            ))}
+          </div>
+        }
+      >
+        <Button
+          type="text"
+          className="universal-reader__setting-button"
+          disabled={isVideo || !speechVoices.length}
+          title={isVideo ? '视频材料使用原始音轨' : `朗读音色：${selectedVoice?.label ?? '暂无音频'}`}
+          aria-label="选择朗读音色"
+        >
+          <span className="universal-reader__setting-label">{voiceLabel}</span>
+        </Button>
+        </Popover>
+        <Popover
+        trigger="click"
+        placement="leftTop"
+        arrow
+        open={openToolPanel === 'rate'}
+        onOpenChange={(open) => setOpenToolPanel(open ? 'rate' : null)}
+        content={
+          <div className="universal-reader__tool-panel universal-reader__rate-panel">
+            {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3].map((rate) => (
+              <Button
+                key={rate}
+                type={speechRate === rate ? 'primary' : 'text'}
+                onClick={() => {
+                  changeSpeechRate(rate);
+                  setOpenToolPanel(null);
+                }}
+              >
+                {rate}x
+              </Button>
+            ))}
+          </div>
+        }
+      >
+        <Button
+          type="text"
+          className="universal-reader__setting-button"
+          disabled={speechDisabled}
+          title={`朗读速度：${speechRate}x`}
+          aria-label={`选择朗读速度，当前 ${speechRate} 倍`}
+        >
+          <span className="universal-reader__setting-label">{speechRate}x</span>
+        </Button>
+        </Popover>
+      </div>
+    </div>
+  );
+
   return (
-    <article
-      className={[
-        'universal-reader',
-        darkMode ? 'universal-reader--dark' : '',
-        isVideo ? 'universal-reader--video' : '',
-      ].filter(Boolean).join(' ')}
-    >
+    <>
+      <audio
+        ref={audioRef}
+        src={selectedVoice?.url}
+        preload="metadata"
+        hidden
+        onPlay={() => setSpeechState('speaking')}
+        onEnded={() => {
+          setSpeechState('idle');
+          setSpokenChunkId(null);
+        }}
+        onError={() => {
+          if (selectedVoice?.url) {
+            setSpeechState('idle');
+            setSpokenChunkId(null);
+          }
+        }}
+        onLoadedMetadata={() => {
+          if (audioRef.current) audioRef.current.playbackRate = speechRate;
+        }}
+        onTimeUpdate={syncSpokenChunk}
+      />
+      <article
+        className={[
+          'universal-reader',
+          darkMode ? 'universal-reader--dark' : '',
+          `universal-reader--${readerTheme}`,
+          isVideo ? 'universal-reader--video' : '',
+        ].filter(Boolean).join(' ')}
+      >
       <header className="universal-reader__header">
         <div>
           <Space size={8} wrap>
@@ -422,13 +976,13 @@ export default function UniversalReader({
             >
               {material.created_by === 'manual' ? '人工添加' : 'AI 推荐'}
             </Tag>
-            <Text type="secondary">{material.media_type}</Text>
+            <Text type="secondary">{mediaTypeLabels[material.media_type]}</Text>
           </Space>
           <Title level={1} className="universal-reader__title">
             {material.title}
           </Title>
         </div>
-        <Space>
+        <Space wrap>
           {material.media_type === 'web_page' && material.media_uri && (
             <Button
               icon={<LinkOutlined />}
@@ -439,11 +993,6 @@ export default function UniversalReader({
               原始来源
             </Button>
           )}
-          <Button
-            aria-label={darkMode ? '切换浅色阅读模式' : '切换深色阅读模式'}
-            icon={darkMode ? <SunOutlined /> : <MoonOutlined />}
-            onClick={() => onDarkModeChange(!darkMode)}
-          />
         </Space>
       </header>
 
@@ -486,42 +1035,70 @@ export default function UniversalReader({
           className={`universal-reader__content ${isVideo ? 'universal-reader__transcript' : ''}`}
           ref={transcriptRef}
           onMouseUp={handleMouseUp}
-          onClick={onClearAnnotationSelection}
+          onClick={(event) => {
+            onClearAnnotationSelection();
+            if (!isVideo) openMarkdownAnnotation(event.target);
+          }}
+          onKeyDown={(event) => {
+            if (
+              !isVideo &&
+              ['Enter', ' '].includes(event.key) &&
+              event.target instanceof HTMLElement &&
+              event.target.closest('[data-annotation-type]')
+            ) {
+              event.preventDefault();
+              openMarkdownAnnotation(event.target, true);
+            }
+          }}
         >
-          {chunks.map((chunk) => (
-            <p
-              id={`reader-chunk-${chunk.id}`}
-              key={chunk.id}
-              data-start-offset={chunk.startOffset}
-              data-end-offset={chunk.endOffset}
-              className={chunk.id === activeChunkId ? 'universal-reader__chunk--active' : undefined}
-              onClick={() => {
-                const selection = window.getSelection();
-                if (selection && !selection.isCollapsed) return;
-
-                if (chunk.startTime !== null) {
-                  seekTo(chunk.startTime);
-                }
-              }}
-            >
-              {isVideo && (
+          {isVideo ? (
+            chunks.map((chunk) => (
+              <p
+                id={`reader-chunk-${chunk.id}`}
+                key={chunk.id}
+                data-start-offset={chunk.startOffset}
+                data-end-offset={chunk.endOffset}
+                className={chunk.id === visibleActiveChunkId ? 'universal-reader__chunk--active' : undefined}
+                onClick={() => {
+                  const selection = window.getSelection();
+                  if (selection && !selection.isCollapsed) return;
+                  if (chunk.startTime !== null) seekTo(chunk.startTime);
+                }}
+              >
                 <span
                   className="universal-reader__timestamp"
                   data-reader-ignore-offset
                 >
                   {chunk.startTime !== null ? formatTimestamp(chunk.startTime) : '--'}
                 </span>
-              )}
-              {renderChunk(
-                chunk,
-                highlights,
-                concepts,
-                questions,
-                onAnnotationClick,
-                selectedAnnotations,
-              )}
-            </p>
-          ))}
+                {renderChunk(
+                  chunk,
+                  highlights,
+                  concepts,
+                  questions,
+                  onAnnotationClick,
+                  selectedAnnotations,
+                )}
+              </p>
+            ))
+          ) : (
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[
+                [
+                  readerMarkdownPlugin,
+                  {
+                    chunks,
+                    ranges: annotationRanges,
+                    activeChunkId: visibleActiveChunkId,
+                    selectedAnnotations,
+                  },
+                ],
+              ]}
+            >
+              {material.clean_text}
+            </ReactMarkdown>
+          )}
         </div>
       </div>
 
@@ -557,6 +1134,10 @@ export default function UniversalReader({
           </Button>
         </div>
       )}
-    </article>
+      </article>
+      {speechControlsTarget
+        ? createPortal(readerControls, speechControlsTarget)
+        : readerControls}
+    </>
   );
 }

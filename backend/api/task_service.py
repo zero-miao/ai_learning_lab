@@ -173,12 +173,13 @@ def _handle_failure(task_id, error):
         task.next_run_at = timezone.now() + timedelta(seconds=delay)
         task.started_at = None
     task.save()
-    if task.task_type == "asr" and task.trigger_type == "Material":
+    if task.task_type in {"asr", "edge_tts"} and task.trigger_type == "Material":
         from .models import Material
         material = Material.objects.filter(pk=task.trigger_id).first()
-        if material:
+        if material and task.attempt_count >= task.max_attempts:
+            prefix = "视频处理失败" if task.task_type == "asr" else "朗读音频生成失败"
             material.status = "failed"
-            material.error = f"视频处理失败：{message[:300]}"
+            material.error = f"{prefix}：{message[:300]}"
             material.save(update_fields=["status", "error", "updated_at"])
 
 

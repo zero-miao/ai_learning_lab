@@ -98,6 +98,7 @@ class Material(models.Model):
         ("importing", "导入中"),
         ("cleaning", "清洗中"),
         ("summarizing", "摘要中"),
+        ("generating_audio", "生成朗读音频"),
         ("ready", "已就绪"),
         ("failed", "失败"),
     ]

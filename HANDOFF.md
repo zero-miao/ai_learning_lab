@@ -29,7 +29,7 @@ V2 实现行为以模型、迁移、测试和本文为准。V1 文档可用于�
 
 ## 3. 技术栈与环境
 
-后端采用 Python 3.12、Django 4.2、Django REST Framework、SQLite、APScheduler 和 OpenAI-compatible SDK；前端采用 React、TypeScript、Vite、Ant Design、Axios 和 Vidstack。
+后端采用 Python 3.12、Django 4.2、Django REST Framework、SQLite、APScheduler、Edge TTS 和 OpenAI-compatible SDK；前端采用 React、TypeScript、Vite、Ant Design、Axios 和 Vidstack。
 
 已验证的本机环境：
 
@@ -125,6 +125,20 @@ V2 核心模型：
     - 操作图标化：补资料、编辑、删除、回原文等操作统一使用图标并与标题同行显示，最大化内容区域。
     - 深色模式增强：修复了深色背景下摘要文字与选中条目文字的可见性；优化了 Drawer 列表项在深色模式下的 hover (对比度增强) 和 active 状态。
     - **全条目点击**：工作区列表项支持全区域点击触发“回原文”定位，不再局限于图标。
+    - **连续学习体验**：阅读页新增粘性工具栏和悬浮工作区入口，长文任意位置均可查看当前材料的概念、问答和高亮数量并打开工作区。
+    - **问答链路修复**：新问题输入与历史对话输入已拆分；AI 回复任务完成后自动刷新当前 Session 并滚动至最新消息。
+    - **状态与防误触**：补齐加载骨架、材料不可用状态、工作区空态、材料处理中提示和 AI 任务失败重试；概念、问答和高亮删除前均需二次确认。
+- 阅读器体验：
+    - 视频区在宽屏双栏下保持 sticky，转录稿滚动时播放器持续可见；窄屏自动恢复普通文档流。
+    - 媒体类型统一展示本地化文本；选区菜单自动避让视口边缘；文中标注支持键盘聚焦与回车打开。
+    - 取消选区、滚动正文或按下 `Escape` 时，划词操作框会立即收起，不再残留失效菜单。
+    - 文本与网页材料在 `briefing` 后自动进入 `edge_tts` AITask，按 `TTS_VOICES` 配置为每个音色生成并缓存 `materials/tts/{material_id}/{voice}.mp3`。正文指纹未变化时复用缓存；至少一个音色成功即可将材料标记为 `ready`，全部失败才重试并最终失败。
+    - 前端不再使用 Web Speech API，直接加载 Material API 返回的 `tts_assets`。播放键作为独立主按钮，背景、音色、倍速组成下方设置组；支持播放、暂停、双击停止、音色切换及 `0.5x`～`3x` 九档倍速，并按播放进度同步高亮当前段落。
+    - 阅读背景支持纯白、暖黄、护眼绿、柔灰、深色五种主题并持久化；朗读音色由后端配置并显示简短标签。历史材料可通过 `python backend/manage.py backfill_tts [--force]` 批量排队生成。
+    - 文本与网页正文使用 `react-markdown + remark-gfm` 渲染标题、加粗、列表、引用、链接、代码及 GFM 表格；自定义 rehype 插件将渲染节点映射回 Markdown 源码 offset，保留 Locator 划词和回跳契约。
+    - 材料前置摘要已统一使用 `react-markdown + remark-gfm`，不再使用逐行正则解析，支持标题、加粗、列表、引用、代码和 GFM 表格。
+    - Edge TTS 是在线服务，正文会发送至微软朗读接口；当前实现不提供 Web Speech 回退。音频接口沿用统一媒体服务并支持 `206 Partial Content`。
+    - 顶部返回入口明确展示 `返回主题：《主题名》`，长主题名自动单行省略。
 - 摘要支持基础 Markdown，默认折叠。
 
 ### 概念、讨论、问答与复习
@@ -223,6 +237,7 @@ V2 核心模型：
 ```
 
 - 前端：`npm run build` 已通过；Vidstack 默认视频布局 CSS 已进入产物。
+- 学习页体验优化后已再次通过 `npm run build` 与 `npm run lint`；主 bundle 体积告警仍存在。
 - 后端：`manage.py check` 通过；媒体 Range、媒体 URL、视频合并段落时间轴对齐 3 项定向测试通过。
 - HTTP 实测：带 `Range: bytes=4096-8191` 的媒体请求返回 `206 Partial Content`、正确 `Content-Range` 和 4096 字节响应体。
 - 浏览器实测（Chrome）：

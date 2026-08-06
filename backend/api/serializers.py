@@ -61,6 +61,7 @@ class MaterialChunkSerializer(serializers.ModelSerializer):
 class MaterialSerializer(serializers.ModelSerializer):
     chunks = MaterialChunkSerializer(many=True, read_only=True)
     media_url = serializers.SerializerMethodField()
+    tts_assets = serializers.SerializerMethodField()
     topic_links = serializers.SerializerMethodField()
     status_display = serializers.CharField(source="get_status_display", read_only=True)
 
@@ -70,6 +71,24 @@ class MaterialSerializer(serializers.ModelSerializer):
         path = f"{settings.MEDIA_URL}{material.media_uri}"
         request = self.context.get("request")
         return request.build_absolute_uri(path) if request else path
+
+    def get_tts_assets(self, material):
+        request = self.context.get("request")
+        voices = material.media_meta.get("tts", {}).get("voices", {})
+        assets = []
+        for voice, data in voices.items():
+            path = data.get("path", "")
+            url = f"{settings.MEDIA_URL}{path}" if path else ""
+            assets.append(
+                {
+                    "voice": voice,
+                    "label": data.get("label", voice),
+                    "status": data.get("status", "failed"),
+                    "url": request.build_absolute_uri(url) if request and url else url,
+                    "error": data.get("error", ""),
+                }
+            )
+        return assets
 
     def get_topic_links(self, material):
         links = (
@@ -99,6 +118,7 @@ class MaterialSerializer(serializers.ModelSerializer):
             "media_type",
             "media_uri",
             "media_url",
+            "tts_assets",
             "topic_links",
             "raw_text",
             "clean_text",

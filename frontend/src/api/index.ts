@@ -5,7 +5,14 @@ const api = axios.create({
   timeout: 10000,
 });
 
-export type MaterialStatus = 'pending' | 'importing' | 'cleaning' | 'summarizing' | 'ready' | 'failed';
+export type MaterialStatus =
+  | 'pending'
+  | 'importing'
+  | 'cleaning'
+  | 'summarizing'
+  | 'generating_audio'
+  | 'ready'
+  | 'failed';
 export type AITaskStatus =
   | 'pending'
   | 'running'
@@ -33,6 +40,13 @@ export interface Material {
   media_type: 'text' | 'web_page' | 'video' | 'audio';
   media_uri: string;
   media_url: string;
+  tts_assets: Array<{
+    voice: string;
+    label: string;
+    status: 'ready' | 'failed';
+    url: string;
+    error: string;
+  }>;
   raw_text: string;
   clean_text: string;
   media_meta: Record<string, unknown>;

@@ -1,15 +1,21 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import remarkGfm from 'remark-gfm';
 import {
   Alert,
   Button,
   Collapse,
   ConfigProvider,
   Drawer,
+  Empty,
   Form,
   Input,
   List,
   Modal,
+  Popconfirm,
+  Result,
+  Skeleton,
   Space,
   Tabs,
   Typography,
@@ -17,11 +23,13 @@ import {
   theme,
 } from 'antd';
 import {
+  AppstoreOutlined,
   ArrowLeftOutlined,
   CheckOutlined,
   DeleteOutlined,
   EditOutlined,
   FileSearchOutlined,
+  ReloadOutlined,
   SendOutlined,
 } from '@ant-design/icons';
 import {
@@ -34,6 +42,7 @@ import {
   getAITask,
   getSession,
   getTopic,
+  retryAITask,
   triggerSupplement,
   updateConcept,
   updateHighlight,
@@ -41,31 +50,22 @@ import {
 } from '../../api';
 import type { AITask, Concept, Highlight, Material, Question, Topic, Session } from '../../api';
 import UniversalReader from '../../components/UniversalReader';
-import type { TextSelectionAnchor } from '../../components/UniversalReader';
+import type { ReaderTheme, TextSelectionAnchor } from '../../components/UniversalReader';
+import './styles.css';
 
 const { Text } = Typography;
 
-function renderMarkdownInline(text: string): React.ReactNode[] {
-  return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, index) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <Typography.Text strong key={index}>{part.slice(2, -2)}</Typography.Text>;
-    }
-    if (part.startsWith('`') && part.endsWith('`')) {
-      return <Typography.Text code key={index}>{part.slice(1, -1)}</Typography.Text>;
-    }
-    return part;
-  });
-}
+const readerPageBackgrounds: Record<ReaderTheme, string> = {
+  paper: '#f5f7fa',
+  sepia: '#e9e0c9',
+  green: '#dce9d6',
+  gray: '#dde1e5',
+  dark: '#000000',
+};
 
 const MarkdownDigest: React.FC<{ content: string }> = ({ content }) => (
-  <div>
-    {content.split('\n').map((line, index) => {
-      if (line.startsWith('### ')) return <Typography.Title key={index} level={5}>{renderMarkdownInline(line.slice(4))}</Typography.Title>;
-      if (line.startsWith('## ')) return <Typography.Title key={index} level={4}>{renderMarkdownInline(line.slice(3))}</Typography.Title>;
-      if (line.startsWith('# ')) return <Typography.Title key={index} level={3}>{renderMarkdownInline(line.slice(2))}</Typography.Title>;
-      if (/^[-*] /.test(line)) return <li key={index} style={{ color: 'inherit' }}><Typography.Text>{renderMarkdownInline(line.slice(2))}</Typography.Text></li>;
-      return line ? <Typography.Paragraph key={index}>{renderMarkdownInline(line)}</Typography.Paragraph> : null;
-    })}
+  <div className="reader-briefing__markdown">
+    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
   </div>
 );
 
@@ -78,29 +78,49 @@ const MaterialReader: React.FC = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [tab, setTab] = useState('questions');
   const [selection, setSelection] = useState<TextSelectionAnchor | null>(null);
-  const [question, setQuestion] = useState('');
+  const [questionDraft, setQuestionDraft] = useState('');
+  const [chatDraft, setChatDraft] = useState('');
   const [task, setTask] = useState<AITask | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [conceptModal, setConceptModal] = useState(false);
   const [highlightModal, setHighlightModal] = useState(false);
-  const [darkMode, setDarkMode] = useState(
-    () => window.matchMedia('(prefers-color-scheme: dark)').matches,
-  );
+  const [readerTheme, setReaderTheme] = useState<ReaderTheme>(() => {
+    const saved = window.localStorage.getItem('reader-theme') as ReaderTheme | null;
+    if (saved && ['paper', 'sepia', 'green', 'gray', 'dark'].includes(saved)) {
+      return saved;
+    }
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'paper';
+  });
+  const darkMode = readerTheme === 'dark';
   const [editingConcept, setEditingConcept] = useState<Concept | null>(null);
   const [editingHighlight, setEditingHighlight] = useState<Highlight | null>(null);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [chatLoading, setChatLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const [conceptForm] = Form.useForm<Partial<Concept>>();
   const [highlightForm] = Form.useForm<{ user_note: string }>();
 
   const load = useCallback(async () => {
     if (!topicId || !materialId) return;
-    const response = await getTopic(Number(topicId));
-    setTopic(response.data);
-    const relation = response.data.topic_materials.find(
-      (item) => item.material_id === Number(materialId),
-    );
-    setMaterial(relation?.material ?? null);
+    setLoadError('');
+    try {
+      const response = await getTopic(Number(topicId));
+      setTopic(response.data);
+      const relation = response.data.topic_materials.find(
+        (item) => item.material_id === Number(materialId),
+      );
+      setMaterial(relation?.material ?? null);
+      if (!relation) setLoadError('该材料未关联到当前话题，可能已被移除。');
+    } catch {
+      setLoadError('无法加载学习材料，请检查后端服务后重试。');
+      throw new Error('Failed to load material');
+    } finally {
+      setLoading(false);
+    }
   }, [materialId, topicId]);
 
   useEffect(() => {
@@ -108,11 +128,16 @@ const MaterialReader: React.FC = () => {
   }, [load]);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = (event: MediaQueryListEvent) => setDarkMode(event.matches);
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, []);
+    window.localStorage.setItem('reader-theme', readerTheme);
+  }, [readerTheme]);
+
+  useEffect(() => {
+    if (material?.status !== 'generating_audio') return;
+    const timer = window.setInterval(() => {
+      void load().catch(() => undefined);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [load, material?.status]);
 
   useEffect(() => {
     if (!task || !['pending', 'running'].includes(task.status)) return;
@@ -122,12 +147,22 @@ const MaterialReader: React.FC = () => {
       if (['succeeded', 'failed'].includes(response.data.status)) {
         if (response.data.status === 'failed') {
           message.error(response.data.error_message || 'AI 任务失败');
+        } else {
+          message.success(`${response.data.task_type_display}已完成`);
         }
         await load();
+        if (activeSession) {
+          const sessionResponse = await getSession(activeSession.id);
+          setActiveSession(sessionResponse.data);
+        }
       }
     }, 1500);
     return () => window.clearInterval(timer);
-  }, [load, task]);
+  }, [activeSession, load, task]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [activeSession?.messages]);
 
   const scoped = useMemo(() => {
     if (!topic || !material) {
@@ -178,11 +213,11 @@ const MaterialReader: React.FC = () => {
   }, []);
 
   const handleSendChat = async () => {
-    if (!activeSession || !question.trim()) return;
+    if (!activeSession || !chatDraft.trim()) return;
     try {
       setChatLoading(true);
-      const content = question.trim();
-      setQuestion('');
+      const content = chatDraft.trim();
+      setChatDraft('');
       const response = await createSessionMessage(activeSession.id, content);
       setTask(response.data.task);
       // Update session with new user message
@@ -260,17 +295,17 @@ const MaterialReader: React.FC = () => {
   };
 
   const createQuestionFromSelection = async () => {
-    if (!topic || !material || !selection || !question.trim()) return;
+    if (!topic || !material || !selection || !questionDraft.trim()) return;
     try {
       const response = await createQuestion({
         topic: topic.id,
         material: material.id,
         start_offset: selection.startOffset,
         end_offset: selection.endOffset,
-        question_text: question.trim(),
+        question_text: questionDraft.trim(),
       });
       setTask(response.data.task);
-      setQuestion('');
+      setQuestionDraft('');
       setSelection(null);
       setDrawerOpen(true);
       setTab('questions');
@@ -287,6 +322,8 @@ const MaterialReader: React.FC = () => {
   const openQuestionChat = (q: Question) => {
     setDrawerOpen(true);
     setTab('questions');
+    setSelection(null);
+    setQuestionDraft('');
     if (q.session) {
       void loadSession(q.session);
     } else {
@@ -299,6 +336,17 @@ const MaterialReader: React.FC = () => {
     const response = await triggerSupplement(topic.id, type, id);
     setTask(response.data.task);
     message.info('正在检索补充资料。');
+  };
+
+  const retryTask = async () => {
+    if (!task) return;
+    try {
+      const response = await retryAITask(task.id);
+      setTask(response.data);
+      message.info('任务已重新提交');
+    } catch {
+      message.error('任务重试失败');
+    }
   };
 
   const searchParams = new URLSearchParams(location.search);
@@ -372,7 +420,31 @@ const MaterialReader: React.FC = () => {
     return () => clearTimeout(timer);
   }, [material, requestedAnchor, requestedLocator, nonce]);
 
-  if (!topic || !material) return <div style={{ padding: 24 }}>加载中...</div>;
+  if (loading) {
+    return (
+      <div className="material-reader__loading">
+        <Skeleton active paragraph={{ rows: 10 }} />
+      </div>
+    );
+  }
+
+  if (!topic || !material) {
+    return (
+      <Result
+        status="warning"
+        title="学习材料不可用"
+        subTitle={loadError || '没有找到对应的学习材料。'}
+        extra={[
+          <Button key="back" onClick={() => navigate(topicId ? `/topics/${topicId}` : '/topics')}>
+            返回话题
+          </Button>,
+          <Button key="retry" type="primary" icon={<ReloadOutlined />} onClick={() => void load()}>
+            重新加载
+          </Button>,
+        ]}
+      />
+    );
+  }
 
   const seekTime = {
     time: requestedLocator?.time_start_offset ??
@@ -386,7 +458,7 @@ const MaterialReader: React.FC = () => {
     <ConfigProvider theme={{ algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm }}>
       <div style={{
         minHeight: '100vh',
-        background: darkMode ? '#000000' : '#f5f7fa',
+        background: readerPageBackgrounds[readerTheme],
         transition: 'background-color 160ms ease',
       }}>
         <div
@@ -396,21 +468,53 @@ const MaterialReader: React.FC = () => {
             padding: '24px 24px 48px',
           }}
         >
-          <Button
-            icon={<ArrowLeftOutlined />}
-            onClick={() => navigate(`/topics/${topic.id}`)}
-            style={{
-              position: 'fixed',
-              top: 76,
-              left: 24,
-              zIndex: 10,
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
-            }}
-          >
-            返回主题
-          </Button>
-          {task && ['pending', 'running'].includes(task.status) && (
-            <Alert style={{ margin: '16px 0' }} type="info" message={`${task.task_type_display}正在执行`} />
+          <div className={`material-reader__toolbar ${darkMode ? 'material-reader__toolbar--dark' : ''}`}>
+            <Button
+              type="text"
+              icon={<ArrowLeftOutlined />}
+              className="material-reader__back-button"
+              title={`返回主题：《${topic.title}》`}
+              onClick={() => navigate(`/topics/${topic.id}`)}
+            >
+              返回主题：《{topic.title}》
+            </Button>
+            <div className="material-reader__toolbar-actions">
+              <Text type="secondary">
+                {scoped.concepts.length} 概念 · {scoped.questions.length} 问答 · {scoped.highlights.length} 高亮
+              </Text>
+              <Button icon={<AppstoreOutlined />} onClick={() => setDrawerOpen(true)}>
+                学习工作区
+              </Button>
+            </div>
+          </div>
+          {task && (
+            <Alert
+              showIcon
+              closable={['succeeded', 'cancelled'].includes(task.status)}
+              onClose={() => setTask(null)}
+              style={{ margin: '16px 0' }}
+              type={task.status === 'failed' ? 'error' : task.status === 'succeeded' ? 'success' : 'info'}
+              message={
+                task.status === 'failed'
+                  ? `${task.task_type_display}执行失败`
+                  : `${task.task_type_display}${task.status === 'succeeded' ? '已完成' : '正在执行'}`
+              }
+              description={task.status === 'failed' ? task.error_message : undefined}
+              action={task.status === 'failed' ? (
+                <Button size="small" icon={<ReloadOutlined />} onClick={() => void retryTask()}>
+                  重试
+                </Button>
+              ) : undefined}
+            />
+          )}
+          {material.status !== 'ready' && (
+            <Alert
+              showIcon
+              style={{ margin: '16px 0' }}
+              type={material.status === 'failed' ? 'error' : 'warning'}
+              message={`材料状态：${material.status_display}`}
+              description={material.error || '材料仍在处理，当前内容可能尚未完整。'}
+            />
           )}
           {material.digest && (
             <Collapse
@@ -431,8 +535,8 @@ const MaterialReader: React.FC = () => {
             highlights={scoped.highlights}
             concepts={scoped.concepts}
             questions={scoped.questions}
-            darkMode={darkMode}
-            onDarkModeChange={setDarkMode}
+            readerTheme={readerTheme}
+            onReaderThemeChange={setReaderTheme}
             onMarkConcept={(next) => {
               setSelection(next);
               conceptForm.setFieldsValue({ title: next.text.slice(0, 80) });
@@ -440,6 +544,8 @@ const MaterialReader: React.FC = () => {
             }}
             onAskQuestion={(next) => {
               setSelection(next);
+              setActiveSession(null);
+              setQuestionDraft('');
               setDrawerOpen(true);
               setTab('questions');
             }}
@@ -471,14 +577,19 @@ const MaterialReader: React.FC = () => {
           }}
             selectedAnnotations={[]}
             seekTime={seekTime}
+            speechControlsTargetId="material-reader-reader-tools"
           />
         </div>
       </div>
+      <div
+        id="material-reader-reader-tools"
+        className="material-reader__reader-tools"
+      />
       <Drawer
-        title="学习工作区"
+        title={<Space><AppstoreOutlined /><span>学习工作区</span></Space>}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        width={420}
+        size={520}
         className={darkMode ? 'universal-reader--dark' : ''}
       >
         <Tabs activeKey={tab} onChange={setTab} items={[
@@ -493,7 +604,7 @@ const MaterialReader: React.FC = () => {
                       <Typography.Title level={5} style={{ margin: 0 }}>当前对话</Typography.Title>
                       <Button type="link" size="small" onClick={() => setActiveSession(null)}>返回列表</Button>
                     </div>
-                    <div style={{
+                    <div className="material-reader__chat-messages" style={{
                       flex: 1,
                       overflowY: 'auto',
                       marginBottom: 16,
@@ -505,6 +616,7 @@ const MaterialReader: React.FC = () => {
                       <List
                         loading={chatLoading}
                         dataSource={activeSession.messages}
+                        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="发送第一条追问" /> }}
                         renderItem={(msg) => (
                           <div style={{
                             marginBottom: 12,
@@ -526,12 +638,13 @@ const MaterialReader: React.FC = () => {
                           </div>
                         )}
                       />
+                      <div ref={chatEndRef} />
                     </div>
                     <Space.Compact style={{ width: '100%' }}>
                       <Input
                         placeholder="继续提问..."
-                        value={question}
-                        onChange={(e) => setQuestion(e.target.value)}
+                        value={chatDraft}
+                        onChange={(e) => setChatDraft(e.target.value)}
                         onPressEnter={handleSendChat}
                         disabled={chatLoading}
                       />
@@ -540,6 +653,7 @@ const MaterialReader: React.FC = () => {
                         icon={<SendOutlined />}
                         onClick={handleSendChat}
                         loading={chatLoading}
+                        disabled={!chatDraft.trim()}
                       />
                     </Space.Compact>
                   </>
@@ -557,8 +671,8 @@ const MaterialReader: React.FC = () => {
                       />
                     )}
                     <Input.TextArea
-                      value={question}
-                      onChange={(event) => setQuestion(event.target.value)}
+                      value={questionDraft}
+                      onChange={(event) => setQuestionDraft(event.target.value)}
                       placeholder="基于选中内容提问"
                       autoSize={{ minRows: 2, maxRows: 6 }}
                     />
@@ -566,13 +680,14 @@ const MaterialReader: React.FC = () => {
                       type="primary"
                       block
                       icon={<SendOutlined />}
-                      disabled={!selection || !question.trim()}
+                      disabled={!selection || !questionDraft.trim()}
                       onClick={() => void createQuestionFromSelection()}
                     >
                       发起问答
                     </Button>
                     <List
                       dataSource={scoped.questions}
+                      locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选中原文后发起第一个问答" /> }}
                       renderItem={(item) => (
                         <List.Item
                           id={`annotation-${item.id}`}
@@ -590,14 +705,12 @@ const MaterialReader: React.FC = () => {
                                 title="补资料"
                                 onClick={(e) => { e.stopPropagation(); void runSupplement('Question', item.id); }}
                               />
-                              <Button
-                                type="text"
-                                size="small"
-                                danger
-                                icon={<DeleteOutlined />}
-                                title="删除"
-                                onClick={(e) => { e.stopPropagation(); void deleteQuestion(item.id).then(load); }}
-                              />
+                              <Popconfirm
+                                title="删除这个问答？"
+                                onConfirm={() => void deleteQuestion(item.id).then(load)}
+                              >
+                                <Button type="text" size="small" danger icon={<DeleteOutlined />} title="删除" />
+                              </Popconfirm>
                             </Space>
                           </div>
                           <Text type="secondary" style={{ fontSize: '13px' }} ellipsis>
@@ -617,6 +730,7 @@ const MaterialReader: React.FC = () => {
             children: (
                     <List
                       dataSource={scoped.concepts}
+                      locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选中原文后标记第一个概念" /> }}
                       renderItem={(item) => (
                         <List.Item
                           id={`annotation-${item.id}`}
@@ -651,14 +765,12 @@ const MaterialReader: React.FC = () => {
                                   onClick={() => void updateConcept(item.id, { status: 'confirmed' }).then(load)}
                                 />
                               )}
-                              <Button
-                                type="text"
-                                size="small"
-                                danger
-                                icon={<DeleteOutlined />}
-                                title="删除"
-                                onClick={() => void deleteConcept(item.id).then(load)}
-                              />
+                              <Popconfirm
+                                title="删除这个概念？"
+                                onConfirm={() => void deleteConcept(item.id).then(load)}
+                              >
+                                <Button type="text" size="small" danger icon={<DeleteOutlined />} title="删除" />
+                              </Popconfirm>
                             </Space>
                           </div>
                           <Text type="secondary" style={{ fontSize: '13px' }}>
@@ -675,6 +787,7 @@ const MaterialReader: React.FC = () => {
             children: (
                     <List
                       dataSource={scoped.highlights}
+                      locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选中原文后添加第一条高亮" /> }}
                       renderItem={(item) => (
                         <List.Item
                           id={`annotation-${item.id}`}
@@ -701,14 +814,12 @@ const MaterialReader: React.FC = () => {
                                 title="补资料"
                                 onClick={() => void runSupplement('Highlight', item.id)}
                               />
-                              <Button
-                                type="text"
-                                size="small"
-                                danger
-                                icon={<DeleteOutlined />}
-                                title="删除"
-                                onClick={() => void deleteHighlight(item.id).then(load)}
-                              />
+                              <Popconfirm
+                                title="删除这条高亮？"
+                                onConfirm={() => void deleteHighlight(item.id).then(load)}
+                              >
+                                <Button type="text" size="small" danger icon={<DeleteOutlined />} title="删除" />
+                              </Popconfirm>
                             </Space>
                           </div>
                           {item.user_note && (

@@ -9,5 +9,7 @@ pytest-django>=4.5
 django-cors-headers>=4.0.0
 python-dotenv>=1.0.0
 openai>=1.0.0
+edge-tts>=7.2.7
 faster-whisper>=1.1.0
+markdown-it-py>=3.0.0
 ruff>=0.12.0
