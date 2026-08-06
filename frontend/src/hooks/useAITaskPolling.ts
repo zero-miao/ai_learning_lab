@@ -11,6 +11,7 @@ interface Options {
 export function useAITaskPolling(taskId: number | null, options: Options = {}) {
   const [task, setTask] = useState<AITask | null>(null);
   const callbacks = useRef(options);
+  const intervalMs = options.intervalMs ?? 2000;
   callbacks.current = options;
 
   useEffect(() => {
@@ -44,13 +45,13 @@ export function useAITaskPolling(taskId: number | null, options: Options = {}) {
       if (!terminal) {
         void poll();
       }
-    }, options.intervalMs ?? 2000);
+    }, intervalMs);
 
     return () => {
       active = false;
       window.clearInterval(intervalId);
     };
-  }, [taskId]);
+  }, [intervalMs, taskId]);
 
   return task;
 }

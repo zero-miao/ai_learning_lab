@@ -1,583 +1,98 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import {
-  Button,
-  Card,
-  Descriptions,
-  Drawer,
-  Empty,
-  Form,
-  Input,
-  List,
-  Modal,
-  Popconfirm,
-  Select,
-  Space,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
-import {
-  ArrowLeftOutlined,
-  DeleteOutlined,
-  EditOutlined,
-} from '@ant-design/icons';
-import {
-  createConceptRelation,
-  deleteConcept,
-  deleteConceptRelation,
-  getTopic,
-  updateConcept,
-  updateConceptRelation,
-} from '../../api';
-import type {
-  Concept,
-  ConceptAnchor,
-  ConceptRelation,
-  Topic,
-} from '../../api';
-
-const { Title, Paragraph } = Typography;
-
-interface RelationFormValues {
-  from_concept: number;
-  to_concept: number;
-  relation_type: string;
-  description?: string;
-}
-
-interface ConceptFormValues {
-  title: string;
-  definition?: string;
-  principle?: string;
-  pitfalls?: string;
-  applications?: string;
-}
-
-interface NodePosition {
-  x: number;
-  y: number;
-}
+import { Button, Card, Drawer, Empty, Form, Input, List, Modal, Popconfirm, Select, Space, Tag, Typography, message } from 'antd';
+import { ArrowLeftOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
+import { createConceptRelation, deleteConcept, deleteConceptRelation, getTopic, updateConcept, updateConceptRelation } from '../../api';
+import type { Concept, ConceptRelation, Topic } from '../../api';
 
 const MAP_WIDTH = 960;
 const MAP_HEIGHT = 560;
 
-function getNodePositions(concepts: Concept[]) {
-  const positions = new Map<number, NodePosition>();
-  const radius = Math.min(190, 90 + concepts.length * 15);
-  concepts.forEach((concept, index) => {
-    const angle = -Math.PI / 2 + (index * 2 * Math.PI) / concepts.length;
-    positions.set(concept.id, {
-      x: MAP_WIDTH / 2 + Math.cos(angle) * radius,
-      y: MAP_HEIGHT / 2 + Math.sin(angle) * radius,
-    });
-  });
-  return positions;
+function positions(concepts: Concept[]) {
+  return new Map(concepts.map((concept, index) => {
+    const angle = -Math.PI / 2 + (index * 2 * Math.PI) / Math.max(concepts.length, 1);
+    const radius = Math.min(190, 90 + concepts.length * 15);
+    return [concept.id, { x: MAP_WIDTH / 2 + Math.cos(angle) * radius, y: MAP_HEIGHT / 2 + Math.sin(angle) * radius }];
+  }));
 }
 
 const TopicMap: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [topic, setTopic] = useState<Topic | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [selectedConcept, setSelectedConcept] = useState<Concept | null>(null);
-  const [relationModalOpen, setRelationModalOpen] = useState(false);
-  const [editingRelation, setEditingRelation] = useState<ConceptRelation | null>(
-    null,
-  );
-  const [conceptModalOpen, setConceptModalOpen] = useState(false);
-  const [draggedConceptId, setDraggedConceptId] = useState<number | null>(null);
-  const [relationForm] = Form.useForm<RelationFormValues>();
-  const [conceptForm] = Form.useForm<ConceptFormValues>();
-
-  const loadTopic = useCallback(async () => {
+  const [selected, setSelected] = useState<Concept | null>(null);
+  const [dragged, setDragged] = useState<number | null>(null);
+  const [relation, setRelation] = useState<ConceptRelation | null>(null);
+  const [relationOpen, setRelationOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [relationForm] = Form.useForm<Pick<ConceptRelation, 'from_concept' | 'to_concept' | 'relation_type' | 'description'>>();
+  const [conceptForm] = Form.useForm<Partial<Concept>>();
+  const load = useCallback(async () => {
     if (!id) return;
-    setLoading(true);
-    try {
-      const response = await getTopic(Number(id));
-      setTopic(response.data);
-      setSelectedConcept((current) =>
-        current
-          ? response.data.concepts.find((concept) => concept.id === current.id) ??
-            null
-          : null,
-      );
-    } catch (error) {
-      console.error('Failed to load topic map:', error);
-      message.error('加载话题思维导图失败');
-    } finally {
-      setLoading(false);
-    }
+    const response = await getTopic(Number(id));
+    setTopic(response.data);
+    setSelected((current) => current ? response.data.concepts.find((item) => item.id === current.id) ?? null : null);
   }, [id]);
-
-  useEffect(() => {
-    void loadTopic();
-  }, [loadTopic]);
-
-  const positions = useMemo(
-    () => getNodePositions(topic?.concepts ?? []),
-    [topic?.concepts],
-  );
-
-  const openEditRelation = (relation: ConceptRelation) => {
-    setEditingRelation(relation);
-    relationForm.setFieldsValue(relation);
-    setRelationModalOpen(true);
+  useEffect(() => { void load().catch(() => message.error('加载概念图失败')); }, [load]);
+  const nodePositions = useMemo(() => positions(topic?.concepts ?? []), [topic?.concepts]);
+  const openRelation = (current: ConceptRelation | null, from?: number, to?: number) => {
+    setRelation(current);
+    relationForm.setFieldsValue(current ?? { from_concept: from, to_concept: to, relation_type: '关联', description: '' });
+    setRelationOpen(true);
   };
-
-  const handleRelationSubmit = async (values: RelationFormValues) => {
-    if (!topic) return;
-    try {
-      if (editingRelation) {
-        await updateConceptRelation(editingRelation.id, {
-          ...values,
-          topic: topic.id,
-        });
-        message.success('概念关系已更新');
-      } else {
-        await createConceptRelation({
-          topic: topic.id,
-          ...values,
-          description: values.description ?? '',
-        });
-        message.success('概念关系已创建');
-      }
-      setRelationModalOpen(false);
-      relationForm.resetFields();
-      await loadTopic();
-    } catch (error) {
-      console.error('Failed to save concept relation:', error);
-      message.error('保存概念关系失败');
-    }
+  const saveRelation = async (values: Pick<ConceptRelation, 'from_concept' | 'to_concept' | 'relation_type' | 'description'>) => {
+    if (relation) await updateConceptRelation(relation.id, values);
+    else await createConceptRelation(values);
+    setRelationOpen(false);
+    await load();
   };
-
-  const handleDeleteRelation = async (relationId: number) => {
-    try {
-      await deleteConceptRelation(relationId);
-      setRelationModalOpen(false);
-      setEditingRelation(null);
-      relationForm.resetFields();
-      message.success('概念关系已删除');
-      await loadTopic();
-    } catch (error) {
-      console.error('Failed to delete concept relation:', error);
-      message.error('删除概念关系失败');
-    }
+  const drop = (target: Concept) => {
+    if (!dragged || dragged === target.id || !topic) return;
+    const existing = topic.concept_relations.find((item) => item.from_concept === dragged && item.to_concept === target.id);
+    openRelation(existing ?? null, dragged, target.id);
+    setDragged(null);
   };
-
-  const handleDropOnConcept = (target: Concept) => {
-    if (!draggedConceptId || draggedConceptId === target.id) return;
-    const existingRelation = topic?.concept_relations.find(
-      (relation) =>
-        (relation.from_concept === draggedConceptId &&
-          relation.to_concept === target.id) ||
-        (relation.from_concept === target.id &&
-          relation.to_concept === draggedConceptId),
-    );
-    if (existingRelation) {
-      openEditRelation(existingRelation);
-      setDraggedConceptId(null);
-      return;
-    }
-    setEditingRelation(null);
-    relationForm.setFieldsValue({
-      from_concept: draggedConceptId,
-      to_concept: target.id,
-      relation_type: '关联',
-      description: '',
-    });
-    setRelationModalOpen(true);
-    setDraggedConceptId(null);
-  };
-
-  const handleDeleteConcept = async () => {
-    if (!selectedConcept) return;
-    try {
-      await deleteConcept(selectedConcept.id);
-      setSelectedConcept(null);
-      message.success('概念及其关联关系已删除');
-      await loadTopic();
-    } catch (error) {
-      console.error('Failed to delete concept:', error);
-      message.error('删除概念失败');
-    }
-  };
-
-  const openEditConcept = () => {
-    if (!selectedConcept) return;
-    conceptForm.setFieldsValue(selectedConcept);
-    setConceptModalOpen(true);
-  };
-
-  const handleConceptSubmit = async (values: ConceptFormValues) => {
-    if (!selectedConcept) return;
-    try {
-      await updateConcept(selectedConcept.id, values);
-      message.success('概念卡片已更新');
-      setConceptModalOpen(false);
-      await loadTopic();
-    } catch (error) {
-      console.error('Failed to update concept:', error);
-      message.error('更新概念卡片失败');
-    }
-  };
-
-  const jumpToAnchor = (anchor: ConceptAnchor) => {
-    if (!topic) {
-      message.warning('该概念没有可用的材料来源。');
-      return;
-    }
-    navigate(
-      `/topics/${topic.id}/materials/${anchor.material}?anchor=${anchor.start_offset}`,
-    );
-  };
-
-  if (loading && !topic) return <div style={{ padding: 24 }}>加载中...</div>;
-  if (!topic) return <div style={{ padding: 24 }}>未找到主题</div>;
-
-  return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px' }}>
-      <Space direction="vertical" size="large" style={{ display: 'flex' }}>
-        <Button
-          icon={<ArrowLeftOutlined />}
-          onClick={() => navigate(`/topics/${topic.id}`)}
-        >
-          返回话题
-        </Button>
-
-        <Card
-          title={
-            <Space>
-              <span>{topic.title} 的思维导图</span>
-              <Tag color="blue">{topic.concepts.length} 个概念</Tag>
-              <Tag>{topic.concept_relations.length} 条关系</Tag>
-            </Space>
-          }
-        >
-          <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-            拖拽一个概念节点到另一个节点上，即可建立关联；重复拖拽会打开已有关系进行编辑。
-          </Typography.Text>
-          {topic.concepts.length ? (
-            <div
-              style={{
-                position: 'relative',
-                minHeight: 560,
-                overflow: 'auto',
-                background: '#fafcff',
-                borderRadius: 8,
-              }}
-            >
-              <svg
-                aria-label="概念关系图"
-                viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
-                width={MAP_WIDTH}
-                height={MAP_HEIGHT}
-                style={{ display: 'block', minWidth: MAP_WIDTH }}
-              >
-                <defs>
-                  <marker
-                    id="concept-map-arrow"
-                    viewBox="0 0 10 10"
-                    refX="9"
-                    refY="5"
-                    markerWidth="6"
-                    markerHeight="6"
-                    orient="auto-start-reverse"
-                  >
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
-                  </marker>
-                </defs>
-                {topic.concept_relations.map((relation) => {
-                  const from = positions.get(relation.from_concept);
-                  const to = positions.get(relation.to_concept);
-                  if (!from || !to) return null;
-                  const labelX = (from.x + to.x) / 2;
-                  const labelY = (from.y + to.y) / 2;
-                  return (
-                    <g key={relation.id}>
-                      <line
-                        x1={from.x}
-                        y1={from.y}
-                        x2={to.x}
-                        y2={to.y}
-                        stroke="#94a3b8"
-                        strokeWidth="2"
-                        markerEnd="url(#concept-map-arrow)"
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => openEditRelation(relation)}
-                      />
-                      <text
-                        x={labelX}
-                        y={labelY - 6}
-                        textAnchor="middle"
-                        fill="#64748b"
-                        fontSize="12"
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => openEditRelation(relation)}
-                      >
-                        {relation.relation_type}
-                      </text>
-                    </g>
-                  );
-                })}
-              </svg>
-              {topic.concepts.map((concept) => {
-                const position = positions.get(concept.id);
-                if (!position) return null;
-                return (
-                  <Button
-                    key={concept.id}
-                    type={
-                      selectedConcept?.id === concept.id ? 'primary' : 'default'
-                    }
-                    onClick={() => setSelectedConcept(concept)}
-                    draggable
-                    onDragStart={() => setDraggedConceptId(concept.id)}
-                    onDragEnd={() => setDraggedConceptId(null)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={() => handleDropOnConcept(concept)}
-                    title="拖拽到另一个概念节点以建立关系"
-                    style={{
-                      position: 'absolute',
-                      left: position.x,
-                      top: position.y,
-                      transform: 'translate(-50%, -50%)',
-                      maxWidth: 180,
-                      height: 'auto',
-                      minHeight: 42,
-                      whiteSpace: 'normal',
-                      borderRadius: 20,
-                    }}
-                  >
-                    {concept.title}
-                  </Button>
-                );
-              })}
-            </div>
-          ) : (
-            <Empty description="从阅读中标记概念后，思维导图会在这里逐步生长。" />
-          )}
-        </Card>
-
-        <Card title="概念关系">
-          <List
-            dataSource={topic.concept_relations}
-            locale={{ emptyText: '尚未建立概念关系' }}
-            renderItem={(relation) => (
-              <List.Item
-                actions={[
-                  <Button
-                    key="edit"
-                    type="link"
-                    icon={<EditOutlined />}
-                    onClick={() => openEditRelation(relation)}
-                  >
-                    编辑
-                  </Button>,
-                  <Popconfirm
-                    key="delete"
-                    title="删除这条概念关系？"
-                    okText="删除"
-                    cancelText="取消"
-                    okButtonProps={{ danger: true }}
-                    onConfirm={() => void handleDeleteRelation(relation.id)}
-                  >
-                    <Button type="link" danger icon={<DeleteOutlined />}>
-                      删除
-                    </Button>
-                  </Popconfirm>,
-                ]}
-              >
-                <List.Item.Meta
-                  title={`${relation.from_concept_title} - ${relation.relation_type} -> ${relation.to_concept_title}`}
-                  description={relation.description || '未补充关系说明'}
-                />
-              </List.Item>
-            )}
-          />
-        </Card>
-      </Space>
-
-      <Drawer
-        title="概念详情"
-        placement="right"
-        width={440}
-        open={Boolean(selectedConcept)}
-        onClose={() => setSelectedConcept(null)}
-        extra={
-          <Space size="small">
-            <Button type="link" icon={<EditOutlined />} onClick={openEditConcept}>
-              编辑
-            </Button>
-            <Popconfirm
-              title="删除这个概念及其关联关系？"
-              okText="删除"
-              cancelText="取消"
-              okButtonProps={{ danger: true }}
-              onConfirm={() => void handleDeleteConcept()}
-            >
-              <Button type="link" danger icon={<DeleteOutlined />}>
-                删除
-              </Button>
-            </Popconfirm>
-          </Space>
-        }
-      >
-        {selectedConcept && (
-          <Space direction="vertical" size="middle" style={{ display: 'flex' }}>
-            <Title level={3}>{selectedConcept.title}</Title>
-            <Tag color={selectedConcept.status === 'confirmed' ? 'blue' : 'green'}>
-              {selectedConcept.status_display}
-            </Tag>
-            <Descriptions column={1} size="small">
-              <Descriptions.Item label="定义">
-                {selectedConcept.definition || '尚未填写'}
-              </Descriptions.Item>
-              <Descriptions.Item label="原理">
-                {selectedConcept.principle || '尚未填写'}
-              </Descriptions.Item>
-              <Descriptions.Item label="易错点">
-                {selectedConcept.pitfalls || '尚未填写'}
-              </Descriptions.Item>
-              <Descriptions.Item label="适用场景">
-                {selectedConcept.applications || '尚未填写'}
-              </Descriptions.Item>
-            </Descriptions>
-            <Card size="small" title="材料来源">
-              <List
-                size="small"
-                dataSource={selectedConcept.anchors}
-                locale={{ emptyText: '来源不可用' }}
-                renderItem={(anchor) => (
-                  <List.Item
-                    actions={[
-                      <Button
-                        key="source"
-                        type="link"
-                        onClick={() => jumpToAnchor(anchor)}
-                      >
-                        查看原文
-                      </Button>,
-                    ]}
-                  >
-                    <List.Item.Meta
-                      title={anchor.material_title}
-                      description={
-                        <Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0 }}>
-                          {anchor.source_text}
-                        </Paragraph>
-                      }
-                    />
-                  </List.Item>
-                )}
-              />
-            </Card>
-          </Space>
-        )}
-      </Drawer>
-
-      <Modal
-        title={editingRelation ? '编辑概念关系' : '建立概念关系'}
-        open={relationModalOpen}
-        onCancel={() => {
-          setRelationModalOpen(false);
-          relationForm.resetFields();
-        }}
-        onOk={() => relationForm.submit()}
-      >
-        <Form
-          form={relationForm}
-          layout="vertical"
-          onFinish={(values) => void handleRelationSubmit(values)}
-        >
-          <Form.Item
-            name="from_concept"
-            label="起始概念"
-            rules={[{ required: true, message: '请选择起始概念' }]}
-          >
-            <Select
-              options={topic.concepts.map((concept) => ({
-                value: concept.id,
-                label: concept.title,
-              }))}
-            />
-          </Form.Item>
-          <Form.Item
-            name="to_concept"
-            label="目标概念"
-            rules={[{ required: true, message: '请选择目标概念' }]}
-          >
-            <Select
-              options={topic.concepts.map((concept) => ({
-                value: concept.id,
-                label: concept.title,
-              }))}
-            />
-          </Form.Item>
-          <Form.Item
-            name="relation_type"
-            label="关系类型"
-            rules={[{ required: true, message: '请输入关系类型' }]}
-          >
-            <Input placeholder="例如：依赖于、属于、用于" />
-          </Form.Item>
-          <Form.Item name="description" label="关系说明">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          {editingRelation && (
-            <Popconfirm
-              title="删除这条概念关系？"
-              okText="删除"
-              cancelText="取消"
-              okButtonProps={{ danger: true }}
-              onConfirm={() => void handleDeleteRelation(editingRelation.id)}
-            >
-              <Button danger>
-                删除关联
-              </Button>
-            </Popconfirm>
-          )}
-        </Form>
-      </Modal>
-
-      <Modal
-        title="编辑概念卡片"
-        open={conceptModalOpen}
-        onCancel={() => {
-          setConceptModalOpen(false);
-          conceptForm.resetFields();
-        }}
-        onOk={() => conceptForm.submit()}
-        width={680}
-      >
-        <Form
-          form={conceptForm}
-          layout="vertical"
-          onFinish={(values) => void handleConceptSubmit(values)}
-        >
-          <Form.Item
-            name="title"
-            label="概念名称"
-            rules={[{ required: true, message: '请输入概念名称' }]}
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item name="definition" label="定义">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          <Form.Item name="principle" label="原理">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          <Form.Item name="pitfalls" label="易错点">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          <Form.Item name="applications" label="适用场景">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-        </Form>
-      </Modal>
-    </div>
-  );
+  if (!topic) return <div style={{ padding: 24 }}>加载中...</div>;
+  return <div style={{ maxWidth: 1200, margin: '0 auto', padding: 24 }}>
+    <Space direction="vertical" size="large" style={{ display: 'flex' }}>
+      <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(`/topics/${topic.id}`)}>返回主题</Button>
+      <Card title={<Space><span>{topic.title} 的思维导图</span><Tag>{topic.concepts.length} 个概念</Tag><Tag>{topic.concept_relations.length} 条关系</Tag></Space>}>
+        <Typography.Text type="secondary">拖拽一个概念节点到另一个节点上即可建立或编辑关系。</Typography.Text>
+        {topic.concepts.length ? <div style={{ position: 'relative', height: MAP_HEIGHT, overflow: 'auto', marginTop: 16, background: '#fafcff', borderRadius: 8 }}>
+          <svg viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`} width={MAP_WIDTH} height={MAP_HEIGHT}>
+            <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" /></marker></defs>
+            {topic.concept_relations.map((item) => {
+              const from = nodePositions.get(item.from_concept); const to = nodePositions.get(item.to_concept);
+              return from && to ? <g key={item.id} onClick={() => openRelation(item)} style={{ cursor: 'pointer' }}><line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="#94a3b8" strokeWidth="2" markerEnd="url(#arrow)" /><text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 6} textAnchor="middle" fill="#475569">{item.relation_type}</text></g> : null;
+            })}
+          </svg>
+          {topic.concepts.map((concept) => {
+            const point = nodePositions.get(concept.id)!;
+            return <Button key={concept.id} draggable onDragStart={() => setDragged(concept.id)} onDragEnd={() => setDragged(null)} onDragOver={(event) => event.preventDefault()} onDrop={() => drop(concept)} type={selected?.id === concept.id ? 'primary' : 'default'} onClick={() => setSelected(concept)} style={{ position: 'absolute', left: point.x, top: point.y, transform: 'translate(-50%, -50%)', minHeight: 42, maxWidth: 180, whiteSpace: 'normal', borderRadius: 22 }}>{concept.title}</Button>;
+          })}
+        </div> : <Empty description="从阅读页标记概念后，思维导图会在这里生长。" />}
+      </Card>
+    </Space>
+    <Drawer title="概念详情" open={Boolean(selected)} onClose={() => setSelected(null)} width={440} extra={selected && <Space><Button icon={<EditOutlined />} onClick={() => { conceptForm.setFieldsValue(selected); setEditOpen(true); }}>编辑</Button><Popconfirm title="删除概念？" onConfirm={() => void deleteConcept(selected.id).then(load)}><Button danger icon={<DeleteOutlined />} /></Popconfirm></Space>}>
+      {selected && <Space direction="vertical" style={{ display: 'flex' }}><Typography.Title level={3}>{selected.title}</Typography.Title><Typography.Paragraph>{selected.definition || '待生成定义'}</Typography.Paragraph><List header="材料来源" dataSource={selected.locators} renderItem={(locator) => <List.Item actions={[<Button key="source" type="link" onClick={() => navigate(`/topics/${topic.id}/materials/${locator.material}?locator=${locator.id}`)}>查看原文</Button>]}>{locator.source_text}</List.Item>} /></Space>}
+    </Drawer>
+    <Modal title={relation ? '编辑概念关系' : '建立概念关系'} open={relationOpen} onCancel={() => setRelationOpen(false)} onOk={() => relationForm.submit()}>
+      <Form form={relationForm} layout="vertical" onFinish={(values) => void saveRelation(values)}>
+        <Form.Item name="from_concept" label="起始概念" rules={[{ required: true }]}><Select options={topic.concepts.map((item) => ({ value: item.id, label: item.title }))} /></Form.Item>
+        <Form.Item name="to_concept" label="目标概念" rules={[{ required: true }]}><Select options={topic.concepts.map((item) => ({ value: item.id, label: item.title }))} /></Form.Item>
+        <Form.Item name="relation_type" label="关系类型" rules={[{ required: true }]}><Input /></Form.Item>
+        <Form.Item name="description" label="说明"><Input.TextArea rows={3} /></Form.Item>
+      </Form>
+      {relation && (
+        <div style={{ textAlign: 'right', marginTop: 16 }}>
+          <Popconfirm title="删除这条关系？" onConfirm={async () => { await deleteConceptRelation(relation.id); setRelationOpen(false); await load(); }}>
+            <Button danger type="link" icon={<DeleteOutlined />}>删除此关系</Button>
+          </Popconfirm>
+        </div>
+      )}
+    </Modal>
+    <Modal title="编辑概念" open={editOpen} onCancel={() => setEditOpen(false)} onOk={() => conceptForm.submit()}><Form form={conceptForm} layout="vertical" onFinish={async (values) => { if (selected) await updateConcept(selected.id, values); setEditOpen(false); await load(); }}><Form.Item name="title" label="名称"><Input /></Form.Item><Form.Item name="definition" label="定义"><Input.TextArea rows={3} /></Form.Item><Form.Item name="principle" label="原理"><Input.TextArea rows={3} /></Form.Item><Form.Item name="pitfalls" label="易错点"><Input.TextArea rows={3} /></Form.Item><Form.Item name="applications" label="应用"><Input.TextArea rows={3} /></Form.Item></Form></Modal>
+  </div>;
 };
 
 export default TopicMap;

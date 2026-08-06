@@ -1,135 +1,187 @@
+from django.conf import settings
 from rest_framework import serializers
 
 from .models import (
-    AIResponse,
     AITask,
     Concept,
-    ConceptAnchor,
     ConceptRelation,
-    DiscussionMessage,
     Exam,
     ExamQuestion,
     Highlight,
     Material,
     MaterialChunk,
+    MaterialTextLocator,
     Question,
     ReviewRecord,
+    Session,
+    SessionMessage,
     Topic,
+    TopicMaterial,
 )
+from .tasks import TaskRegistry
 
 
-class AIResponseSerializer(serializers.ModelSerializer):
-    task_type_display = serializers.CharField(
-        source="get_task_type_display", read_only=True
-    )
-
-    class Meta:
-        model = AIResponse
-        fields = [
-            "id",
-            "task_type",
-            "task_type_display",
-            "content",
-            "model",
-            "created_at",
-        ]
-
-
-class QuestionSerializer(serializers.ModelSerializer):
-    ai_responses = AIResponseSerializer(many=True, read_only=True)
-    concept_title = serializers.CharField(source="concept.title", read_only=True)
-
-    class Meta:
-        model = Question
-        fields = [
-            "id",
-            "topic",
-            "material",
-            "chunk",
-            "concept",
-            "concept_title",
-            "selected_text",
-            "start_offset",
-            "end_offset",
-            "question_text",
-            "is_saved",
-            "saved_at",
-            "created_at",
-            "ai_responses",
-        ]
-        read_only_fields = [
-            "selected_text",
-            "start_offset",
-            "end_offset",
-            "is_saved",
-            "saved_at",
-            "created_at",
-        ]
-
-
-class DiscussionMessageSerializer(serializers.ModelSerializer):
-    role_display = serializers.CharField(source="get_role_display", read_only=True)
-    message_type_display = serializers.CharField(
-        source="get_message_type_display", read_only=True
-    )
-    source_task_model = serializers.CharField(
-        source="source_task.model", read_only=True
-    )
-    source_task_stage = serializers.SerializerMethodField()
-
-    def get_source_task_stage(self, message):
-        if message.source_task is None:
-            return None
-        stage = message.source_task.input_json.get("stage")
-        return stage if stage in {"explore", "frame", "decide"} else None
-
-    class Meta:
-        model = DiscussionMessage
-        fields = [
-            "id",
-            "topic",
-            "role",
-            "role_display",
-            "message_type",
-            "message_type_display",
-            "content",
-            "suggested_stage",
-            "stage_suggestion_reason",
-            "source_task",
-            "source_task_model",
-            "source_task_stage",
-            "created_at",
-        ]
-        read_only_fields = [
-            "topic",
-            "role",
-            "message_type",
-            "source_task",
-            "created_at",
-        ]
-
-
-class ConceptAnchorSerializer(serializers.ModelSerializer):
+class MaterialTextLocatorSerializer(serializers.ModelSerializer):
     material_title = serializers.CharField(source="material.title", read_only=True)
 
     class Meta:
-        model = ConceptAnchor
+        model = MaterialTextLocator
         fields = [
             "id",
             "material",
             "material_title",
             "chunk",
+            "topic",
             "source_text",
             "start_offset",
             "end_offset",
+            "time_start_offset",
+            "time_end_offset",
+            "entity_type",
+            "entity_id",
             "created_at",
         ]
         read_only_fields = fields
 
 
-class ConceptSerializer(serializers.ModelSerializer):
-    anchors = ConceptAnchorSerializer(many=True, read_only=True)
+class MaterialChunkSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MaterialChunk
+        fields = [
+            "id",
+            "chunk_index",
+            "content",
+            "start_offset",
+            "end_offset",
+            "start_time",
+            "end_time",
+        ]
+
+
+class MaterialSerializer(serializers.ModelSerializer):
+    chunks = MaterialChunkSerializer(many=True, read_only=True)
+    media_url = serializers.SerializerMethodField()
+    topic_links = serializers.SerializerMethodField()
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    def get_media_url(self, material):
+        if material.media_type not in {"video", "audio"} or not material.media_uri:
+            return ""
+        path = f"{settings.MEDIA_URL}{material.media_uri}"
+        request = self.context.get("request")
+        return request.build_absolute_uri(path) if request else path
+
+    def get_topic_links(self, material):
+        links = (
+            link for link in material.topic_materials.all() if link.removed_at is None
+        )
+        return [
+            {
+                "topic": link.topic_id,
+                "topic_title": link.topic.title,
+                "category": link.category,
+                "import_by": link.import_by,
+                "import_at": link.import_at,
+                "relevance_score": link.relevance_score,
+            }
+            for link in links
+        ]
+
+    class Meta:
+        model = Material
+        fields = [
+            "id",
+            "title",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "error",
+            "media_type",
+            "media_uri",
+            "media_url",
+            "topic_links",
+            "raw_text",
+            "clean_text",
+            "media_meta",
+            "digest",
+            "status",
+            "status_display",
+            "chunks",
+        ]
+        read_only_fields = [
+            "created_at",
+            "updated_at",
+            "error",
+            "clean_text",
+            "media_meta",
+            "digest",
+            "status",
+            "status_display",
+            "chunks",
+        ]
+
+
+class TopicMaterialSerializer(serializers.ModelSerializer):
+    material = MaterialSerializer(read_only=True)
+    material_id = serializers.IntegerField(source="material.id", read_only=True)
+
+    class Meta:
+        model = TopicMaterial
+        fields = [
+            "id",
+            "topic",
+            "material",
+            "material_id",
+            "import_by",
+            "import_at",
+            "import_reason",
+            "category",
+            "relevance_score",
+            "removed_at",
+        ]
+        read_only_fields = [
+            "import_by",
+            "import_at",
+            "import_reason",
+            "relevance_score",
+            "removed_at",
+        ]
+
+
+class QuestionSerializer(serializers.ModelSerializer):
+    locators = serializers.SerializerMethodField()
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    def get_locators(self, question):
+        locators = MaterialTextLocator.objects.filter(
+            entity_type="question", entity_id=question.id
+        ).select_related("material", "chunk")
+        return MaterialTextLocatorSerializer(locators, many=True).data
+
+    class Meta:
+        model = Question
+        fields = [
+            "id",
+            "session",
+            "question_text",
+            "conclusion",
+            "status",
+            "status_display",
+            "created_at",
+            "locators",
+        ]
+        read_only_fields = ["created_at", "locators", "status_display"]
+
+
+class ConceptSerializer(serializers.ModelSerializer):
+    locators = serializers.SerializerMethodField()
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    def get_locators(self, concept):
+        locators = MaterialTextLocator.objects.filter(
+            entity_type="concept", entity_id=concept.id
+        ).select_related("material", "chunk")
+        return MaterialTextLocatorSerializer(locators, many=True).data
 
     class Meta:
         model = Concept
@@ -143,18 +195,58 @@ class ConceptSerializer(serializers.ModelSerializer):
             "applications",
             "status",
             "status_display",
-            "source_task",
-            "anchors",
+            "locators",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = [
-            "topic",
-            "source_task",
-            "anchors",
+        read_only_fields = ["topic", "locators", "created_at", "updated_at"]
+
+
+class HighlightSerializer(serializers.ModelSerializer):
+    locators = serializers.SerializerMethodField()
+
+    def get_locators(self, highlight):
+        locators = MaterialTextLocator.objects.filter(
+            entity_type="highlight", entity_id=highlight.id
+        ).select_related("material", "chunk")
+        return MaterialTextLocatorSerializer(locators, many=True).data
+
+    class Meta:
+        model = Highlight
+        fields = [
+            "id",
+            "user_note",
             "created_at",
             "updated_at",
+            "locators",
         ]
+        read_only_fields = ["created_at", "updated_at", "locators"]
+
+
+class SessionMessageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SessionMessage
+        fields = ["id", "session", "msg_from", "msg_content", "msg_at"]
+        read_only_fields = fields
+
+
+class SessionSerializer(serializers.ModelSerializer):
+    messages = SessionMessageSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Session
+        fields = [
+            "id",
+            "system_prompt",
+            "model",
+            "session_scene",
+            "context_material",
+            "context_msg",
+            "created_at",
+            "updated_at",
+            "messages",
+        ]
+        read_only_fields = fields
 
 
 class ConceptRelationSerializer(serializers.ModelSerializer):
@@ -167,7 +259,8 @@ class ConceptRelationSerializer(serializers.ModelSerializer):
         model = ConceptRelation
         fields = [
             "id",
-            "topic",
+            "from_topic",
+            "to_topic",
             "from_concept",
             "from_concept_title",
             "to_concept",
@@ -178,6 +271,8 @@ class ConceptRelationSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = [
+            "from_topic",
+            "to_topic",
             "from_concept_title",
             "to_concept_title",
             "created_at",
@@ -195,75 +290,9 @@ class ConceptRelationSerializer(serializers.ModelSerializer):
         )
         if from_concept == to_concept:
             raise serializers.ValidationError("概念不能关联自身。")
-        topic = attrs.get("topic", self.instance.topic if self.instance else None)
-        if (
-            from_concept.topic_id != to_concept.topic_id
-            or topic.id != from_concept.topic_id
-        ):
-            raise serializers.ValidationError("概念关系必须位于同一学习话题。")
+        attrs["from_topic"] = from_concept.topic
+        attrs["to_topic"] = to_concept.topic
         return attrs
-
-
-class HighlightSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Highlight
-        fields = [
-            "id",
-            "topic",
-            "material",
-            "chunk",
-            "source_text",
-            "user_note",
-            "start_offset",
-            "end_offset",
-            "created_at",
-        ]
-        read_only_fields = fields
-
-
-class MaterialChunkSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = MaterialChunk
-        fields = ["id", "chunk_index", "content", "start_offset", "end_offset"]
-
-
-class MaterialSerializer(serializers.ModelSerializer):
-    chunks = MaterialChunkSerializer(many=True, read_only=True)
-    ai_responses = AIResponseSerializer(many=True, read_only=True)
-    type_display = serializers.CharField(source="get_type_display", read_only=True)
-    source_type_display = serializers.CharField(
-        source="get_source_type_display", read_only=True
-    )
-    import_status_display = serializers.CharField(
-        source="get_import_status_display", read_only=True
-    )
-
-    class Meta:
-        model = Material
-        fields = [
-            "id",
-            "topic",
-            "type",
-            "type_display",
-            "source_type",
-            "source_type_display",
-            "source_url",
-            "title",
-            "raw_text",
-            "clean_text",
-            "import_status",
-            "import_status_display",
-            "import_error",
-            "created_at",
-            "chunks",
-            "ai_responses",
-        ]
-        read_only_fields = [
-            "created_at",
-            "clean_text",
-            "import_status",
-            "import_error",
-        ]
 
 
 class TopicSerializer(serializers.ModelSerializer):
@@ -275,17 +304,44 @@ class TopicSerializer(serializers.ModelSerializer):
     mastery_level_display = serializers.CharField(
         source="get_mastery_level_display", read_only=True
     )
-    materials = MaterialSerializer(many=True, read_only=True)
+    topic_materials = serializers.SerializerMethodField()
     concepts = ConceptSerializer(many=True, read_only=True)
-    questions = QuestionSerializer(many=True, read_only=True)
-    concept_relations = ConceptRelationSerializer(many=True, read_only=True)
-    highlights = HighlightSerializer(many=True, read_only=True)
+    questions = serializers.SerializerMethodField()
+    highlights = serializers.SerializerMethodField()
+    concept_relations = serializers.SerializerMethodField()
     learning_output = serializers.SerializerMethodField()
 
+    def get_topic_materials(self, topic):
+        links = topic.topic_materials.filter(removed_at__isnull=True).select_related(
+            "material"
+        )
+        return TopicMaterialSerializer(links, many=True, context=self.context).data
+
+    def get_questions(self, topic):
+        ids = MaterialTextLocator.objects.filter(
+            topic=topic, entity_type="question"
+        ).values_list("entity_id", flat=True)
+        return QuestionSerializer(Question.objects.filter(id__in=ids), many=True).data
+
+    def get_highlights(self, topic):
+        ids = MaterialTextLocator.objects.filter(
+            topic=topic, entity_type="highlight"
+        ).values_list("entity_id", flat=True)
+        return HighlightSerializer(Highlight.objects.filter(id__in=ids), many=True).data
+
+    def get_concept_relations(self, topic):
+        relations = ConceptRelation.objects.filter(
+            from_topic=topic
+        ) | ConceptRelation.objects.filter(to_topic=topic)
+        return ConceptRelationSerializer(relations.distinct(), many=True).data
+
     def get_learning_output(self, topic):
+        question_count = MaterialTextLocator.objects.filter(
+            topic=topic, entity_type="question"
+        ).count()
         return {
             "concept_count": topic.concepts.count(),
-            "saved_question_count": topic.questions.filter(is_saved=True).count(),
+            "question_count": question_count,
             "map_node_count": topic.concepts.count(),
         }
 
@@ -301,6 +357,7 @@ class TopicSerializer(serializers.ModelSerializer):
             "discussion_rationale",
             "discussion_stage",
             "discussion_context",
+            "session",
             "goal",
             "scope",
             "status",
@@ -309,7 +366,7 @@ class TopicSerializer(serializers.ModelSerializer):
             "mastery_level_display",
             "created_at",
             "updated_at",
-            "materials",
+            "topic_materials",
             "concepts",
             "questions",
             "concept_relations",
@@ -319,6 +376,7 @@ class TopicSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "discussion_stage",
             "discussion_context",
+            "session",
             "created_at",
             "updated_at",
         ]
@@ -346,11 +404,6 @@ class ExamSerializer(serializers.ModelSerializer):
         source="get_exam_type_display", read_only=True
     )
     status_display = serializers.CharField(source="get_status_display", read_only=True)
-    review_due_at = serializers.SerializerMethodField()
-
-    def get_review_due_at(self, exam):
-        review = exam.review_records.order_by("due_at").first()
-        return review.due_at if review else None
 
     class Meta:
         model = Exam
@@ -365,18 +418,9 @@ class ExamSerializer(serializers.ModelSerializer):
             "feedback",
             "created_at",
             "submitted_at",
-            "review_due_at",
             "questions",
         ]
-        read_only_fields = [
-            "exam_type",
-            "status",
-            "score",
-            "feedback",
-            "created_at",
-            "submitted_at",
-            "questions",
-        ]
+        read_only_fields = fields
 
 
 class ReviewRecordSerializer(serializers.ModelSerializer):
@@ -387,8 +431,8 @@ class ReviewRecordSerializer(serializers.ModelSerializer):
     topic_mastery_level_display = serializers.CharField(
         source="topic.get_mastery_level_display", read_only=True
     )
-    result_display = serializers.CharField(source="get_result_display", read_only=True)
     exam_score = serializers.IntegerField(source="exam.score", read_only=True)
+    result_display = serializers.CharField(source="get_result_display", read_only=True)
 
     class Meta:
         model = ReviewRecord
@@ -417,28 +461,12 @@ class ReviewRecordSerializer(serializers.ModelSerializer):
 
 
 class AITaskSerializer(serializers.ModelSerializer):
-    task_type_display = serializers.CharField(
-        source="get_task_type_display", read_only=True
-    )
+    task_type_display = serializers.SerializerMethodField()
     status_display = serializers.CharField(source="get_status_display", read_only=True)
-    blocking_task = serializers.SerializerMethodField()
 
-    def get_blocking_task(self, task):
-        if task.status != "pending":
-            return None
-        blocking_task = (
-            AITask.objects.filter(status="running")
-            .exclude(pk=task.pk)
-            .order_by("started_at", "id")
-            .first()
-        )
-        if blocking_task is None:
-            return None
-        return {
-            "id": blocking_task.id,
-            "task_type_display": blocking_task.get_task_type_display(),
-            "model": blocking_task.model,
-        }
+    def get_task_type_display(self, obj):
+        choices = dict(TaskRegistry.get_choices())
+        return choices.get(obj.task_type, obj.task_type)
 
     class Meta:
         model = AITask
@@ -448,15 +476,11 @@ class AITaskSerializer(serializers.ModelSerializer):
             "task_type_display",
             "status",
             "status_display",
-            "blocking_task",
             "priority",
-            "topic",
-            "material",
-            "question",
-            "concept",
-            "discussion_message",
-            "exam",
-            "review",
+            "trigger_type",
+            "trigger_id",
+            "task_data",
+            "full_context",
             "result_json",
             "error_message",
             "attempt_count",
@@ -465,7 +489,6 @@ class AITaskSerializer(serializers.ModelSerializer):
             "started_at",
             "finished_at",
             "model",
-            "prompt_version",
             "created_at",
             "updated_at",
         ]

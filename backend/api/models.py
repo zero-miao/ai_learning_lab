@@ -66,6 +66,14 @@ class Topic(models.Model):
     discussion_context = models.JSONField(
         default=dict, blank=True, verbose_name="讨论工作记忆"
     )
+    session = models.ForeignKey(
+        "Session",
+        related_name="discussion_topics",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="讨论会话",
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
 
@@ -79,49 +87,53 @@ class Topic(models.Model):
 
 
 class Material(models.Model):
-    TYPE_CHOICES = [
-        ("url", "网页链接"),
+    MEDIA_TYPE_CHOICES = [
         ("text", "纯文本"),
+        ("web_page", "网页"),
+        ("video", "视频"),
+        ("audio", "音频"),
     ]
-    SOURCE_TYPE_CHOICES = [
+    STATUS_CHOICES = [
+        ("pending", "待处理"),
+        ("importing", "导入中"),
+        ("cleaning", "清洗中"),
+        ("summarizing", "摘要中"),
+        ("ready", "已就绪"),
+        ("failed", "失败"),
+    ]
+    CREATED_BY_CHOICES = [
         ("manual", "人工添加"),
         ("ai_recommended", "AI 推荐"),
     ]
-
-    IMPORT_STATUS_CHOICES = [
-        ("pending", "处理中"),
-        ("success", "成功"),
-        ("failed", "失败"),
-    ]
-
-    topic = models.ForeignKey(
-        Topic,
-        related_name="materials",
-        on_delete=models.CASCADE,
-        verbose_name="所属主题",
-    )
-    type = models.CharField(max_length=10, choices=TYPE_CHOICES, verbose_name="类型")
-    source_type = models.CharField(
-        max_length=20,
-        choices=SOURCE_TYPE_CHOICES,
-        default="manual",
-        db_index=True,
-        verbose_name="来源类型",
-    )
-    source_url = models.URLField(
-        max_length=500, blank=True, null=True, verbose_name="来源URL"
-    )
     title = models.CharField(max_length=255, verbose_name="标题")
-    raw_text = models.TextField(blank=True, verbose_name="原始文本")
-    clean_text = models.TextField(blank=True, verbose_name="清洗后文本")
-    import_status = models.CharField(
-        max_length=10,
-        choices=IMPORT_STATUS_CHOICES,
-        default="pending",
-        verbose_name="导入状态",
+    media_type = models.CharField(
+        max_length=20,
+        choices=MEDIA_TYPE_CHOICES,
+        default="text",
+        db_index=True,
+        verbose_name="媒体类型",
     )
-    import_error = models.TextField(blank=True, verbose_name="导入失败原因")
+    media_uri = models.CharField(max_length=1000, blank=True, verbose_name="媒体引用")
+    media_meta = models.JSONField(default=dict, blank=True, verbose_name="媒体元信息")
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="pending",
+        db_index=True,
+        verbose_name="V2处理状态",
+    )
+    error = models.TextField(blank=True, verbose_name="V2处理错误")
+    created_by = models.CharField(
+        max_length=20,
+        choices=CREATED_BY_CHOICES,
+        default="manual",
+        verbose_name="首次创建来源",
+    )
+    digest = models.TextField(blank=True, verbose_name="材料摘要")
+    raw_text = models.TextField(blank=True, verbose_name="原始内容")
+    clean_text = models.TextField(blank=True, verbose_name="处理后内容")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
 
     class Meta:
         verbose_name = "学习材料"
@@ -142,6 +154,12 @@ class MaterialChunk(models.Model):
     content = models.TextField(verbose_name="片段内容")
     start_offset = models.IntegerField(verbose_name="起始偏移")
     end_offset = models.IntegerField(verbose_name="结束偏移")
+    start_time = models.FloatField(
+        null=True, blank=True, verbose_name="媒体起始时间（秒）"
+    )
+    end_time = models.FloatField(
+        null=True, blank=True, verbose_name="媒体结束时间（秒）"
+    )
 
     class Meta:
         verbose_name = "材料片段"
@@ -149,97 +167,179 @@ class MaterialChunk(models.Model):
         ordering = ["chunk_index"]
 
 
-class DiscussionMessage(models.Model):
-    ROLE_CHOICES = [
-        ("user", "用户"),
-        ("assistant", "AI 助手"),
+class TopicMaterial(models.Model):
+    IMPORT_BY_CHOICES = [
+        ("manual", "人工添加"),
+        ("ai_recommended", "AI 推荐"),
     ]
-    TYPE_CHOICES = [
-        ("opening", "主动开场"),
-        ("assessment", "快速评估"),
-        ("discussion", "讨论"),
-        ("learning_path", "学习路线"),
+    CATEGORY_CHOICES = [
+        ("exam_material", "考试材料"),
+        ("recommended_reading", "推荐阅读"),
     ]
 
     topic = models.ForeignKey(
         Topic,
-        related_name="discussion_messages",
-        on_delete=models.CASCADE,
-        verbose_name="所属主题",
-    )
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, verbose_name="角色")
-    message_type = models.CharField(
-        max_length=30,
-        choices=TYPE_CHOICES,
-        default="discussion",
-        verbose_name="消息类型",
-    )
-    content = models.TextField(verbose_name="消息内容")
-    suggested_stage = models.CharField(
-        max_length=20,
-        choices=Topic.DISCUSSION_STAGE_CHOICES,
-        null=True,
-        blank=True,
-        verbose_name="建议讨论阶段",
-    )
-    stage_suggestion_reason = models.TextField(blank=True, verbose_name="阶段建议理由")
-    source_task = models.ForeignKey(
-        "AITask",
-        related_name="generated_discussion_messages",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        verbose_name="来源任务",
-    )
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
-
-    class Meta:
-        verbose_name = "讨论消息"
-        verbose_name_plural = "讨论消息"
-        ordering = ["created_at", "id"]
-
-
-class Question(models.Model):
-    topic = models.ForeignKey(
-        Topic,
-        related_name="questions",
+        related_name="topic_materials",
         on_delete=models.CASCADE,
         verbose_name="所属主题",
     )
     material = models.ForeignKey(
         Material,
-        related_name="questions",
+        related_name="topic_materials",
         on_delete=models.CASCADE,
+        verbose_name="关联材料",
+    )
+    import_by = models.CharField(
+        max_length=20,
+        choices=IMPORT_BY_CHOICES,
+        default="manual",
+        verbose_name="关联方式",
+    )
+    import_at = models.DateTimeField(auto_now_add=True, verbose_name="关联时间")
+    import_reason = models.TextField(blank=True, verbose_name="导入理由")
+    category = models.CharField(
+        max_length=30,
+        choices=CATEGORY_CHOICES,
+        default="recommended_reading",
+        verbose_name="材料分类",
+    )
+    relevance_score = models.FloatField(
+        null=True, blank=True, verbose_name="主题相关度"
+    )
+    removed_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="从当前主题移除时间"
+    )
+
+    class Meta:
+        verbose_name = "主题材料关联"
+        verbose_name_plural = "主题材料关联"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["topic", "material"], name="unique_topic_material"
+            )
+        ]
+
+
+class Session(models.Model):
+    system_prompt = models.TextField(blank=True, verbose_name="系统提示词")
+    model = models.CharField(max_length=100, blank=True, verbose_name="使用模型")
+    session_scene = models.CharField(
+        max_length=100, blank=True, verbose_name="会话场景"
+    )
+    context_material = models.ForeignKey(
+        Material,
+        related_name="sessions",
+        on_delete=models.SET_NULL,
         null=True,
         blank=True,
+        verbose_name="上下文材料",
+    )
+    context_msg = models.TextField(blank=True, verbose_name="压缩上下文")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "会话"
+        verbose_name_plural = "会话"
+        ordering = ["-updated_at"]
+
+
+class SessionMessage(models.Model):
+    MSG_FROM_CHOICES = [
+        ("user", "用户"),
+        ("ai", "AI"),
+    ]
+
+    session = models.ForeignKey(
+        Session,
+        related_name="messages",
+        on_delete=models.CASCADE,
+        verbose_name="所属会话",
+    )
+    msg_from = models.CharField(
+        max_length=10, choices=MSG_FROM_CHOICES, verbose_name="消息来源"
+    )
+    msg_content = models.TextField(verbose_name="消息内容")
+    msg_at = models.DateTimeField(auto_now_add=True, verbose_name="消息时间")
+
+    class Meta:
+        verbose_name = "会话消息"
+        verbose_name_plural = "会话消息"
+        ordering = ["msg_at", "id"]
+
+
+class MaterialTextLocator(models.Model):
+    ENTITY_TYPE_CHOICES = [
+        ("concept", "概念"),
+        ("highlight", "高亮"),
+        ("question", "问题"),
+    ]
+
+    material = models.ForeignKey(
+        Material,
+        related_name="text_locators",
+        on_delete=models.CASCADE,
         verbose_name="关联材料",
     )
     chunk = models.ForeignKey(
         MaterialChunk,
-        related_name="questions",
-        on_delete=models.CASCADE,
+        related_name="text_locators",
+        on_delete=models.SET_NULL,
         null=True,
         blank=True,
         verbose_name="关联片段",
     )
-    concept = models.ForeignKey(
-        "Concept",
+    topic = models.ForeignKey(
+        Topic,
+        related_name="text_locators",
+        on_delete=models.CASCADE,
+        verbose_name="创建主题",
+    )
+    source_text = models.TextField(verbose_name="来源文本")
+    start_offset = models.PositiveIntegerField(verbose_name="文本起始偏移")
+    end_offset = models.PositiveIntegerField(verbose_name="文本结束偏移")
+    time_start_offset = models.FloatField(
+        null=True, blank=True, verbose_name="媒体起始时间（秒）"
+    )
+    time_end_offset = models.FloatField(
+        null=True, blank=True, verbose_name="媒体结束时间（秒）"
+    )
+    entity_type = models.CharField(
+        max_length=20, choices=ENTITY_TYPE_CHOICES, verbose_name="实体类型"
+    )
+    entity_id = models.PositiveBigIntegerField(verbose_name="实体ID")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "材料文本定位器"
+        verbose_name_plural = "材料文本定位器"
+        indexes = [
+            models.Index(
+                fields=["entity_type", "entity_id"],
+                name="locator_entity_idx",
+            ),
+            models.Index(
+                fields=["material", "time_start_offset"],
+                name="locator_timeline_idx",
+            ),
+        ]
+
+
+class Question(models.Model):
+    session = models.ForeignKey(
+        Session,
         related_name="questions",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        verbose_name="关联概念",
-    )
-    selected_text = models.TextField(blank=True, verbose_name="选中文本")
-    start_offset = models.PositiveIntegerField(
-        null=True, blank=True, verbose_name="起始偏移"
-    )
-    end_offset = models.PositiveIntegerField(
-        null=True, blank=True, verbose_name="结束偏移"
+        on_delete=models.CASCADE,
+        verbose_name="所属会话",
     )
     question_text = models.TextField(verbose_name="问题内容")
-    is_saved = models.BooleanField(default=False, verbose_name="已沉淀")
-    saved_at = models.DateTimeField(null=True, blank=True, verbose_name="沉淀时间")
+    conclusion = models.TextField(blank=True, verbose_name="问答结论")
+    status = models.CharField(
+        max_length=20,
+        choices=[("open", "开放"), ("closed", "已关闭")],
+        default="open",
+        verbose_name="V2状态",
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="提问时间")
 
     class Meta:
@@ -271,14 +371,6 @@ class Concept(models.Model):
         db_index=True,
         verbose_name="状态",
     )
-    source_task = models.ForeignKey(
-        "AITask",
-        related_name="generated_concepts",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        verbose_name="来源任务",
-    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
 
@@ -291,50 +383,22 @@ class Concept(models.Model):
         return self.title
 
 
-class ConceptAnchor(models.Model):
-    concept = models.ForeignKey(
-        Concept,
-        related_name="anchors",
-        on_delete=models.CASCADE,
-        verbose_name="所属概念",
-    )
-    material = models.ForeignKey(
-        Material,
-        related_name="concept_anchors",
-        on_delete=models.CASCADE,
-        verbose_name="来源材料",
-    )
-    chunk = models.ForeignKey(
-        MaterialChunk,
-        related_name="concept_anchors",
+class ConceptRelation(models.Model):
+    from_topic = models.ForeignKey(
+        Topic,
+        related_name="outgoing_concept_relations",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        verbose_name="来源片段",
+        verbose_name="起始概念所属主题",
     )
-    source_text = models.TextField(verbose_name="来源文本")
-    start_offset = models.PositiveIntegerField(verbose_name="起始偏移")
-    end_offset = models.PositiveIntegerField(verbose_name="结束偏移")
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
-
-    class Meta:
-        verbose_name = "概念来源锚点"
-        verbose_name_plural = "概念来源锚点"
-        ordering = ["created_at"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["concept", "material", "start_offset", "end_offset"],
-                name="unique_concept_anchor_range",
-            )
-        ]
-
-
-class ConceptRelation(models.Model):
-    topic = models.ForeignKey(
+    to_topic = models.ForeignKey(
         Topic,
-        related_name="concept_relations",
-        on_delete=models.CASCADE,
-        verbose_name="所属主题",
+        related_name="incoming_concept_relations",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="目标概念所属主题",
     )
     from_concept = models.ForeignKey(
         Concept,
@@ -376,81 +440,14 @@ class ConceptRelation(models.Model):
 
 
 class Highlight(models.Model):
-    topic = models.ForeignKey(
-        Topic,
-        related_name="highlights",
-        on_delete=models.CASCADE,
-        verbose_name="所属主题",
-    )
-    material = models.ForeignKey(
-        Material,
-        related_name="highlights",
-        on_delete=models.CASCADE,
-        verbose_name="来源材料",
-    )
-    chunk = models.ForeignKey(
-        MaterialChunk,
-        related_name="highlights",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        verbose_name="来源片段",
-    )
-    source_text = models.TextField(verbose_name="高亮文本")
     user_note = models.TextField(blank=True, verbose_name="用户备注")
-    start_offset = models.PositiveIntegerField(verbose_name="起始偏移")
-    end_offset = models.PositiveIntegerField(verbose_name="结束偏移")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
 
     class Meta:
         verbose_name = "高亮"
         verbose_name_plural = "高亮"
         ordering = ["created_at"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["material", "start_offset", "end_offset"],
-                name="unique_highlight_range",
-            )
-        ]
-
-
-class AIResponse(models.Model):
-    TASK_TYPE_CHOICES = [
-        ("briefing", "阅读前导"),
-        ("answer_question", "回答问题"),
-        ("generate_exam", "生成考题"),
-        ("grade_exam", "阅卷评分"),
-    ]
-
-    question = models.ForeignKey(
-        Question,
-        related_name="ai_responses",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        verbose_name="关联问题",
-    )
-    material = models.ForeignKey(
-        Material,
-        related_name="ai_responses",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        verbose_name="关联材料",
-    )
-    task_type = models.CharField(
-        max_length=20, choices=TASK_TYPE_CHOICES, verbose_name="任务类型"
-    )
-    prompt_version = models.CharField(
-        max_length=50, blank=True, verbose_name="Prompt版本"
-    )
-    content = models.TextField(verbose_name="回答内容")
-    model = models.CharField(max_length=50, blank=True, verbose_name="使用模型")
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="生成时间")
-
-    class Meta:
-        verbose_name = "AI响应"
-        verbose_name_plural = "AI响应"
 
 
 class Exam(models.Model):
@@ -576,19 +573,10 @@ class ReviewRecord(models.Model):
 
 
 class AITask(models.Model):
-    TASK_TYPE_CHOICES = [
-        ("briefing", "阅读前导"),
-        ("answer_question", "回答问题"),
-        ("concept_draft", "概念草稿"),
-        ("generate_exam", "生成考题"),
-        ("grade_exam", "阅卷评分"),
-        ("review_prompt", "复习提示"),
-        ("grade_review", "复盘反馈"),
-        ("discussion_opening", "讨论开场"),
-        ("discussion_assessment", "快速评估"),
-        ("discussion_reply", "讨论回复"),
-        ("learning_path", "学习路线"),
-    ]
+    # 任务类型由 backend/api/tasks.py 中的 TaskRegistry 自动注册和维护
+    task_type = models.CharField(
+        max_length=50, db_index=True, verbose_name="任务类型"
+    )
     STATUS_CHOICES = [
         ("pending", "等待执行"),
         ("running", "执行中"),
@@ -596,10 +584,6 @@ class AITask(models.Model):
         ("failed", "失败"),
         ("cancelled", "已取消"),
     ]
-
-    task_type = models.CharField(
-        max_length=30, choices=TASK_TYPE_CHOICES, verbose_name="任务类型"
-    )
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
@@ -608,63 +592,14 @@ class AITask(models.Model):
         verbose_name="任务状态",
     )
     priority = models.IntegerField(default=0, db_index=True, verbose_name="优先级")
-    topic = models.ForeignKey(
-        Topic,
-        related_name="ai_tasks",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        verbose_name="关联主题",
+    trigger_type = models.CharField(
+        max_length=50, blank=True, db_index=True, verbose_name="触发方类型"
     )
-    material = models.ForeignKey(
-        Material,
-        related_name="ai_tasks",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        verbose_name="关联材料",
+    trigger_id = models.PositiveBigIntegerField(
+        null=True, blank=True, db_index=True, verbose_name="触发方ID"
     )
-    question = models.ForeignKey(
-        Question,
-        related_name="ai_tasks",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        verbose_name="关联问题",
-    )
-    concept = models.ForeignKey(
-        Concept,
-        related_name="ai_tasks",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        verbose_name="关联概念",
-    )
-    discussion_message = models.ForeignKey(
-        DiscussionMessage,
-        related_name="ai_tasks",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        verbose_name="关联讨论消息",
-    )
-    exam = models.ForeignKey(
-        Exam,
-        related_name="ai_tasks",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        verbose_name="关联考试",
-    )
-    review = models.ForeignKey(
-        ReviewRecord,
-        related_name="ai_tasks",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        verbose_name="关联复习记录",
-    )
-    input_json = models.JSONField(default=dict, blank=True, verbose_name="任务输入")
+    task_data = models.JSONField(default=dict, blank=True, verbose_name="任务数据")
+    full_context = models.TextField(blank=True, verbose_name="LLM完整上下文")
     result_json = models.JSONField(default=dict, blank=True, verbose_name="任务结果")
     error_message = models.TextField(blank=True, verbose_name="错误信息")
     attempt_count = models.PositiveSmallIntegerField(
@@ -677,9 +612,6 @@ class AITask(models.Model):
     started_at = models.DateTimeField(null=True, blank=True, verbose_name="开始时间")
     finished_at = models.DateTimeField(null=True, blank=True, verbose_name="完成时间")
     model = models.CharField(max_length=100, blank=True, verbose_name="使用模型")
-    prompt_version = models.CharField(
-        max_length=50, blank=True, verbose_name="Prompt版本"
-    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
 
@@ -689,6 +621,8 @@ class AITask(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return (
-            f"{self.get_task_type_display()} #{self.pk} ({self.get_status_display()})"
-        )
+        from .tasks import TaskRegistry
+
+        choices = dict(TaskRegistry.get_choices())
+        task_type_display = choices.get(self.task_type, self.task_type)
+        return f"{task_type_display} #{self.pk} ({self.get_status_display()})"

@@ -1,851 +1,354 @@
-import os
-from datetime import timedelta
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
-from django.utils import timezone
 from rest_framework.test import APIClient
 
-from .ai_gateway import AIGateway
 from .models import (
-    AIResponse,
     AITask,
     Concept,
-    ConceptAnchor,
-    ConceptRelation,
-    DiscussionMessage,
-    Exam,
-    ExamQuestion,
     Highlight,
     Material,
     MaterialChunk,
+    MaterialTextLocator,
     Question,
     ReviewRecord,
+    Session,
     Topic,
+    TopicMaterial,
 )
-from .task_service import (
-    INTERACTIVE_TASK_PRIORITY,
-    claim_due_task,
-    enqueue_or_reuse,
-    execute_task,
-    recover_interrupted_tasks,
-)
+from .task_service import enqueue_or_reuse
+from .tasks import TaskRegistry, _create_material_chunks
 
 
-class AsyncTaskApiTests(TestCase):
+class V2ErApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        self.topic = Topic.objects.create(
-            title="Django ORM", goal="能在项目中选择合适的查询方式"
-        )
+        self.topic = Topic.objects.create(title="Django ORM")
         self.material = Material.objects.create(
-            topic=self.topic,
-            type="text",
             title="ORM 基础",
+            media_type="text",
             raw_text="Django ORM 通过 QuerySet 表达数据库查询。",
             clean_text="Django ORM 通过 QuerySet 表达数据库查询。",
-            import_status="success",
+            status="ready",
         )
-
-    def test_question_request_returns_task_and_reuses_pending_task(self):
-        payload = {
-            "topic": self.topic.id,
-            "material": self.material.id,
-            "question_text": "QuerySet 为什么可组合？",
-        }
-        first = self.client.post("/api/questions/", payload, format="json")
-        second = self.client.post("/api/questions/", payload, format="json")
-
-        self.assertEqual(first.status_code, 202)
-        self.assertEqual(second.status_code, 202)
-        self.assertEqual(first.data["task"]["status"], "pending")
-        self.assertNotEqual(first.data["question"]["id"], second.data["question"]["id"])
-
-    def test_task_model_uses_task_type_override_with_default_fallback(self):
-        with patch.dict(
-            os.environ,
-            {
-                "LLM_MODEL": "default-model",
-                "LLM_MODEL_CONCEPT_DRAFT": "concept-model",
-            },
-        ):
-            concept_task, _ = enqueue_or_reuse("concept_draft", topic=self.topic)
-            question_task, _ = enqueue_or_reuse("answer_question", topic=self.topic)
-
-        self.assertEqual(concept_task.model, "concept-model")
-        self.assertEqual(question_task.model, "default-model")
-
-    @patch("api.ai_gateway.AIGateway.get_provider")
-    def test_discussion_reply_falls_back_to_plain_text(self, get_provider):
-        get_provider.return_value.generate_response.return_value = (
-            "先说说这个想法与你当前最在意的问题有什么关系。"
-        )
-        response = AIGateway.reply_to_discussion(
-            "人生规划",
-            "",
-            "",
-            "",
-            "我有点迷茫。",
-            "explore",
-            {},
-            "qwen2.5:14b",
-        )
-        self.assertEqual(
-            response["reply"], "先说说这个想法与你当前最在意的问题有什么关系。"
-        )
-        self.assertEqual(response["context"], {})
-        self.assertIsNone(response["suggested_stage"])
-
-    @patch("api.ai_gateway.AIGateway.get_provider")
-    def test_discussion_reply_extracts_reply_from_malformed_json(self, get_provider):
-        get_provider.return_value.generate_response.return_value = (
-            '{"reply":"先明确你最想改变的部分。","context":{}},"suggested_stage":null}'
-        )
-        response = AIGateway.reply_to_discussion(
-            "人生规划",
-            "",
-            "",
-            "",
-            "我有点迷茫。",
-            "explore",
-            {},
-            "qwen2.5:14b",
-        )
-        self.assertEqual(response["reply"], "先明确你最想改变的部分。")
-        self.assertEqual(response["context"], {})
-
-    def test_question_anchor_and_save_to_concept(self):
-        MaterialChunk.objects.create(
+        TopicMaterial.objects.create(topic=self.topic, material=self.material)
+        self.chunk = MaterialChunk.objects.create(
             material=self.material,
             chunk_index=0,
             content=self.material.clean_text,
             start_offset=0,
             end_offset=len(self.material.clean_text),
         )
-        concept = Concept.objects.create(topic=self.topic, title="QuerySet")
-        start_offset = self.material.clean_text.index("QuerySet")
-        end_offset = start_offset + len("QuerySet")
 
+    def test_annotation_uses_locator_without_legacy_anchor_tables(self):
+        start = self.material.clean_text.index("QuerySet")
+        response = self.client.post(
+            f"/api/topics/{self.topic.id}/concepts/",
+            {
+                "title": "QuerySet",
+                "material": self.material.id,
+                "start_offset": start,
+                "end_offset": start + len("QuerySet"),
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 202)
+        concept = Concept.objects.get(pk=response.data["concept"]["id"])
+        locator = MaterialTextLocator.objects.get(
+            entity_type="concept", entity_id=concept.id
+        )
+        self.assertEqual(locator.material_id, self.material.id)
+        self.assertEqual(locator.topic_id, self.topic.id)
+        task = AITask.objects.get(pk=response.data["task"]["id"])
+        self.assertEqual(task.trigger_type, "Concept")
+        self.assertEqual(task.trigger_id, concept.id)
+
+    def test_question_uses_session_and_locator(self):
         response = self.client.post(
             "/api/questions/",
             {
                 "topic": self.topic.id,
                 "material": self.material.id,
-                "selected_text": "伪造内容",
-                "start_offset": start_offset,
-                "end_offset": end_offset,
-                "question_text": "为什么可以组合？",
+                "start_offset": 0,
+                "end_offset": 10,
+                "question_text": "QuerySet 为什么可组合？",
             },
             format="json",
         )
         self.assertEqual(response.status_code, 202)
         question = Question.objects.get(pk=response.data["question"]["id"])
-        self.assertEqual(question.selected_text, "QuerySet")
-        self.assertEqual(question.start_offset, start_offset)
-        self.assertEqual(question.end_offset, end_offset)
-        self.assertIsNotNone(question.chunk)
-        self.assertFalse(question.is_saved)
-
-        save_response = self.client.post(
-            f"/api/questions/{question.id}/save/",
-            {"concept": concept.id},
-            format="json",
-        )
-        self.assertEqual(save_response.status_code, 200)
-        question.refresh_from_db()
-        self.assertTrue(question.is_saved)
-        self.assertEqual(question.concept_id, concept.id)
-        self.assertIsNotNone(question.saved_at)
-        topic_response = self.client.get(f"/api/topics/{self.topic.id}/")
-        self.assertEqual(len(topic_response.data["questions"]), 1)
-        self.assertEqual(
-            topic_response.data["questions"][0]["start_offset"], start_offset
-        )
-
-    def test_concept_relation_requires_concepts_from_same_topic(self):
-        query_set = Concept.objects.create(topic=self.topic, title="QuerySet")
-        lazy_evaluation = Concept.objects.create(topic=self.topic, title="惰性求值")
-        relation_response = self.client.post(
-            "/api/concept-relations/",
-            {
-                "topic": self.topic.id,
-                "from_concept": query_set.id,
-                "to_concept": lazy_evaluation.id,
-                "relation_type": "依赖于",
-                "description": "QuerySet 在实际求值前保持惰性。",
-            },
-            format="json",
-        )
-        self.assertEqual(relation_response.status_code, 201)
-        relation = ConceptRelation.objects.get(pk=relation_response.data["id"])
-        self.assertEqual(relation.topic_id, self.topic.id)
-        self.assertEqual(relation.relation_type, "依赖于")
-
-        topic_response = self.client.get(f"/api/topics/{self.topic.id}/")
-        self.assertEqual(len(topic_response.data["concept_relations"]), 1)
-        self.assertEqual(
-            topic_response.data["concept_relations"][0]["to_concept_title"],
-            "惰性求值",
-        )
-
-        other_topic = Topic.objects.create(title="Python 基础")
-        other_concept = Concept.objects.create(topic=other_topic, title="迭代器")
-        invalid_response = self.client.post(
-            "/api/concept-relations/",
-            {
-                "topic": self.topic.id,
-                "from_concept": query_set.id,
-                "to_concept": other_concept.id,
-                "relation_type": "关联",
-            },
-            format="json",
-        )
-        self.assertEqual(invalid_response.status_code, 400)
-
-    @patch("api.task_service.AIGateway.reply_to_discussion")
-    def test_discussion_workflow_persists_messages_and_converts_topic(
-        self, reply_to_discussion
-    ):
-        topic_response = self.client.post(
-            "/api/topics/",
-            {
-                "title": "向量数据库",
-                "type": "discussion",
-                "goal": "判断是否值得系统学习。",
-            },
-            format="json",
-        )
-        self.assertEqual(topic_response.status_code, 201)
-        topic = Topic.objects.get(pk=topic_response.data["id"])
-        self.assertFalse(AITask.objects.filter(topic=topic).exists())
-        self.assertEqual(topic.discussion_stage, "explore")
-
-        reply_to_discussion.return_value = {
-            "reply": "先从你的检索需求和数据规模判断。",
-            "context": {
-                "confirmed_context": ["需要本地检索"],
-                "open_questions": ["数据规模"],
-                "working_hypotheses": [],
-                "next_focus": "明确检索场景",
-            },
-            "suggested_stage": "frame",
-            "stage_suggestion_reason": "已经有明确的使用场景。",
-        }
-        message_response = self.client.post(
-            f"/api/topics/{topic.id}/discussion-messages/",
-            {"content": "我需要为本地知识库做检索。"},
-            format="json",
-        )
-        self.assertEqual(message_response.status_code, 202)
-        reply_task = AITask.objects.get(pk=message_response.data["task"]["id"])
-        self.assertEqual(reply_task.priority, INTERACTIVE_TASK_PRIORITY)
-        reply_task.status = "running"
-        reply_task.attempt_count = 1
-        reply_task.save()
-        execute_task(reply_task.id)
-        self.assertEqual(
-            DiscussionMessage.objects.filter(topic=topic, role="assistant").count(),
-            1,
-        )
-        topic.refresh_from_db()
-        self.assertEqual(topic.discussion_context["next_focus"], "明确检索场景")
-        assistant_message = DiscussionMessage.objects.get(topic=topic, role="assistant")
-        self.assertEqual(assistant_message.suggested_stage, "frame")
-
-        stage_response = self.client.post(
-            f"/api/topics/{topic.id}/discussion-stage/",
-            {"stage": "frame"},
-            format="json",
-        )
-        self.assertEqual(stage_response.status_code, 200)
-        self.assertEqual(stage_response.data["discussion_stage"], "frame")
-
-        convert_response = self.client.post(
-            f"/api/topics/{topic.id}/convert-to-learning/", format="json"
-        )
-        self.assertEqual(convert_response.status_code, 200)
-        topic.refresh_from_db()
-        self.assertEqual(topic.type, "learning")
-        self.assertEqual(topic.discussion_outcome, "learn")
-        self.assertEqual(topic.discussion_messages.count(), 2)
-        history_response = self.client.get(f"/api/topics/{topic.id}/discussion/")
-        self.assertEqual(history_response.status_code, 200)
-        self.assertEqual(len(history_response.data["messages"]), 2)
-        assistant_payload = history_response.data["messages"][1]
-        self.assertEqual(assistant_payload["source_task_model"], reply_task.model)
-        self.assertEqual(assistant_payload["source_task_stage"], "explore")
-        follow_up_response = self.client.post(
-            f"/api/topics/{topic.id}/discussion-messages/",
-            {"content": "转换后如何继续安排学习？"},
-            format="json",
-        )
-        self.assertEqual(follow_up_response.status_code, 202)
-
-    def test_discussion_stage_model_route_and_priority_queue(self):
-        with patch.dict(
-            os.environ,
-            {
-                "LLM_MODEL": "default-model",
-                "LLM_MODEL_DISCUSSION_EXPLORE": "explore-model",
-                "LLM_MODEL_DISCUSSION_FRAME": "frame-model",
-                "LLM_MODEL_DISCUSSION_DECIDE": "decide-model",
-            },
-        ):
-            topic = Topic.objects.create(title="探索", type="discussion")
-            response = self.client.post(
-                f"/api/topics/{topic.id}/discussion-messages/",
-                {"content": "我有个想法"},
-                format="json",
-            )
-            self.assertEqual(response.data["task"]["model"], "explore-model")
-            AITask.objects.filter(pk=response.data["task"]["id"]).update(
-                status="succeeded"
-            )
-            self.client.post(
-                f"/api/topics/{topic.id}/discussion-stage/",
-                {"stage": "frame"},
-                format="json",
-            )
-            response = self.client.post(
-                f"/api/topics/{topic.id}/discussion-messages/",
-                {"content": "我想明确问题"},
-                format="json",
-            )
-            self.assertEqual(response.data["task"]["model"], "frame-model")
-
-        background_task, _ = enqueue_or_reuse("briefing", topic=self.topic)
-        claimed = claim_due_task()
-        self.assertEqual(claimed.id, response.data["task"]["id"])
-        self.assertNotEqual(claimed.id, background_task.id)
-
-    def test_pending_task_exposes_running_blocking_task(self):
-        pending_task, _ = enqueue_or_reuse("discussion_reply", topic=self.topic)
-        AITask.objects.create(
-            task_type="briefing",
-            status="running",
-            topic=self.topic,
-            next_run_at=timezone.now(),
-            started_at=timezone.now(),
-            model="blocking-model",
-        )
-
-        response = self.client.get(f"/api/ai-tasks/{pending_task.id}/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.data["blocking_task"]["task_type_display"], "阅读前导"
-        )
-        self.assertEqual(response.data["blocking_task"]["model"], "blocking-model")
-
-    @patch("api.views.MaterialService.process_material")
-    def test_failed_material_can_be_reimported(self, process_material):
-        material = Material.objects.create(
-            topic=self.topic,
-            type="url",
-            source_url="https://example.com/unavailable",
-            title="失败材料",
-            import_status="failed",
-            import_error="无法获取网页内容，请检查链接是否可访问。",
-        )
-
-        response = self.client.post(
-            f"/api/materials/{material.id}/retry-import/", format="json"
-        )
-
-        self.assertEqual(response.status_code, 200)
-        process_material.assert_called_once_with(material)
-        self.assertEqual(response.data["import_error"], material.import_error)
-
-    @patch("api.task_service.AIGateway.assess_discussion_material")
-    def test_discussion_assessment_updates_rationale(self, assess_discussion_material):
-        assess_discussion_material.return_value = (
-            "材料关联度：高。它直接说明了向量相似度检索的核心用途。"
-        )
-        topic = Topic.objects.create(
-            title="向量检索", type="discussion", goal="判断是否学习"
-        )
-        Material.objects.create(
-            topic=topic,
-            type="text",
-            title="向量检索简介",
-            raw_text="向量检索通过相似度查找相关内容。",
-            clean_text="向量检索通过相似度查找相关内容。",
-            import_status="success",
-        )
-        response = self.client.post(
-            f"/api/topics/{topic.id}/discussion-assessment/", format="json"
-        )
-        self.assertEqual(response.status_code, 202)
-        task = AITask.objects.get(pk=response.data["task"]["id"])
-        task.status = "running"
-        task.attempt_count = 1
-        task.save()
-        execute_task(task.id)
-        topic.refresh_from_db()
-        self.assertEqual(
-            topic.discussion_rationale, assess_discussion_material.return_value
-        )
+        self.assertIsInstance(question.session, Session)
         self.assertTrue(
-            DiscussionMessage.objects.filter(
-                topic=topic, message_type="assessment"
+            MaterialTextLocator.objects.filter(
+                entity_type="question", entity_id=question.id
             ).exists()
         )
 
-    def test_topic_type_and_material_source_type_are_exposed(self):
-        topic_response = self.client.post(
-            "/api/topics/",
-            {
-                "title": "是否学习向量数据库",
-                "type": "discussion",
-                "goal": "判断是否值得投入时间。",
-            },
-            format="json",
-        )
-        self.assertEqual(topic_response.status_code, 201)
-        self.assertEqual(topic_response.data["type"], "discussion")
-        self.assertEqual(topic_response.data["type_display"], "讨论")
-
-        material_response = self.client.post(
-            "/api/materials/",
-            {
-                "topic": topic_response.data["id"],
-                "type": "text",
-                "source_type": "ai_recommended",
-                "title": "向量数据库概览",
-                "raw_text": "向量数据库用于高维向量相似度检索。",
-            },
-            format="json",
-        )
-        self.assertEqual(material_response.status_code, 201)
-        self.assertEqual(material_response.data["source_type"], "ai_recommended")
-        self.assertEqual(material_response.data["source_type_display"], "AI 推荐")
-
-    @patch("api.task_service.AIGateway.generate_concept_draft")
-    def test_concept_draft_worker_persists_anchor_and_allows_confirmation(
-        self, generate_concept_draft
-    ):
-        MaterialChunk.objects.create(
-            material=self.material,
-            chunk_index=0,
-            content=self.material.clean_text,
-            start_offset=0,
-            end_offset=len(self.material.clean_text),
-        )
-        start_offset = self.material.clean_text.index("QuerySet")
-        end_offset = start_offset + len("QuerySet")
-        generate_concept_draft.return_value = {
-            "definition": "可组合的查询对象。",
-            "principle": "查询条件以惰性方式累积。",
-            "pitfalls": "不要误以为每次链式调用都会立即查询数据库。",
-            "applications": "用于逐步构建数据库查询。",
-        }
-
-        response = self.client.post(
-            f"/api/topics/{self.topic.id}/concepts/",
-            {
-                "title": "QuerySet",
-                "material": self.material.id,
-                "start_offset": start_offset,
-                "end_offset": end_offset,
-            },
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 202)
-        self.assertTrue(response.data["created"])
-        concept = Concept.objects.get(pk=response.data["concept"]["id"])
-        self.assertEqual(concept.status, "draft")
-        anchor = ConceptAnchor.objects.get(concept=concept)
-        self.assertEqual(anchor.source_text, "QuerySet")
-        self.assertEqual(anchor.start_offset, start_offset)
-        self.assertIsNotNone(anchor.chunk)
-        task = AITask.objects.get(pk=response.data["task"]["id"])
-        self.assertEqual(task.task_type, "concept_draft")
-        self.assertEqual(task.concept_id, concept.id)
-        task.status = "running"
-        task.attempt_count = 1
-        task.save()
-
-        execute_task(task.id)
-
-        concept.refresh_from_db()
-        self.assertEqual(
-            concept.definition, generate_concept_draft.return_value["definition"]
-        )
-        self.assertEqual(concept.source_task_id, task.id)
-        confirm_response = self.client.patch(
-            f"/api/concepts/{concept.id}/",
-            {"status": "confirmed", "definition": "用户确认后的定义。"},
-            format="json",
-        )
-        self.assertEqual(confirm_response.status_code, 200)
-        concept.refresh_from_db()
-        self.assertEqual(concept.status, "confirmed")
-        self.assertEqual(concept.definition, "用户确认后的定义。")
-
-        repeated_response = self.client.post(
-            f"/api/topics/{self.topic.id}/concepts/",
-            {
-                "title": "QuerySet",
-                "material": self.material.id,
-                "start_offset": start_offset,
-                "end_offset": end_offset,
-            },
-            format="json",
-        )
-        self.assertEqual(repeated_response.status_code, 202)
-        self.assertFalse(repeated_response.data["created"])
-        self.assertEqual(Concept.objects.filter(topic=self.topic).count(), 1)
-        self.assertEqual(ConceptAnchor.objects.filter(concept=concept).count(), 1)
-
-    def test_highlight_uses_server_derived_anchor_text(self):
-        start_offset = self.material.clean_text.index("Django")
-        end_offset = start_offset + len("Django ORM")
+    def test_highlight_and_topic_material_soft_removal(self):
         response = self.client.post(
             f"/api/topics/{self.topic.id}/highlights/",
             {
                 "material": self.material.id,
-                "start_offset": start_offset,
-                "end_offset": end_offset,
-                "user_note": "复习时补充这里的查询链路。",
+                "start_offset": 0,
+                "end_offset": 10,
+                "user_note": "重点",
             },
             format="json",
         )
         self.assertEqual(response.status_code, 201)
-        highlight = Highlight.objects.get(pk=response.data["highlight"])
-        self.assertEqual(highlight.source_text, "Django ORM")
-        self.assertEqual(highlight.user_note, "复习时补充这里的查询链路。")
-        self.assertEqual(highlight.topic_id, self.topic.id)
-
-        invalid_response = self.client.post(
-            f"/api/topics/{self.topic.id}/highlights/",
-            {
-                "material": self.material.id,
-                "start_offset": -1,
-                "end_offset": 2,
-            },
-            format="json",
+        highlight = Highlight.objects.get(pk=response.data["id"])
+        self.assertTrue(
+            MaterialTextLocator.objects.filter(
+                entity_type="highlight", entity_id=highlight.id
+            ).exists()
         )
-        self.assertEqual(invalid_response.status_code, 400)
+        relation = TopicMaterial.objects.get(topic=self.topic, material=self.material)
+        delete_response = self.client.delete(f"/api/topic-materials/{relation.id}/")
+        self.assertEqual(delete_response.status_code, 204)
+        relation.refresh_from_db()
+        self.assertIsNotNone(relation.removed_at)
 
-    def test_highlight_user_note_can_be_updated(self):
-        highlight = Highlight.objects.create(
-            topic=self.topic,
-            material=self.material,
-            source_text="Django ORM",
-            start_offset=0,
-            end_offset=10,
-        )
-        response = self.client.patch(
-            f"/api/highlights/{highlight.id}/user-note/",
-            {"user_note": "适合和原生 SQL 的边界一起复习。"},
-            format="json",
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["user_note"], "适合和原生 SQL 的边界一起复习。")
-        highlight.refresh_from_db()
-        self.assertEqual(highlight.user_note, "适合和原生 SQL 的边界一起复习。")
-
-    def test_highlight_can_be_deleted(self):
-        highlight = Highlight.objects.create(
-            topic=self.topic,
-            material=self.material,
-            source_text="Django ORM",
-            start_offset=0,
-            end_offset=10,
-        )
-        response = self.client.delete(f"/api/highlights/{highlight.id}/")
-        self.assertEqual(response.status_code, 204)
-        self.assertFalse(Highlight.objects.filter(pk=highlight.id).exists())
-
-    def test_exam_request_returns_reused_pending_task(self):
-        first = self.client.post("/api/exams/", {"topic": self.topic.id}, format="json")
-        second = self.client.post(
-            "/api/exams/", {"topic": self.topic.id}, format="json"
-        )
-
-        self.assertEqual(first.status_code, 202)
-        self.assertEqual(second.status_code, 202)
-        self.assertEqual(first.data["task"]["id"], second.data["task"]["id"])
-
-    def test_exam_draft_answers_can_be_saved_before_submission(self):
-        exam = Exam.objects.create(topic=self.topic)
-        question = ExamQuestion.objects.create(
-            exam=exam,
-            question_type="transfer",
-            question_text="如何在新场景中应用 QuerySet？",
-        )
+    @patch("api.views.default_storage.save", return_value="materials/video.mp4")
+    def test_video_upload_uses_global_material_and_task_trigger(self, save):
         response = self.client.post(
-            f"/api/exams/{exam.id}/save/",
-            {
-                "answers": [
-                    {
-                        "id": question.id,
-                        "answer_text": "先组合条件，再在需要结果时执行查询。",
-                    }
-                ]
-            },
-            format="json",
-        )
-        self.assertEqual(response.status_code, 200)
-        question.refresh_from_db()
-        self.assertEqual(question.answer_text, "先组合条件，再在需要结果时执行查询。")
-
-    @patch("api.task_service.AIGateway.generate_exam")
-    def test_exam_worker_creates_questions(self, generate_exam):
-        generate_exam.return_value = [
-            {
-                "scenario": "后台报表筛选。",
-                "question_text": "如何组合 QuerySet？",
-                "rubric": {"key_points": ["链式调用"]},
-            },
-        ]
-        response = self.client.post(
-            "/api/exams/", {"topic": self.topic.id}, format="json"
-        )
-        task = AITask.objects.get(pk=response.data["task"]["id"])
-        task.status = "running"
-        task.attempt_count = 1
-        task.save()
-
-        execute_task(task.id)
-
-        task.refresh_from_db()
-        self.assertEqual(task.status, "succeeded")
-        exam = Exam.objects.get(pk=task.result_json["exam_id"])
-        self.assertEqual(exam.questions.count(), 1)
-
-    @patch("api.task_service.AIGateway.ask_question")
-    def test_question_worker_saves_answer(self, ask_question):
-        ask_question.return_value = "QuerySet 支持链式调用。"
-        response = self.client.post(
-            "/api/questions/",
+            "/api/materials/upload-video/",
             {
                 "topic": self.topic.id,
-                "material": self.material.id,
-                "question_text": "QuerySet 为什么可组合？",
+                "title": "Django 课程",
+                "video": SimpleUploadedFile("course.mp4", b"video", "video/mp4"),
             },
-            format="json",
+            format="multipart",
         )
+        self.assertEqual(response.status_code, 202)
+        material = Material.objects.get(pk=response.data["material"]["id"])
         task = AITask.objects.get(pk=response.data["task"]["id"])
-        task.status = "running"
-        task.attempt_count = 1
-        task.save()
+        self.assertEqual(material.media_type, "video")
+        self.assertEqual(task.trigger_type, "Material")
+        self.assertEqual(task.trigger_id, material.id)
+        save.assert_called_once()
 
-        execute_task(task.id)
-
-        self.assertEqual(
-            AIResponse.objects.filter(task_type="answer_question").count(), 1
-        )
-        ask_question.assert_called_once_with(
-            self.material.clean_text,
-            "QuerySet 为什么可组合？",
-            "",
-            task.model,
-        )
-
-    @patch("api.task_service.AIGateway.grade_exam")
-    @patch("api.task_service.AIGateway.generate_exam")
-    def test_grading_worker_updates_mastery_and_review(self, generate_exam, grade_exam):
-        generate_exam.return_value = [
-            {
-                "scenario": "新场景",
-                "question_text": "如何应用这个概念？",
-                "rubric": {"key_points": ["关键点"]},
-            }
-        ]
-        create_response = self.client.post(
-            "/api/exams/", {"topic": self.topic.id}, format="json"
-        )
-        generation_task = AITask.objects.get(pk=create_response.data["task"]["id"])
-        generation_task.status = "running"
-        generation_task.attempt_count = 1
-        generation_task.save()
-        execute_task(generation_task.id)
-        generation_task.refresh_from_db()
-        exam = Exam.objects.get(pk=generation_task.result_json["exam_id"])
-
-        grade_exam.return_value = {
-            "questions": [
-                {
-                    "id": exam.questions.first().id,
-                    "score": 90,
-                    "feedback": "回答完整。",
-                }
-            ],
-            "overall_feedback": "可以进入下一轮复习。",
-        }
+    @patch(
+        "api.views.default_storage.save",
+        side_effect=["materials/video.mp4", "materials/subtitle.srt"],
+    )
+    def test_video_upload_accepts_optional_subtitle(self, save):
         response = self.client.post(
-            f"/api/exams/{exam.id}/submit/",
+            "/api/materials/upload-video/",
             {
-                "answers": [
-                    {"id": exam.questions.first().id, "answer_text": "我的迁移分析。"}
+                "topic": self.topic.id,
+                "video": SimpleUploadedFile("course.mp4", b"video", "video/mp4"),
+                "subtitle": SimpleUploadedFile(
+                    "course.srt", b"1\n00:00:00,000 --> 00:00:01,000\nhello\n"
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        material = Material.objects.get(pk=response.data["material"]["id"])
+        self.assertEqual(material.media_meta["subtitle_uri"], "materials/subtitle.srt")
+        self.assertEqual(save.call_count, 2)
+
+    def test_media_url_uses_api_host_for_video(self):
+        video = Material.objects.create(
+            title="视频",
+            media_type="video",
+            media_uri="materials/video.mp4",
+            status="ready",
+        )
+        TopicMaterial.objects.create(topic=self.topic, material=video)
+
+        response = self.client.get(f"/api/topics/{self.topic.id}/")
+        serialized = next(
+            item["material"]
+            for item in response.data["topic_materials"]
+            if item["material_id"] == video.id
+        )
+        self.assertEqual(
+            serialized["media_url"], "http://testserver/media/materials/video.mp4"
+        )
+
+    def test_media_range_request_returns_partial_content(self):
+        with TemporaryDirectory() as media_root:
+            media_path = Path(media_root) / "materials" / "video.mp4"
+            media_path.parent.mkdir()
+            media_path.write_bytes(b"0123456789")
+
+            with self.settings(MEDIA_ROOT=media_root):
+                response = self.client.get(
+                    "/media/materials/video.mp4",
+                    HTTP_RANGE="bytes=2-5",
+                )
+                content = b"".join(response.streaming_content)
+
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response["Accept-Ranges"], "bytes")
+        self.assertEqual(response["Content-Range"], "bytes 2-5/10")
+        self.assertEqual(response["Content-Length"], "4")
+        self.assertEqual(content, b"2345")
+
+    def test_video_chunks_align_merged_paragraphs_to_asr_timestamps(self):
+        video = Material.objects.create(
+            title="视频",
+            media_type="video",
+            clean_text="Alpha beta\n\nGamma",
+            media_meta={
+                "segments": [
+                    {"start": 0.0, "end": 1.0, "text": "alpha"},
+                    {"start": 1.0, "end": 2.0, "text": "beta"},
+                    {"start": 2.0, "end": 3.0, "text": "gamma"},
                 ]
             },
+        )
+
+        _create_material_chunks(video)
+
+        chunks = list(video.chunks.order_by("chunk_index"))
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual((chunks[0].start_time, chunks[0].end_time), (0.0, 2.0))
+        self.assertEqual((chunks[1].start_time, chunks[1].end_time), (2.0, 3.0))
+
+    def test_topic_supplement_creates_explicit_topic_task(self):
+        response = self.client.post(
+            f"/api/topics/{self.topic.id}/supplement/",
+            {},
             format="json",
         )
-        grading_task = AITask.objects.get(pk=response.data["task"]["id"])
-        grading_task.status = "running"
-        grading_task.attempt_count = 1
-        grading_task.save()
-        execute_task(grading_task.id)
+        self.assertEqual(response.status_code, 202)
+        task = AITask.objects.get(pk=response.data["task"]["id"])
+        self.assertEqual(task.task_type, "supplement_search")
+        self.assertEqual(task.trigger_type, "Topic")
+        self.assertEqual(task.trigger_id, self.topic.id)
+        self.assertEqual(task.task_data["topic_id"], self.topic.id)
 
-        exam.refresh_from_db()
-        self.topic.refresh_from_db()
-        self.assertEqual(exam.status, "graded")
-        self.assertEqual(exam.score, 90)
-        self.assertEqual(self.topic.mastery_level, "strong")
-        self.assertTrue(
-            ReviewRecord.objects.filter(topic=self.topic, exam=exam).exists()
+    @patch("api.tasks.BaseTask._call_llm")
+    @patch("api.supplement_service.crawl")
+    @patch("api.supplement_service.search")
+    def test_supplement_imports_qualified_candidate(
+        self, search, crawl, call_llm
+    ):
+        # Mocking the two LLM calls: generate_queries and evaluate_supplement
+        call_llm.side_effect = [
+            json.dumps({"queries": ["Django ORM QuerySet"]}),  # generate_queries
+            json.dumps({                                       # evaluate_supplement
+                "relevance_score": 0.92,
+                "category": "exam_material",
+                "import_reason": "直接解释 QuerySet 的查询与惰性求值。",
+            })
+        ]
+        search.return_value = [
+            {
+                "title": "QuerySet 指南",
+                "url": "https://example.com/queryset",
+                "snippet": "",
+                "engine": "test",
+            }
+        ]
+        crawl.return_value = "Django ORM QuerySet " * 50
+        
+        task, _ = enqueue_or_reuse(
+            "supplement_search",
+            trigger_type="Topic",
+            trigger_id=self.topic.id,
+            task_data={"topic_id": self.topic.id, "relevance_threshold": 0.8},
         )
 
-    def test_review_list_and_completion(self):
-        due_review = ReviewRecord.objects.create(
-            topic=self.topic,
-            due_at=timezone.now() - timedelta(hours=1),
+        task_cls = TaskRegistry.get_task_class(task.task_type)
+        task_obj = task_cls(
+            task_id=task.id,
+            task_data=task.task_data,
+            trigger_type=task.trigger_type,
+            trigger_id=task.trigger_id,
+            model=task.model
         )
-        future_review = ReviewRecord.objects.create(
-            topic=self.topic,
-            due_at=timezone.now() + timedelta(days=3),
+        result = task_obj.run()
+
+        self.assertEqual(result["imported_count"], 1)
+        relation = TopicMaterial.objects.get(
+            topic=self.topic, material_id=result["imported_material_ids"][0]
         )
-        ReviewRecord.objects.create(
-            topic=self.topic,
-            due_at=timezone.now() - timedelta(days=1),
-            result="completed",
-            completed_at=timezone.now() - timedelta(hours=2),
+        self.assertEqual(relation.import_by, "ai_recommended")
+        self.assertEqual(relation.category, "exam_material")
+        self.assertEqual(relation.relevance_score, 0.92)
+        self.assertTrue(relation.material.chunks.exists())
+
+    @patch("api.tasks.BaseTask._call_llm")
+    @patch("api.supplement_service.crawl")
+    @patch("api.supplement_service.search")
+    def test_supplement_filters_low_relevance_candidate(
+        self, search, crawl, call_llm
+    ):
+        # Mocking the two LLM calls
+        call_llm.side_effect = [
+            json.dumps({"queries": ["Django ORM QuerySet"]}),  # generate_queries
+            json.dumps({                                       # evaluate_supplement
+                "relevance_score": 0.2,
+                "category": "recommended_reading",
+                "import_reason": "无关。",
+            })
+        ]
+        search.return_value = [
+            {
+                "title": "无关内容",
+                "url": "https://example.com/unrelated",
+                "snippet": "",
+                "engine": "test",
+            }
+        ]
+        crawl.return_value = "无关内容 " * 100
+        
+        task, _ = enqueue_or_reuse(
+            "supplement_search",
+            trigger_type="Topic",
+            trigger_id=self.topic.id,
+            task_data={"topic_id": self.topic.id, "relevance_threshold": 0.8},
         )
 
-        response = self.client.get("/api/reviews/?result=pending")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            [item["id"] for item in response.data], [due_review.id, future_review.id]
+        task_cls = TaskRegistry.get_task_class(task.task_type)
+        task_obj = task_cls(
+            task_id=task.id,
+            task_data=task.task_data,
+            trigger_type=task.trigger_type,
+            trigger_id=task.trigger_id,
+            model=task.model
         )
-        self.assertEqual(response.data[0]["topic_title"], self.topic.title)
+        result = task_obj.run()
 
-        complete_response = self.client.post(
-            f"/api/reviews/{due_review.id}/complete/", format="json"
+        self.assertEqual(result["imported_count"], 0)
+        self.assertEqual(result["candidates"][0]["reason"], "相关度低于阈值")
+
+    def test_task_reuse_is_scoped_to_trigger(self):
+        first, created = enqueue_or_reuse(
+            "briefing", trigger_type="Material", trigger_id=self.material.id
         )
-
-        self.assertEqual(complete_response.status_code, 200)
-        due_review.refresh_from_db()
-        self.assertEqual(due_review.result, "completed")
-        self.assertIsNotNone(due_review.completed_at)
-
-        repeated_response = self.client.post(
-            f"/api/reviews/{due_review.id}/complete/", format="json"
+        second, reused = enqueue_or_reuse(
+            "briefing", trigger_type="Material", trigger_id=self.material.id
         )
-        self.assertEqual(repeated_response.status_code, 400)
+        self.assertTrue(created)
+        self.assertFalse(reused)
+        self.assertEqual(first.id, second.id)
 
-    @patch("api.task_service.AIGateway.generate_review_prompt")
-    def test_review_prompt_worker_persists_prompt(self, generate_review_prompt):
-        generate_review_prompt.return_value = (
-            "## 主动回忆\n\n1. QuerySet 为什么可以组合？"
+    def test_exam_generation_uses_topic_trigger(self):
+        response = self.client.post(
+            "/api/exams/", {"topic": self.topic.id}, format="json"
         )
+        self.assertEqual(response.status_code, 202)
+        task = AITask.objects.get(pk=response.data["task"]["id"])
+        self.assertEqual(task.task_type, "generate_exam")
+        self.assertEqual(task.trigger_type, "Topic")
+        self.assertEqual(task.trigger_id, self.topic.id)
+
+    def test_review_prompt_uses_review_record_trigger(self):
         review = ReviewRecord.objects.create(
-            topic=self.topic,
-            due_at=timezone.now(),
+            topic=self.topic, due_at="2026-08-05T00:00:00Z"
         )
-
         response = self.client.post(f"/api/reviews/{review.id}/prompt/", format="json")
-
         self.assertEqual(response.status_code, 202)
         task = AITask.objects.get(pk=response.data["task"]["id"])
         self.assertEqual(task.task_type, "review_prompt")
-        self.assertEqual(task.review_id, review.id)
-        task.status = "running"
-        task.attempt_count = 1
-        task.save()
-
-        execute_task(task.id)
-
-        task.refresh_from_db()
-        review.refresh_from_db()
-        self.assertEqual(task.status, "succeeded")
-        self.assertEqual(review.review_prompt, generate_review_prompt.return_value)
-        self.assertIsNotNone(review.review_prompt_generated_at)
-
-    @patch("api.task_service.AIGateway.grade_review")
-    def test_review_submission_creates_follow_up_schedule(self, grade_review):
-        grade_review.return_value = {
-            "score": 72,
-            "feedback": "能说明核心概念，但应继续练习在新场景中的应用。",
-        }
-        review = ReviewRecord.objects.create(
-            topic=self.topic,
-            due_at=timezone.now(),
-        )
-        response = self.client.post(
-            f"/api/reviews/{review.id}/submit/",
-            {"response_text": "QuerySet 可以组合查询条件，并延迟到需要结果时执行。"},
-            format="json",
-        )
-        self.assertEqual(response.status_code, 202)
-        task = AITask.objects.get(pk=response.data["task"]["id"])
-        self.assertEqual(task.task_type, "grade_review")
-        task.status = "running"
-        task.attempt_count = 1
-        task.save()
-        execute_task(task.id)
-
-        review.refresh_from_db()
-        self.assertEqual(review.result, "completed")
-        self.assertEqual(review.score, 72)
-        self.assertEqual(review.feedback, grade_review.return_value["feedback"])
-        self.assertIsNotNone(review.next_due_at)
-        follow_up = ReviewRecord.objects.get(previous_review=review)
-        self.assertEqual(follow_up.topic_id, self.topic.id)
-        self.assertEqual(follow_up.due_at.date(), review.next_due_at.date())
-
-    @patch(
-        "api.task_service.AIGateway.generate_briefing",
-        side_effect=RuntimeError("模型不可用"),
-    )
-    def test_failed_task_retries_then_fails(self, _):
-        task = AITask.objects.create(
-            task_type="briefing",
-            topic=self.topic,
-            material=self.material,
-            status="running",
-            attempt_count=1,
-            next_run_at=timezone.now(),
-        )
-        execute_task(task.id)
-        task.refresh_from_db()
-        self.assertEqual(task.status, "pending")
-        self.assertIn("自动重试", task.error_message)
-
-        for attempt in (2, 3):
-            task.status = "running"
-            task.attempt_count = attempt
-            task.save()
-            execute_task(task.id)
-        task.refresh_from_db()
-        self.assertEqual(task.status, "failed")
-
-    def test_retry_and_recovery(self):
-        failed = AITask.objects.create(
-            task_type="briefing",
-            topic=self.topic,
-            material=self.material,
-            status="failed",
-            attempt_count=3,
-            next_run_at=timezone.now(),
-        )
-        response = self.client.post(f"/api/ai-tasks/{failed.id}/retry/", format="json")
-        self.assertEqual(response.status_code, 202)
-        failed.refresh_from_db()
-        self.assertEqual(failed.status, "pending")
-        self.assertEqual(failed.attempt_count, 0)
-
-        interrupted = AITask.objects.create(
-            task_type="briefing",
-            topic=self.topic,
-            material=self.material,
-            status="running",
-            attempt_count=1,
-            next_run_at=timezone.now(),
-        )
-        recover_interrupted_tasks()
-        interrupted.refresh_from_db()
-        self.assertEqual(interrupted.status, "pending")
+        self.assertEqual(task.trigger_type, "ReviewRecord")
+        self.assertEqual(task.trigger_id, review.id)

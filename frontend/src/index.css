@@ -6,3 +6,34 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+.reader-drawer-item {
+  transition: all 0.3s ease;
+  border: 1px solid transparent;
+}
+
+.reader-drawer-item:hover {
+  background: #f0f7ff !important;
+}
+
+.reader-drawer-item--active {
+  background: #e6f4ff !important;
+  border-color: #91caff !important;
+  box-shadow: 0 0 8px rgba(22, 119, 255, 0.2);
+}
+
+.universal-reader--dark .reader-drawer-item:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: #434343 !important;
+}
+
+.universal-reader--dark .reader-drawer-item--active {
+  background: rgba(22, 119, 255, 0.2) !important;
+  border-color: #1677ff !important;
+  box-shadow: 0 0 12px rgba(22, 119, 255, 0.3);
+  color: #fff !important;
+}
+
+.universal-reader--dark .reader-drawer-item--active .ant-typography {
+  color: inherit !important;
+}
