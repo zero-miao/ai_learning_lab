@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@vidstack/react": "^1.15.5",
     "antd": "^6.5.3",
     "axios": "^1.19.0",
     "react": "^19.2.8",

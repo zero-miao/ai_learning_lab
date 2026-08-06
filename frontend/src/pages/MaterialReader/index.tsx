@@ -1,34 +1,27 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
   Button,
   Collapse,
-  Divider,
-  Dropdown,
+  ConfigProvider,
   Drawer,
-  FloatButton,
   Form,
   Input,
-  Layout,
   List,
-  message,
   Modal,
-  Popconfirm,
   Space,
   Tabs,
-  Tooltip,
   Typography,
+  message,
+  theme,
 } from 'antd';
 import {
-  AppstoreOutlined,
   ArrowLeftOutlined,
   CheckOutlined,
   DeleteOutlined,
   EditOutlined,
-  EyeOutlined,
-  MoreOutlined,
-  ReloadOutlined,
+  FileSearchOutlined,
   SendOutlined,
 } from '@ant-design/icons';
 import {
@@ -38,52 +31,24 @@ import {
   deleteConcept,
   deleteHighlight,
   deleteQuestion,
-  getQuestion,
+  getAITask,
+  getSession,
   getTopic,
-  listAITasks,
-  retryAITask,
-  saveQuestion,
+  triggerSupplement,
   updateConcept,
-  updateHighlightUserNote,
+  updateHighlight,
+  createSessionMessage,
 } from '../../api';
-import type { AITask, Concept, Highlight, Material, Topic } from '../../api';
+import type { AITask, Concept, Highlight, Material, Question, Topic, Session } from '../../api';
 import UniversalReader from '../../components/UniversalReader';
 import type { TextSelectionAnchor } from '../../components/UniversalReader';
-import { useAITaskPolling } from '../../hooks/useAITaskPolling';
 
 const { Text } = Typography;
-const { Content } = Layout;
-
-type ChatItem = {
-  role: 'user' | 'ai';
-  content: string;
-  selection?: string;
-  type?: string;
-  task?: AITask;
-  questionId?: number;
-  isSaved?: boolean;
-};
-
-interface ConceptFormValues {
-  title: string;
-}
-
-interface ConceptEditorValues {
-  title: string;
-  definition?: string;
-  principle?: string;
-  pitfalls?: string;
-  applications?: string;
-}
-
-interface HighlightFormValues {
-  user_note?: string;
-}
 
 function renderMarkdownInline(text: string): React.ReactNode[] {
   return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, index) => {
     if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={index}>{part.slice(2, -2)}</strong>;
+      return <Typography.Text strong key={index}>{part.slice(2, -2)}</Typography.Text>;
     }
     if (part.startsWith('`') && part.endsWith('`')) {
       return <Typography.Text code key={index}>{part.slice(1, -1)}</Typography.Text>;
@@ -92,1161 +57,691 @@ function renderMarkdownInline(text: string): React.ReactNode[] {
   });
 }
 
-const MarkdownBriefing: React.FC<{ content: string }> = ({ content }) => {
-  const lines = content.split('\n');
-  const blocks: React.ReactNode[] = [];
-  let index = 0;
-  while (index < lines.length) {
-    const line = lines[index];
-    const isTable =
-      line.includes('|') &&
-      /^\s*\|?[\s:-]+\|[\s|:-]*$/.test(lines[index + 1] ?? '');
-    if (isTable) {
-      const rows = [line];
-      index += 2;
-      while (lines[index]?.includes('|')) {
-        rows.push(lines[index]);
-        index += 1;
-      }
-      const cells = (row: string) =>
-        row
-          .trim()
-          .replace(/^\||\|$/g, '')
-          .split('|')
-          .map((cell) => cell.trim());
-      blocks.push(
-        <div key={`table-${index}`} style={{ overflowX: 'auto', marginBottom: 16 }}>
-          <table className="reader-briefing__table">
-            <thead>
-              <tr>
-                {cells(rows[0]).map((cell, cellIndex) => (
-                  <th key={cellIndex}>{renderMarkdownInline(cell)}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.slice(1).map((row, rowIndex) => (
-                <tr key={rowIndex}>
-                  {cells(row).map((cell, cellIndex) => (
-                    <td key={cellIndex}>{renderMarkdownInline(cell)}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>,
-      );
-      continue;
-    }
-    if (!line.trim()) {
-      index += 1;
-      continue;
-    }
-    if (line.startsWith('### ')) {
-      blocks.push(<Typography.Title key={index} level={5}>{renderMarkdownInline(line.slice(4))}</Typography.Title>);
-    } else if (line.startsWith('## ')) {
-      blocks.push(<Typography.Title key={index} level={4}>{renderMarkdownInline(line.slice(3))}</Typography.Title>);
-    } else if (line.startsWith('# ')) {
-      blocks.push(<Typography.Title key={index} level={3}>{renderMarkdownInline(line.slice(2))}</Typography.Title>);
-    } else if (/^[-*] /.test(line)) {
-      blocks.push(<li key={index}>{renderMarkdownInline(line.slice(2))}</li>);
-    } else {
-      blocks.push(<Typography.Paragraph key={index}>{renderMarkdownInline(line)}</Typography.Paragraph>);
-    }
-    index += 1;
-  }
-  return (
-    <div className="reader-briefing__markdown">{blocks}</div>
-  );
-};
+const MarkdownDigest: React.FC<{ content: string }> = ({ content }) => (
+  <div>
+    {content.split('\n').map((line, index) => {
+      if (line.startsWith('### ')) return <Typography.Title key={index} level={5}>{renderMarkdownInline(line.slice(4))}</Typography.Title>;
+      if (line.startsWith('## ')) return <Typography.Title key={index} level={4}>{renderMarkdownInline(line.slice(3))}</Typography.Title>;
+      if (line.startsWith('# ')) return <Typography.Title key={index} level={3}>{renderMarkdownInline(line.slice(2))}</Typography.Title>;
+      if (/^[-*] /.test(line)) return <li key={index} style={{ color: 'inherit' }}><Typography.Text>{renderMarkdownInline(line.slice(2))}</Typography.Text></li>;
+      return line ? <Typography.Paragraph key={index}>{renderMarkdownInline(line)}</Typography.Paragraph> : null;
+    })}
+  </div>
+);
 
 const MaterialReader: React.FC = () => {
-  const { topicId, materialId } = useParams<{
-    topicId: string;
-    materialId: string;
-  }>();
+  const { topicId, materialId } = useParams<{ topicId: string; materialId: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [topic, setTopic] = useState<Topic | null>(null);
   const [material, setMaterial] = useState<Material | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [selectedText, setSelectedText] = useState('');
-  const [selectedAnchor, setSelectedAnchor] =
-    useState<TextSelectionAnchor | null>(null);
-  const [assistantVisible, setAssistantVisible] = useState(false);
-  const [assistantTab, setAssistantTab] = useState('questions');
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [tab, setTab] = useState('questions');
+  const [selection, setSelection] = useState<TextSelectionAnchor | null>(null);
   const [question, setQuestion] = useState('');
-  const [chatHistory, setChatHistory] = useState<ChatItem[]>([]);
-  const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
-  const [activeTaskType, setActiveTaskType] = useState<string | null>(null);
+  const [task, setTask] = useState<AITask | null>(null);
+  const [conceptModal, setConceptModal] = useState(false);
+  const [highlightModal, setHighlightModal] = useState(false);
   const [darkMode, setDarkMode] = useState(
     () => window.matchMedia('(prefers-color-scheme: dark)').matches,
   );
-  const [conceptModalOpen, setConceptModalOpen] = useState(false);
-  const [conceptSelection, setConceptSelection] =
-    useState<TextSelectionAnchor | null>(null);
-  const [conceptSaving, setConceptSaving] = useState(false);
-  const [conceptForm] = Form.useForm<ConceptFormValues>();
-  const [conceptEditorOpen, setConceptEditorOpen] = useState(false);
   const [editingConcept, setEditingConcept] = useState<Concept | null>(null);
-  const [conceptEditorForm] = Form.useForm<ConceptEditorValues>();
-  const [highlightModalOpen, setHighlightModalOpen] = useState(false);
-  const [highlightSelection, setHighlightSelection] =
-    useState<TextSelectionAnchor | null>(null);
-  const [editingHighlight, setEditingHighlight] = useState<Highlight | null>(
-    null,
-  );
-  const [highlightSaving, setHighlightSaving] = useState(false);
-  const [highlightForm] = Form.useForm<HighlightFormValues>();
-  const [selectedConceptId, setSelectedConceptId] = useState<number | null>(null);
-  const [selectedQuestionId, setSelectedQuestionId] = useState<number | null>(null);
-  const [selectedHighlightId, setSelectedHighlightId] = useState<number | null>(null);
-  const [pendingConceptIds, setPendingConceptIds] = useState<Set<number>>(
-    new Set(),
-  );
-  const navigate = useNavigate();
-  const location = useLocation();
-  const handledNavigationRef = useRef<string | null>(null);
+  const [editingHighlight, setEditingHighlight] = useState<Highlight | null>(null);
+  const [activeSession, setActiveSession] = useState<Session | null>(null);
+  const [chatLoading, setChatLoading] = useState(false);
 
-  const loadData = useCallback(async () => {
+  const [conceptForm] = Form.useForm<Partial<Concept>>();
+  const [highlightForm] = Form.useForm<{ user_note: string }>();
+
+  const load = useCallback(async () => {
     if (!topicId || !materialId) return;
-    const [response, tasksResponse] = await Promise.all([
-      getTopic(Number(topicId)),
-      listAITasks({ topic: Number(topicId) }),
-    ]);
+    const response = await getTopic(Number(topicId));
     setTopic(response.data);
-    setPendingConceptIds(
-      new Set(
-        tasksResponse.data
-          .filter(
-            (task) =>
-              task.task_type === 'concept_draft' &&
-              (task.status === 'pending' || task.status === 'running') &&
-              task.concept !== null,
-          )
-          .map((task) => task.concept!),
-      ),
+    const relation = response.data.topic_materials.find(
+      (item) => item.material_id === Number(materialId),
     );
-    const nextMaterial =
-      response.data.materials.find((item) => item.id === Number(materialId)) ??
-      null;
-    setMaterial(nextMaterial);
+    setMaterial(relation?.material ?? null);
   }, [materialId, topicId]);
 
-  const handleTaskSuccess = useCallback(
-    async (task: AITask) => {
-      if (task.task_type === 'briefing') {
-        await loadData();
-      } else if (
-        task.task_type === 'answer_question' &&
-        typeof task.result_json.question_id === 'number'
-      ) {
-        const response = await getQuestion(task.result_json.question_id);
-        const answer = response.data.ai_responses[0];
-        if (answer) {
-          setChatHistory((current) =>
-            current.map((item) =>
-              item.task?.id === task.id
-                ? {
-                    role: 'ai',
-                    content: answer.content,
-                    questionId: response.data.id,
-                    isSaved: response.data.is_saved,
-                  }
-                : item,
-            ),
-          );
-        }
-      }
-      setActiveTaskId(null);
-      setActiveTaskType(null);
-    },
-    [loadData],
-  );
-
-  const handleTaskFailure = useCallback((task: AITask) => {
-    setChatHistory((current) =>
-      current.map((item) =>
-        item.task?.id === task.id
-          ? {
-              ...item,
-              content: task.error_message || 'AI 任务失败。',
-              task,
-            }
-          : item,
-      ),
-    );
-  }, []);
-
-  const activeTask = useAITaskPolling(activeTaskId, {
-    onSucceeded: (task) => {
-      void handleTaskSuccess(task);
-    },
-    onFailed: handleTaskFailure,
-  });
-
   useEffect(() => {
-    setLoading(true);
-    void loadData()
-      .catch((error) => {
-        console.error('Failed to fetch reader data:', error);
-        message.error('加载阅读材料失败');
-      })
-      .finally(() => setLoading(false));
-  }, [loadData]);
+    void load().catch(() => message.error('加载材料失败'));
+  }, [load]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = (event: MediaQueryListEvent) =>
-      setDarkMode(event.matches);
+    const handleChange = (event: MediaQueryListEvent) => setDarkMode(event.matches);
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, []);
 
   useEffect(() => {
-    if (!assistantVisible) return;
-    const handleOutsideClick = (event: MouseEvent) => {
-      const target = event.target as Element;
-      if (
-        !target.closest('.ant-drawer') &&
-        !target.closest('.ant-float-btn') &&
-        !target.closest('.universal-reader__selection-menu') &&
-        !target.closest('.ant-modal-root') &&
-        !target.closest('.ant-dropdown') &&
-        !target.closest('.ant-popover')
-      ) {
-        setAssistantVisible(false);
+    if (!task || !['pending', 'running'].includes(task.status)) return;
+    const timer = window.setInterval(async () => {
+      const response = await getAITask(task.id);
+      setTask(response.data);
+      if (['succeeded', 'failed'].includes(response.data.status)) {
+        if (response.data.status === 'failed') {
+          message.error(response.data.error_message || 'AI 任务失败');
+        }
+        await load();
       }
-    };
-    document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, [assistantVisible]);
-
-  useEffect(() => {
-    if (!pendingConceptIds.size) return;
-    const timer = window.setInterval(() => {
-      void loadData();
-    }, 3000);
+    }, 1500);
     return () => window.clearInterval(timer);
-  }, [loadData, pendingConceptIds]);
+  }, [load, task]);
 
-  useEffect(() => {
-    if (!material) return;
-    const navigationKey = [
-      location.key,
-      topicId,
-      materialId,
-      location.search,
-    ].join(':');
-    if (handledNavigationRef.current === navigationKey) return;
-    handledNavigationRef.current = navigationKey;
-
-    const searchParams = new URLSearchParams(location.search);
-    const annotationTargets = [
-      {
-        type: 'concept' as const,
-        tab: 'concepts',
-        id: Number(searchParams.get('concept')),
-        selector: (id: number) => `[data-concept-ids~="${id}"]`,
-      },
-      {
-        type: 'question' as const,
-        tab: 'question-history',
-        id: Number(searchParams.get('question')),
-        selector: (id: number) => `[data-question-ids~="${id}"]`,
-      },
-      {
-        type: 'highlight' as const,
-        tab: 'highlights',
-        id: Number(searchParams.get('highlight')),
-        selector: (id: number) => `[data-highlight-ids~="${id}"]`,
-      },
-    ];
-    const annotationTarget = annotationTargets.find(({ id }) =>
-      Number.isInteger(id) && id > 0,
-    );
-    if (annotationTarget) {
-      setAssistantVisible(true);
-      setAssistantTab(annotationTarget.tab);
-      setSelectedConceptId(
-        annotationTarget.type === 'concept' ? annotationTarget.id : null,
-      );
-      setSelectedQuestionId(
-        annotationTarget.type === 'question' ? annotationTarget.id : null,
-      );
-      setSelectedHighlightId(
-        annotationTarget.type === 'highlight' ? annotationTarget.id : null,
-      );
-      const element = document.querySelector<HTMLElement>(
-        annotationTarget.selector(annotationTarget.id),
-      );
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        return;
-      }
+  const scoped = useMemo(() => {
+    if (!topic || !material) {
+      return { concepts: [] as Concept[], highlights: [] as Highlight[], questions: [] as Question[] };
     }
-    const anchorValue = searchParams.get('anchor');
-    if (anchorValue === null) return;
-    const anchor = Number(anchorValue);
-    if (!Number.isInteger(anchor) || anchor < 0) return;
-    const chunk = material.chunks.find(
-      (item) => item.start_offset <= anchor && anchor < item.end_offset,
-    );
-    const element = document.getElementById(
-      `reader-chunk-${chunk?.id ?? 0}`,
-    );
-    element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [location.search, material]);
+    const matchesMaterial = (locatorMaterial: number) => locatorMaterial === material.id;
+    return {
+      concepts: topic.concepts
+        .map((concept) => ({
+          ...concept,
+          locators: concept.locators.filter((locator) => matchesMaterial(locator.material)),
+        }))
+        .filter((concept) => concept.locators.length),
+      highlights: topic.highlights
+        .map((highlight) => ({
+          ...highlight,
+          locators: highlight.locators.filter((locator) => matchesMaterial(locator.material)),
+        }))
+        .filter((highlight) => highlight.locators.length),
+      questions: topic.questions
+        .map((item) => ({
+          ...item,
+          locators: item.locators.filter((locator) => matchesMaterial(locator.material)),
+        }))
+        .filter((item) => item.locators.length),
+    };
+  }, [material, topic]);
 
-  useEffect(() => {
-    if (!material || activeTaskId) return;
-    void listAITasks({ material: material.id }).then((response) => {
-      const task = response.data.find(
-        (item) =>
-          (item.task_type === 'briefing' ||
-            item.task_type === 'answer_question') &&
-          (item.status === 'pending' || item.status === 'running'),
-      );
-      if (task) {
-        setActiveTaskId(task.id);
-        setActiveTaskType(task.task_type);
-      }
-    });
-  }, [activeTaskId, material]);
-
-  const handleAskSelection = (selection: TextSelectionAnchor) => {
-    setSelectedText(selection.text);
-    setSelectedAnchor(selection);
-    setAssistantTab('questions');
-    setAssistantVisible(true);
+  const jumpToSource = (locatorId: number) => {
+    navigate(`?locator=${locatorId}&t=${Date.now()}`, { replace: true });
   };
 
-  const handleAsk = async () => {
-    if (!question.trim() || !topic || !material) return;
-    const currentQuestion = question;
-    const currentSelection = selectedText;
-    const currentAnchor = selectedAnchor;
-    setQuestion('');
-    setSelectedText('');
-    setSelectedAnchor(null);
-    setChatHistory((current) => [
-      ...current,
-      { role: 'user', content: currentQuestion, selection: currentSelection },
-    ]);
+  const loadSession = useCallback(async (sessionId: number) => {
+    if (!sessionId) {
+      console.error('Invalid session ID');
+      return;
+    }
+    try {
+      setChatLoading(true);
+      const response = await getSession(sessionId);
+      setActiveSession(response.data);
+    } catch (error) {
+      console.error('Failed to load session:', error);
+      message.error('加载对话失败，请重试');
+    } finally {
+      setChatLoading(false);
+    }
+  }, []);
+
+  const handleSendChat = async () => {
+    if (!activeSession || !question.trim()) return;
+    try {
+      setChatLoading(true);
+      const content = question.trim();
+      setQuestion('');
+      const response = await createSessionMessage(activeSession.id, content);
+      setTask(response.data.task);
+      // Update session with new user message
+      setActiveSession(prev => prev ? {
+        ...prev,
+        messages: [...prev.messages, response.data.message]
+      } : null);
+    } catch (error) {
+      console.error('Send message failed:', error);
+      message.error('发送消息失败');
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  const handleEditConcept = (concept: Concept) => {
+    setEditingConcept(concept);
+    conceptForm.setFieldsValue(concept);
+    setConceptModal(true);
+  };
+
+  const handleEditHighlight = (highlight: Highlight) => {
+    setEditingHighlight(highlight);
+    highlightForm.setFieldsValue({ user_note: highlight.user_note });
+    setHighlightModal(true);
+  };
+
+  const submitConcept = async (values: Partial<Concept>) => {
+    if (!topic || !material) return;
+    try {
+      if (editingConcept) {
+        await updateConcept(editingConcept.id, values);
+        message.success('概念已更新');
+      } else if (selection) {
+        const response = await createConcept(topic.id, {
+          title: values.title || selection.text.slice(0, 80),
+          material: material.id,
+          start_offset: selection.startOffset,
+          end_offset: selection.endOffset,
+        });
+        setTask(response.data.task);
+        message.success('概念草稿已创建');
+      }
+      setConceptModal(false);
+      setEditingConcept(null);
+      setSelection(null);
+      await load();
+    } catch {
+      message.error('保存失败');
+    }
+  };
+
+  const submitHighlight = async (values: { user_note: string }) => {
+    if (!topic || !material) return;
+    try {
+      if (editingHighlight) {
+        await updateHighlight(editingHighlight.id, values);
+        message.success('高亮已更新');
+      } else if (selection) {
+        await createHighlight(topic.id, {
+          material: material.id,
+          start_offset: selection.startOffset,
+          end_offset: selection.endOffset,
+          user_note: values.user_note,
+        });
+        message.success('已添加高亮');
+      }
+      setHighlightModal(false);
+      setEditingHighlight(null);
+      setSelection(null);
+      await load();
+    } catch {
+      message.error('保存失败');
+    }
+  };
+
+  const createQuestionFromSelection = async () => {
+    if (!topic || !material || !selection || !question.trim()) return;
     try {
       const response = await createQuestion({
         topic: topic.id,
         material: material.id,
-        selected_text: currentSelection,
-        start_offset: currentAnchor?.startOffset,
-        end_offset: currentAnchor?.endOffset,
-        question_text: currentQuestion,
+        start_offset: selection.startOffset,
+        end_offset: selection.endOffset,
+        question_text: question.trim(),
       });
-      const task = response.data.task;
-      setChatHistory((current) => [
-        ...current,
-        {
-          role: 'ai',
-          content: 'AI 正在思考...',
-          task,
-          questionId: response.data.question.id,
-          isSaved: response.data.question.is_saved,
-        },
-      ]);
-      setActiveTaskId(task.id);
-      setActiveTaskType(task.task_type);
-    } catch (error) {
-      console.error('Failed to ask question:', error);
-      message.error('提问提交失败');
-    }
-  };
-
-  const handleMarkConcept = (selection: TextSelectionAnchor) => {
-    setConceptSelection(selection);
-    conceptForm.setFieldsValue({
-      title: selection.text.replace(/\s+/g, ' ').trim().slice(0, 80),
-    });
-    setConceptModalOpen(true);
-  };
-
-  const handleConceptSubmit = async (values: ConceptFormValues) => {
-    if (!topic || !material) return;
-    try {
-      setConceptSaving(true);
-      if (!conceptSelection) return;
-      const response = await createConcept(topic.id, {
-        title: values.title,
-        material: material.id,
-        start_offset: conceptSelection.startOffset,
-        end_offset: conceptSelection.endOffset,
-      });
-      setPendingConceptIds((current) => new Set(current).add(response.data.concept.id));
-      message.info(
-        response.data.created ? '已提交概念草稿生成任务' : '已关联到已有概念，正在更新草稿',
-      );
-      closeConceptModal();
-      await loadData();
-    } catch (error) {
-      console.error('Failed to create or update concept:', error);
-      message.error('提交概念草稿失败');
-    } finally {
-      setConceptSaving(false);
-    }
-  };
-
-  const closeConceptModal = () => {
-    setConceptModalOpen(false);
-    setConceptSelection(null);
-    conceptForm.resetFields();
-  };
-
-  const handleHighlight = (selection: TextSelectionAnchor) => {
-    setEditingHighlight(null);
-    setHighlightSelection(selection);
-    highlightForm.resetFields();
-    setHighlightModalOpen(true);
-  };
-
-  const openHighlightEditor = (highlight: Highlight) => {
-    setEditingHighlight(highlight);
-    setHighlightSelection(null);
-    highlightForm.setFieldsValue({ user_note: highlight.user_note });
-    setHighlightModalOpen(true);
-  };
-
-  const closeHighlightModal = () => {
-    setHighlightModalOpen(false);
-    setHighlightSelection(null);
-    setEditingHighlight(null);
-    highlightForm.resetFields();
-  };
-
-  const handleHighlightSubmit = async (values: HighlightFormValues) => {
-    if (!topic || !material) return;
-    try {
-      setHighlightSaving(true);
-      if (editingHighlight) {
-        await updateHighlightUserNote(
-          editingHighlight.id,
-          values.user_note ?? '',
-        );
-        message.success('高亮备注已更新');
-      } else if (highlightSelection) {
-        const response = await createHighlight(topic.id, {
-          material: material.id,
-          start_offset: highlightSelection.startOffset,
-          end_offset: highlightSelection.endOffset,
-          user_note: values.user_note ?? '',
-        });
-        message.success(response.data.created ? '已添加高亮' : '该文本已经高亮');
+      setTask(response.data.task);
+      setQuestion('');
+      setSelection(null);
+      setDrawerOpen(true);
+      setTab('questions');
+      await load();
+      if (response.data.question.session) {
+        void loadSession(response.data.question.session);
       }
-      closeHighlightModal();
-      await loadData();
     } catch (error) {
-      console.error('Failed to save highlight:', error);
-      message.error('保存高亮失败');
-    } finally {
-      setHighlightSaving(false);
+      console.error('Create question failed:', error);
+      message.error('发起问答失败');
     }
   };
 
-  const handleSaveQuestion = async (questionId: number, conceptId?: number) => {
-    try {
-      const response = await saveQuestion(questionId, conceptId);
-      setChatHistory((current) =>
-        current.map((item) =>
-          item.questionId === questionId
-            ? { ...item, isSaved: response.data.is_saved }
-            : item,
-        ),
-      );
-      message.success(
-        conceptId ? '问答已沉淀到概念卡片' : '问答已保存到材料记录',
-      );
-      await loadData();
-    } catch (error) {
-      console.error('Failed to save question:', error);
-      message.error('保存问答失败');
-    }
-  };
-
-  const handleJumpToHighlight = (highlightId: number) => {
-    const highlight = topic?.highlights.find((item) => item.id === highlightId);
-    if (!highlight) return;
-    setSelectedConceptId(null);
-    setSelectedQuestionId(null);
-    setSelectedHighlightId(highlightId);
-    const target =
-      document.querySelector<HTMLElement>(
-        `[data-highlight-ids~="${highlight.id}"]`,
-      ) ??
-      document.getElementById(
-        highlight.chunk ? `reader-chunk-${highlight.chunk}` : 'reader-chunk-0',
-      );
-    target?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'center',
-    });
-  };
-
-  const handleAnnotationClick = (
-    type: 'concept' | 'question' | 'highlight',
-    id: number,
-  ) => {
-    setAssistantVisible(true);
-    setSelectedConceptId(null);
-    setSelectedQuestionId(null);
-    setSelectedHighlightId(null);
-    if (type === 'concept') {
-      setAssistantTab('concepts');
-      setSelectedConceptId(id);
-    } else if (type === 'question') {
-      setAssistantTab('question-history');
-      setSelectedQuestionId(id);
+  const openQuestionChat = (q: Question) => {
+    setDrawerOpen(true);
+    setTab('questions');
+    if (q.session) {
+      void loadSession(q.session);
     } else {
-      setAssistantTab('highlights');
-      setSelectedHighlightId(id);
+      message.warning('该问答尚未初始化对话');
     }
   };
 
-  const clearAnnotationSelection = () => {
-    setSelectedConceptId(null);
-    setSelectedQuestionId(null);
-    setSelectedHighlightId(null);
-    setAssistantVisible(false);
+  const runSupplement = async (type: 'Concept' | 'Question' | 'Highlight', id: number) => {
+    if (!topic) return;
+    const response = await triggerSupplement(topic.id, type, id);
+    setTask(response.data.task);
+    message.info('正在检索补充资料。');
   };
 
-  const handleJumpToQuestion = (questionId: number) => {
-    const item = topic?.questions.find((question) => question.id === questionId);
-    if (!item || item.start_offset === null) return;
-    setSelectedConceptId(null);
-    setSelectedQuestionId(questionId);
-    setSelectedHighlightId(null);
-    const target = document.querySelector<HTMLElement>(
-      `[data-question-ids~="${questionId}"]`,
-    );
-    target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const searchParams = new URLSearchParams(location.search);
+  const anchorParam = searchParams.get('anchor');
+  const requestedAnchor = anchorParam !== null ? Number(anchorParam) : null;
+  const requestedLocatorId = Number(searchParams.get('locator'));
+  const nonce = searchParams.get('t') || '';
+
+  const requestedLocator = useMemo(() => {
+    if (!topic || !requestedLocatorId) return null;
+    const conceptLocator = topic.concepts.flatMap((c) => c.locators.map((l) => ({ ...l, type: 'concept', ownerId: c.id }))).find((l) => l.id === requestedLocatorId);
+    if (conceptLocator) return conceptLocator;
+    const questionLocator = topic.questions.flatMap((q) => q.locators.map((l) => ({ ...l, type: 'question', ownerId: q.id }))).find((l) => l.id === requestedLocatorId);
+    if (questionLocator) return questionLocator;
+    const highlightLocator = topic.highlights.flatMap((h) => h.locators.map((l) => ({ ...l, type: 'highlight', ownerId: h.id }))).find((l) => l.id === requestedLocatorId);
+    if (highlightLocator) return highlightLocator;
+    return null;
+  }, [topic, requestedLocatorId]);
+
+  useEffect(() => {
+    if (!material || (!requestedLocator && requestedAnchor === null)) return;
+
+    const scrollTo = () => {
+      let element: HTMLElement | null = null;
+      if (requestedLocator) {
+        // Open drawer and switch tab if we have a locator
+        setDrawerOpen(true);
+        setTab(
+          requestedLocator.type === 'question' ? 'questions' :
+          requestedLocator.type === 'concept' ? 'concepts' : 'highlights'
+        );
+
+        element = document.getElementById(`reader-${requestedLocator.type}-${requestedLocator.ownerId}`);
+
+        // Also scroll the annotation in the drawer
+        setTimeout(() => {
+          document.getElementById(`annotation-${requestedLocator.ownerId}`)?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+          });
+        }, 500);
+      }
+
+      if (!element && requestedAnchor !== null) {
+        const chunk = requestedLocator?.chunk
+          ? material.chunks.find((item) => item.id === requestedLocator.chunk)
+          : material.chunks.find(
+            (item) =>
+              item.start_offset <= requestedAnchor &&
+              requestedAnchor < item.end_offset,
+          );
+        element = document.getElementById(`reader-chunk-${chunk?.id ?? 0}`);
+      }
+
+      if (element) {
+        element.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
+        if (requestedLocator) {
+          element.classList.add('universal-reader__annotation--selected');
+          setTimeout(() => {
+            element?.classList.remove('universal-reader__annotation--selected');
+          }, 2000);
+        }
+      }
+    };
+
+    // Use a slightly longer delay to ensure chunks are rendered and IDs are assigned
+    const timer = setTimeout(scrollTo, 300);
+    return () => clearTimeout(timer);
+  }, [material, requestedAnchor, requestedLocator, nonce]);
+
+  if (!topic || !material) return <div style={{ padding: 24 }}>加载中...</div>;
+
+  const seekTime = {
+    time: requestedLocator?.time_start_offset ??
+      (requestedAnchor !== null
+        ? material.chunks.find((chunk) => chunk.start_offset <= requestedAnchor && requestedAnchor < chunk.end_offset)?.start_time ?? null
+        : null),
+    nonce
   };
 
-  const handleDeleteQuestion = async (questionId: number) => {
-    try {
-      await deleteQuestion(questionId);
-      if (selectedQuestionId === questionId) setSelectedQuestionId(null);
-      setChatHistory((current) =>
-        current.filter((item) => item.questionId !== questionId),
-      );
-      message.success('问答已删除');
-      await loadData();
-    } catch (error) {
-      console.error('Failed to delete question:', error);
-      message.error('删除问答失败');
-    }
-  };
-
-  const openConceptEditor = (concept: Concept) => {
-    setEditingConcept(concept);
-    conceptEditorForm.setFieldsValue(concept);
-    setConceptEditorOpen(true);
-  };
-
-  const saveConcept = async (
-    values: ConceptEditorValues,
-    confirm = false,
-    target = editingConcept,
-  ) => {
-    if (!target) return;
-    try {
-      const response = await updateConcept(target.id, {
-        ...values,
-        status: confirm ? 'confirmed' : target.status,
-      });
-      setEditingConcept(response.data);
-      message.success(confirm ? '概念已确认' : '概念已更新');
-      setConceptEditorOpen(false);
-      await loadData();
-    } catch (error) {
-      console.error('Failed to update concept:', error);
-      message.error('保存概念失败');
-    }
-  };
-
-  const handleDeleteConcept = async (conceptId: number) => {
-    try {
-      await deleteConcept(conceptId);
-      if (selectedConceptId === conceptId) setSelectedConceptId(null);
-      setConceptEditorOpen(false);
-      message.success('概念已删除');
-      await loadData();
-    } catch (error) {
-      console.error('Failed to delete concept:', error);
-      message.error('删除概念失败');
-    }
-  };
-
-  const confirmDeleteConcept = (concept: Concept) => {
-    Modal.confirm({
-      title: `删除概念“${concept.title}”？`,
-      content: '该概念的所有来源锚点和关联关系都会一并删除，且无法恢复。',
-      okText: '删除概念',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: () => handleDeleteConcept(concept.id),
-    });
-  };
-
-  const handleDeleteHighlight = async (highlightId: number) => {
-    try {
-      await deleteHighlight(highlightId);
-      message.success('高亮已删除');
-      await loadData();
-    } catch (error) {
-      console.error('Failed to delete highlight:', error);
-      message.error('删除高亮失败');
-    }
-  };
-
-  const handleJumpToConcept = (concept: Concept) => {
-    const anchor =
-      concept.anchors.find((item) => item.material === material?.id) ??
-      concept.anchors[0];
-    if (!anchor || !topic) {
-      message.warning('该概念没有可用的材料来源。');
-      return;
-    }
-    setSelectedConceptId(concept.id);
-    setSelectedQuestionId(null);
-    setSelectedHighlightId(null);
-    if (anchor.material === material?.id) {
-      const target =
-        document.querySelector<HTMLElement>(
-          `[data-concept-ids~="${concept.id}"]`,
-        ) ??
-        document.getElementById(`reader-chunk-${anchor.chunk ?? 0}`);
-      target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return;
-    }
-    navigate(
-      `/topics/${topic.id}/materials/${anchor.material}?anchor=${anchor.start_offset}&concept=${concept.id}`,
-    );
-  };
-
-  const handleRetry = async (task: AITask) => {
-    const response = await retryAITask(task.id);
-    setActiveTaskId(response.data.id);
-    setActiveTaskType(response.data.task_type);
-  };
-
-  if (loading && !material) return <div style={{ padding: 24 }}>加载中...</div>;
-  if (!material) return <div style={{ padding: 24 }}>未找到材料</div>;
-  const briefing = material.ai_responses.find(
-    (item) => item.task_type === 'briefing',
-  );
   return (
-    <Layout
-      style={{
-        minHeight: 'calc(100vh - 64px)',
-        background: darkMode ? '#0f0f0f' : '#f5f7fa',
-      }}
-    >
-      <Content
-        style={{
-          padding: '28px 24px 56px',
-          overflowY: 'auto',
-          background: 'transparent',
-        }}
-      >
-        <div style={{ maxWidth: 980, margin: '0 auto' }}>
+    <ConfigProvider theme={{ algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm }}>
+      <div style={{
+        minHeight: '100vh',
+        background: darkMode ? '#000000' : '#f5f7fa',
+        transition: 'background-color 160ms ease',
+      }}>
+        <div
+          style={{
+            maxWidth: material.media_type === 'video' ? 1480 : 1080,
+            margin: '0 auto',
+            padding: '24px 24px 48px',
+          }}
+        >
           <Button
-            type="text"
             icon={<ArrowLeftOutlined />}
-            onClick={() => navigate(`/topics/${topicId}`)}
+            onClick={() => navigate(`/topics/${topic.id}`)}
             style={{
               position: 'fixed',
               top: 76,
               left: 24,
-              zIndex: 2,
-              marginBottom: 20,
-              color: darkMode ? '#d4d4d8' : '#595959',
-              background: darkMode ? '#171717' : '#ffffff',
-              boxShadow: '0 2px 8px rgba(15, 23, 42, 0.12)',
+              zIndex: 10,
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
             }}
           >
-            返回话题
+            返回主题
           </Button>
-          {activeTask && (
-            <Alert
-              type="info"
-              showIcon
-              message={
-                activeTaskType === 'briefing'
-                  ? '阅读前导正在生成，你可以继续阅读。'
-                  : 'AI 正在处理你的问题，你可以继续阅读。'
-              }
-              style={{ marginBottom: 16 }}
-            />
+          {task && ['pending', 'running'].includes(task.status) && (
+            <Alert style={{ margin: '16px 0' }} type="info" message={`${task.task_type_display}正在执行`} />
           )}
-          {briefing && (
+          {material.digest && (
             <Collapse
-              size="small"
               style={{
-                marginBottom: 20,
-                borderColor: '#69b1ff',
-                background: '#e6f4ff',
+                margin: '16px 0',
+                background: darkMode ? '#141414' : '#fff',
+                borderColor: darkMode ? '#303030' : '#d9d9d9',
               }}
-              items={[
-                {
-                  key: 'briefing',
-                  label: '阅读前导（AI 生成）',
-                  children: <MarkdownBriefing content={briefing.content} />,
-                },
-              ]}
+              items={[{
+                key: 'digest',
+                label: <Text strong>材料摘要</Text>,
+                children: <MarkdownDigest content={material.digest} />,
+              }]}
             />
           )}
           <UniversalReader
             material={material}
-            highlights={topic?.highlights.filter(
-              (highlight) => highlight.material === material.id,
-            ) ?? []}
-            concepts={(topic?.concepts ?? [])
-              .map((concept) => ({
-                ...concept,
-                anchors: concept.anchors.filter(
-                  (anchor) => anchor.material === material.id,
-                ),
-              }))
-              .filter((concept) => concept.anchors.length > 0)}
-            questions={(topic?.questions ?? []).filter(
-              (question) => question.material === material.id,
-            )}
+            highlights={scoped.highlights}
+            concepts={scoped.concepts}
+            questions={scoped.questions}
             darkMode={darkMode}
             onDarkModeChange={setDarkMode}
-            onMarkConcept={handleMarkConcept}
-            onAskQuestion={handleAskSelection}
-            onHighlight={handleHighlight}
-            onClearAnnotationSelection={clearAnnotationSelection}
-            onAnnotationClick={handleAnnotationClick}
-            selectedAnnotations={[
-              { type: 'concept', id: selectedConceptId },
-              { type: 'question', id: selectedQuestionId },
-              { type: 'highlight', id: selectedHighlightId },
-            ]}
+            onMarkConcept={(next) => {
+              setSelection(next);
+              conceptForm.setFieldsValue({ title: next.text.slice(0, 80) });
+              setConceptModal(true);
+            }}
+            onAskQuestion={(next) => {
+              setSelection(next);
+              setDrawerOpen(true);
+              setTab('questions');
+            }}
+            onHighlight={(next) => {
+              setSelection(next);
+              highlightForm.resetFields();
+              setHighlightModal(true);
+            }}
+            onClearAnnotationSelection={() => undefined}
+            onAnnotationClick={(type, id) => {
+            setDrawerOpen(true);
+            const tabName = type === 'question' ? 'questions' : type === 'concept' ? 'concepts' : 'highlights';
+            setTab(tabName);
+
+            if (type === 'question') {
+              const q = scoped.questions.find(item => item.id === id);
+              if (q?.session) void loadSession(q.session);
+            }
+
+            // Wait for drawer to open before scrolling
+            setTimeout(() => {
+              const el = document.getElementById(`annotation-${id}`);
+              if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.classList.add('reader-drawer-item--active');
+                setTimeout(() => el.classList.remove('reader-drawer-item--active'), 3000);
+              }
+            }, 300);
+          }}
+            selectedAnnotations={[]}
+            seekTime={seekTime}
           />
         </div>
-      </Content>
-
+      </div>
       <Drawer
-        title="学习助手"
-        placement="right"
-        width={400}
-        onClose={() => setAssistantVisible(false)}
-        open={assistantVisible}
-        mask={false}
+        title="学习工作区"
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        width={420}
+        className={darkMode ? 'universal-reader--dark' : ''}
       >
-        <Tabs
-          activeKey={assistantTab}
-          onChange={setAssistantTab}
-          items={[
-            { key: 'questions', label: '问答' },
-            { key: 'question-history', label: '问答历史' },
-            { key: 'concepts', label: '概念' },
-            { key: 'highlights', label: '高亮' },
-          ]}
-        />
-        {assistantTab === 'questions' && (
-          <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100% - 48px)' }}>
-          <div style={{ flex: 1, overflowY: 'auto', marginBottom: 16 }}>
-            <List
-              dataSource={chatHistory}
-              renderItem={(item) => (
-                <List.Item style={{ border: 'none', padding: '8px 0' }}>
-                  <div
-                    style={{
-                      width: '100%',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems:
-                        item.role === 'user' ? 'flex-end' : 'flex-start',
-                    }}
-                  >
-                    {item.selection && (
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: '#999',
-                          background: '#f5f5f5',
-                          padding: '4px 8px',
-                          borderRadius: 4,
-                          marginBottom: 4,
-                          maxWidth: '80%',
-                        }}
-                      >
-                        引用：“{item.selection}”
-                      </div>
-                    )}
-                    <div
-                      style={{
-                        background: item.role === 'user' ? '#1677ff' : '#f0f0f0',
-                        color: item.role === 'user' ? '#fff' : '#333',
-                        padding: '8px 12px',
-                        borderRadius: 8,
-                        maxWidth: '90%',
-                        whiteSpace: 'pre-wrap',
-                      }}
-                    >
-                      {item.content}
-                      {item.task?.status === 'failed' && (
-                        <Button
-                          size="small"
-                          icon={<ReloadOutlined />}
-                          onClick={() => void handleRetry(item.task!)}
-                          style={{ marginTop: 8 }}
-                        >
-                          重试
-                        </Button>
-                      )}
-                      {item.role === 'ai' &&
-                        item.questionId &&
-                        (item.isSaved ? (
-                          <Text
-                            type="secondary"
-                            style={{ display: 'block', marginTop: 8 }}
-                          >
-                            已沉淀
-                          </Text>
-                        ) : (
-                          <Dropdown
-                            menu={{
-                              items: [
-                                {
-                                  key: 'material',
-                                  label: '保存到材料问答',
-                                },
-                                ...((topic?.concepts ?? []).map((concept) => ({
-                                  key: `concept-${concept.id}`,
-                                  label: `保存到概念：${concept.title}`,
-                                }))),
-                              ],
-                              onClick: ({ key }) => {
-                                const conceptId = key.startsWith('concept-')
-                                  ? Number(key.replace('concept-', ''))
-                                  : undefined;
-                                void handleSaveQuestion(
-                                  item.questionId!,
-                                  conceptId,
-                                );
-                              },
-                            }}
-                          >
-                            <Button size="small" style={{ marginTop: 8 }}>
-                              沉淀问答
-                            </Button>
-                          </Dropdown>
-                        ))}
+        <Tabs activeKey={tab} onChange={setTab} items={[
+          {
+            key: 'questions',
+            label: `问答 (${scoped.questions.length})`,
+            children: (
+              <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 160px)' }}>
+                {activeSession ? (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <Typography.Title level={5} style={{ margin: 0 }}>当前对话</Typography.Title>
+                      <Button type="link" size="small" onClick={() => setActiveSession(null)}>返回列表</Button>
                     </div>
-                  </div>
-                </List.Item>
-              )}
-            />
-          </div>
-          <Divider style={{ margin: '8px 0' }} />
-          {selectedText && (
-            <Alert
-              type="info"
-              showIcon
-              message="将基于以下选中内容提问"
-              description={
-                <div>
-                  <div
-                    style={{
-                      maxHeight: 88,
-                      margin: '6px 0',
+                    <div style={{
+                      flex: 1,
                       overflowY: 'auto',
-                      whiteSpace: 'pre-wrap',
-                    }}
-                  >
-                    “{selectedText}”
-                  </div>
-                  <Button
-                    type="link"
-                    size="small"
-                    onClick={() => {
-                      setSelectedText('');
-                      setSelectedAnchor(null);
-                    }}
-                  >
-                    取消引用
-                  </Button>
-                </div>
-              }
-              style={{ marginBottom: 8 }}
-            />
-          )}
-          <Space.Compact style={{ width: '100%' }}>
-            <Input
-              placeholder="问问 AI..."
-              value={question}
-              onChange={(event) => setQuestion(event.target.value)}
-              onPressEnter={handleAsk}
-            />
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              onClick={() => void handleAsk()}
-            />
-          </Space.Compact>
-          </div>
-        )}
-      {assistantVisible && assistantTab === 'question-history' && (
-        <List
-          dataSource={topic?.questions ?? []}
-          locale={{ emptyText: '当前话题还没有问答记录。' }}
-          renderItem={(item) => (
-            <List.Item
-              style={
-                selectedQuestionId === item.id
-                  ? { background: '#fff7e6', padding: '8px' }
-                  : undefined
-              }
-            >
-              <List.Item.Meta
-                title={
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <Typography.Text strong style={{ flex: 1 }}>{item.question_text}</Typography.Text>
-                    <Tooltip title="查看原文"><Button type="text" size="small" icon={<EyeOutlined />} disabled={item.start_offset === null} onClick={() => handleJumpToQuestion(item.id)} /></Tooltip>
-                    <Popconfirm title="删除这条问答？" okText="删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void handleDeleteQuestion(item.id)}>
-                      <Tooltip title="删除问答"><Button type="text" size="small" danger icon={<DeleteOutlined />} /></Tooltip>
-                    </Popconfirm>
-                  </div>
-                }
-                description={
-                  item.ai_responses[0]?.content ||
-                  'AI 回答正在生成或尚未可用。'
-                }
-              />
-            </List.Item>
-          )}
-        />
-      )}
-      {assistantVisible && assistantTab === 'concepts' && (
-        <>
-          <List
-            dataSource={topic?.concepts ?? []}
-            locale={{ emptyText: '从阅读中标记概念后，会在这里集中显示。' }}
-            renderItem={(concept) => (
-              <List.Item
-                style={
-                  selectedConceptId === concept.id
-                    ? { background: '#e6f4ff', padding: '8px' }
-                    : undefined
-                }
-              >
-                <List.Item.Meta
-                  title={
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <Space size={6} style={{ flex: 1 }}>
-                        <span>{concept.title}</span>
-                        <Typography.Text
-                          style={{
-                            color: pendingConceptIds.has(concept.id)
-                              ? '#389e0d'
-                              : concept.status === 'confirmed'
-                                ? '#0958d9'
-                                : '#389e0d',
-                          }}
-                        >
-                          {pendingConceptIds.has(concept.id) ? '草稿生成中' : concept.status_display}
-                        </Typography.Text>
-                      </Space>
-                      <Tooltip title="查看来源"><Button type="text" size="small" icon={<EyeOutlined />} onClick={() => handleJumpToConcept(concept)} /></Tooltip>
-                      <Dropdown
-                    menu={{
-                      items: [
-                        { key: 'edit', label: '编辑概念', icon: <EditOutlined /> },
-                        ...(concept.status === 'draft' &&
-                        !pendingConceptIds.has(concept.id)
-                          ? [{ key: 'confirm', label: '确认概念', icon: <CheckOutlined /> }]
-                          : []),
-                        { key: 'delete', label: '删除概念', icon: <DeleteOutlined />, danger: true },
-                      ],
-                      onClick: ({ key }) => {
-                        if (key === 'edit') openConceptEditor(concept);
-                        if (key === 'confirm') {
-                          void saveConcept(concept, true, concept);
-                        }
-                        if (key === 'delete') confirmDeleteConcept(concept);
-                      },
-                    }}
-                  >
-                        <Tooltip title="更多操作"><Button type="text" size="small" icon={<MoreOutlined />} /></Tooltip>
-                      </Dropdown>
+                      marginBottom: 16,
+                      padding: '8px',
+                      background: darkMode ? '#1f1f1f' : '#fafafa',
+                      borderRadius: 8,
+                      border: darkMode ? '1px solid #303030' : 'none'
+                    }}>
+                      <List
+                        loading={chatLoading}
+                        dataSource={activeSession.messages}
+                        renderItem={(msg) => (
+                          <div style={{
+                            marginBottom: 12,
+                            textAlign: msg.msg_from === 'user' ? 'right' : 'left'
+                          }}>
+                            <div style={{
+                              display: 'inline-block',
+                              padding: '8px 12px',
+                              borderRadius: 8,
+                              maxWidth: '85%',
+                              background: msg.msg_from === 'user' ? '#1677ff' : (darkMode ? '#262626' : '#fff'),
+                              color: msg.msg_from === 'user' ? '#fff' : 'inherit',
+                              boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                              textAlign: 'left',
+                              border: msg.msg_from === 'ai' && darkMode ? '1px solid #303030' : 'none'
+                            }}>
+                              <Text style={{ color: 'inherit' }}>{msg.msg_content}</Text>
+                            </div>
+                          </div>
+                        )}
+                      />
                     </div>
-                  }
-                  description={
-                    <Typography.Paragraph>
-                      {concept.definition || '概念草稿正在等待补全。'}
-                    </Typography.Paragraph>
-                  }
-                />
-              </List.Item>
-            )}
-          />
-        </>
-      )}
-
-      {assistantVisible && assistantTab === 'highlights' && (
-        <>
-          <List
-            dataSource={(topic?.highlights ?? []).filter(
-              (highlight) => highlight.material === material.id,
-            )}
-            locale={{ emptyText: '当前材料还没有高亮片段' }}
-            renderItem={(highlight) => (
-              <List.Item
-                style={
-                  selectedHighlightId === highlight.id
-                    ? { background: '#fffbe6', padding: '8px' }
-                    : undefined
-                }
-            >
-              <List.Item.Meta
-                title={
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <Typography.Text strong style={{ flex: 1 }}>高亮于 {new Date(highlight.created_at).toLocaleString()}</Typography.Text>
-                    <Tooltip title="查看原文"><Button type="text" size="small" icon={<EyeOutlined />} onClick={() => handleJumpToHighlight(highlight.id)} /></Tooltip>
-                    <Tooltip title="编辑备注"><Button type="text" size="small" icon={<EditOutlined />} onClick={() => openHighlightEditor(highlight)} /></Tooltip>
-                    <Popconfirm title="删除这条高亮？" okText="删除" okButtonProps={{ danger: true }} cancelText="取消" onConfirm={() => void handleDeleteHighlight(highlight.id)}>
-                      <Tooltip title="删除高亮"><Button type="text" size="small" danger icon={<DeleteOutlined />} /></Tooltip>
-                    </Popconfirm>
-                  </div>
-                }
-                description={
-                  <Space direction="vertical" size={2}>
-                    <Typography.Paragraph style={{ margin: 0 }}>
-                      {highlight.source_text}
-                    </Typography.Paragraph>
-                    {highlight.user_note && (
-                      <Typography.Text type="secondary">
-                        备注：{highlight.user_note}
-                      </Typography.Text>
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Input
+                        placeholder="继续提问..."
+                        value={question}
+                        onChange={(e) => setQuestion(e.target.value)}
+                        onPressEnter={handleSendChat}
+                        disabled={chatLoading}
+                      />
+                      <Button
+                        type="primary"
+                        icon={<SendOutlined />}
+                        onClick={handleSendChat}
+                        loading={chatLoading}
+                      />
+                    </Space.Compact>
+                  </>
+                ) : (
+                  <Space direction="vertical" style={{ display: 'flex' }} size="middle">
+                    {selection && (
+                      <Alert
+                        type="info"
+                        message={
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text ellipsis style={{ maxWidth: 300 }}>引用：{selection.text}</Text>
+                            <Button type="link" size="small" onClick={() => setSelection(null)}>取消</Button>
+                          </div>
+                        }
+                      />
                     )}
+                    <Input.TextArea
+                      value={question}
+                      onChange={(event) => setQuestion(event.target.value)}
+                      placeholder="基于选中内容提问"
+                      autoSize={{ minRows: 2, maxRows: 6 }}
+                    />
+                    <Button
+                      type="primary"
+                      block
+                      icon={<SendOutlined />}
+                      disabled={!selection || !question.trim()}
+                      onClick={() => void createQuestionFromSelection()}
+                    >
+                      发起问答
+                    </Button>
+                    <List
+                      dataSource={scoped.questions}
+                      renderItem={(item) => (
+                        <List.Item
+                          id={`annotation-${item.id}`}
+                          className="reader-drawer-item"
+                          style={{ display: 'block', padding: '12px 8px', borderRadius: 8, cursor: 'pointer' }}
+                          onClick={() => openQuestionChat(item)}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                            <Text strong style={{ flex: 1, marginRight: 8 }}>{item.question_text}</Text>
+                            <Space size={0} onClick={(e) => e.stopPropagation()}>
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<FileSearchOutlined />}
+                                title="补资料"
+                                onClick={(e) => { e.stopPropagation(); void runSupplement('Question', item.id); }}
+                              />
+                              <Button
+                                type="text"
+                                size="small"
+                                danger
+                                icon={<DeleteOutlined />}
+                                title="删除"
+                                onClick={(e) => { e.stopPropagation(); void deleteQuestion(item.id).then(load); }}
+                              />
+                            </Space>
+                          </div>
+                          <Text type="secondary" style={{ fontSize: '13px' }} ellipsis>
+                            {item.conclusion || '点击开始对话'}
+                          </Text>
+                        </List.Item>
+                      )}
+                    />
                   </Space>
-                }
-              />
-              </List.Item>
-            )}
-          />
-        </>
-      )}
+                )}
+              </div>
+            ),
+          },
+          {
+            key: 'concepts',
+            label: `概念 (${scoped.concepts.length})`,
+            children: (
+                    <List
+                      dataSource={scoped.concepts}
+                      renderItem={(item) => (
+                        <List.Item
+                          id={`annotation-${item.id}`}
+                          className="reader-drawer-item"
+                          style={{ display: 'block', padding: '12px 8px', borderRadius: 8, cursor: 'pointer' }}
+                          onClick={() => jumpToSource(item.locators[0]?.id)}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                            <Text strong style={{ flex: 1, marginRight: 8 }}>{item.title}</Text>
+                            <Space size={0} onClick={(e) => e.stopPropagation()}>
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<EditOutlined />}
+                                title="编辑"
+                                onClick={() => handleEditConcept(item)}
+                              />
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<FileSearchOutlined />}
+                                title="补资料"
+                                onClick={() => void runSupplement('Concept', item.id)}
+                              />
+                              {item.status !== 'confirmed' && (
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  icon={<CheckOutlined />}
+                                  title="确认"
+                                  style={{ color: '#52c41a' }}
+                                  onClick={() => void updateConcept(item.id, { status: 'confirmed' }).then(load)}
+                                />
+                              )}
+                              <Button
+                                type="text"
+                                size="small"
+                                danger
+                                icon={<DeleteOutlined />}
+                                title="删除"
+                                onClick={() => void deleteConcept(item.id).then(load)}
+                              />
+                            </Space>
+                          </div>
+                          <Text type="secondary" style={{ fontSize: '13px' }}>
+                            {item.definition || '草稿生成中...'}
+                          </Text>
+                        </List.Item>
+                      )}
+                    />
+            ),
+          },
+          {
+            key: 'highlights',
+            label: `高亮 (${scoped.highlights.length})`,
+            children: (
+                    <List
+                      dataSource={scoped.highlights}
+                      renderItem={(item) => (
+                        <List.Item
+                          id={`annotation-${item.id}`}
+                          className="reader-drawer-item"
+                          style={{ display: 'block', padding: '12px 8px', borderRadius: 8, cursor: 'pointer' }}
+                          onClick={() => jumpToSource(item.locators[0]?.id)}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                            <Text strong ellipsis style={{ flex: 1, marginRight: 8 }}>
+                              {item.locators[0]?.source_text}
+                            </Text>
+                            <Space size={0} onClick={(e) => e.stopPropagation()}>
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<EditOutlined />}
+                                title="编辑"
+                                onClick={() => handleEditHighlight(item)}
+                              />
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<FileSearchOutlined />}
+                                title="补资料"
+                                onClick={() => void runSupplement('Highlight', item.id)}
+                              />
+                              <Button
+                                type="text"
+                                size="small"
+                                danger
+                                icon={<DeleteOutlined />}
+                                title="删除"
+                                onClick={() => void deleteHighlight(item.id).then(load)}
+                              />
+                            </Space>
+                          </div>
+                          {item.user_note && (
+                            <Text type="secondary" style={{ fontSize: '13px' }}>
+                              {item.user_note}
+                            </Text>
+                          )}
+                        </List.Item>
+                      )}
+                    />
+            ),
+          },
+        ]} />
       </Drawer>
-
-      <Modal
-        title="标记为概念"
-        open={conceptModalOpen}
-        onCancel={closeConceptModal}
-        onOk={() => conceptForm.submit()}
-        confirmLoading={conceptSaving}
-        okText="后台生成草稿"
-        width={680}
-      >
-        {conceptSelection && (
-          <Alert
-            type="info"
-            showIcon
-            message="AI 将根据当前选中原文生成可编辑的概念草稿。"
-            description={`“${conceptSelection.text}”`}
-            style={{ marginBottom: 16 }}
-          />
+    <Modal title={editingConcept ? "编辑概念" : "标记概念"} open={conceptModal} onCancel={() => { setConceptModal(false); setEditingConcept(null); }} onOk={() => conceptForm.submit()}>
+      <Form form={conceptForm} layout="vertical" onFinish={submitConcept}>
+        <Form.Item name="title" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
+        {editingConcept && (
+          <>
+            <Form.Item name="definition" label="定义"><Input.TextArea rows={3} /></Form.Item>
+            <Form.Item name="principle" label="原理"><Input.TextArea rows={3} /></Form.Item>
+            <Form.Item name="pitfalls" label="易错点"><Input.TextArea rows={3} /></Form.Item>
+            <Form.Item name="applications" label="应用"><Input.TextArea rows={3} /></Form.Item>
+          </>
         )}
-        <Form
-          form={conceptForm}
-          layout="vertical"
-          onFinish={(values) => void handleConceptSubmit(values)}
-        >
-          <Form.Item
-            name="title"
-            label="概念名称"
-            rules={[{ required: true, message: '请输入概念名称' }]}
-          >
-            <Input />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal
-        title="编辑概念卡片"
-        open={conceptEditorOpen}
-        onCancel={() => {
-          setConceptEditorOpen(false);
-          setEditingConcept(null);
-          conceptEditorForm.resetFields();
-        }}
-        onOk={() => conceptEditorForm.submit()}
-        width={680}
-      >
-        <Form
-          form={conceptEditorForm}
-          layout="vertical"
-          onFinish={(values) => void saveConcept(values)}
-        >
-          <Form.Item
-            name="title"
-            label="概念名称"
-            rules={[{ required: true, message: '请输入概念名称' }]}
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item name="definition" label="定义">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          <Form.Item name="principle" label="原理">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          <Form.Item name="pitfalls" label="易错点">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          <Form.Item name="applications" label="适用场景">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal
-        title={editingHighlight ? '编辑高亮备注' : '添加高亮'}
-        open={highlightModalOpen}
-        onCancel={closeHighlightModal}
-        onOk={() => highlightForm.submit()}
-        confirmLoading={highlightSaving}
-        okText={editingHighlight ? '保存备注' : '添加高亮'}
-      >
-        {highlightSelection && (
-          <Alert
-            type="info"
-            showIcon
-            message="已选中的原文"
-            description={`“${highlightSelection.text}”`}
-            style={{ marginBottom: 16 }}
-          />
-        )}
-        <Form
-          form={highlightForm}
-          layout="vertical"
-          onFinish={(values) => void handleHighlightSubmit(values)}
-        >
-          <Form.Item name="user_note" label="备注（可选）">
-            <Input.TextArea
-              rows={4}
-              placeholder="记录你的理解、疑问或后续行动..."
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <FloatButton
-        icon={<AppstoreOutlined />}
-        type="primary"
-        style={{ right: 24 }}
-        onClick={() => setAssistantVisible(!assistantVisible)}
-        badge={{ dot: selectedText !== '' }}
-      />
-    </Layout>
+      </Form>
+    </Modal>
+    <Modal title={editingHighlight ? "编辑高亮" : "添加高亮"} open={highlightModal} onCancel={() => { setHighlightModal(false); setEditingHighlight(null); }} onOk={() => highlightForm.submit()}>
+      <Form form={highlightForm} layout="vertical" onFinish={submitHighlight}>
+        <Form.Item name="user_note" label="笔记内容"><Input.TextArea rows={4} /></Form.Item>
+      </Form>
+    </Modal>
+    </ConfigProvider>
   );
 };
 

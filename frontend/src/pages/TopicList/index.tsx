@@ -12,6 +12,7 @@ import {
   Segmented,
   Space,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
@@ -76,9 +77,9 @@ const TopicList: React.FC = () => {
         const type = values.initialMaterialType ?? 'url';
         await createMaterial({
           topic: topic.id,
-          type,
           title: `${topic.title} - 初始材料`,
-          source_url: type === 'url' ? values.initialUrl : '',
+          media_type: type === 'url' ? 'web_page' : 'text',
+          media_uri: type === 'url' ? values.initialUrl : '',
           raw_text: type === 'text' ? values.initialText : '',
         });
       }
@@ -183,7 +184,7 @@ const TopicList: React.FC = () => {
       </Card>
 
       <List
-        grid={{ gutter: 16, xs: 1, sm: 2, md: 3, lg: 3, xl: 4, xxl: 4 }}
+        grid={{ gutter: 24, column: 4, xs: 1, sm: 2, md: 2, lg: 4, xl: 4, xxl: 4 }}
         loading={loading}
         dataSource={visibleTopics}
         locale={{
@@ -202,13 +203,35 @@ const TopicList: React.FC = () => {
           ),
         }}
         renderItem={(item) => (
-          <List.Item>
+          <List.Item style={{ padding: 0 }}>
             <Card
               hoverable
-              title={item.title}
+              style={{
+                height: 200,
+                width: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+              styles={{
+                header: { flex: '0 0 auto', overflow: 'hidden', padding: '0 16px' },
+                body: {
+                  flex: '1 1 auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
+                  padding: '12px 16px',
+                },
+              }}
+              title={
+                <Tooltip title={item.title}>
+                  <Typography.Text strong ellipsis style={{ display: 'block', lineHeight: '56px' }}>
+                    {item.title}
+                  </Typography.Text>
+                </Tooltip>
+              }
               extra={
-                <Space size={4} onClick={(event) => event.stopPropagation()}>
-                  <Tag color={item.type === 'learning' ? 'blue' : 'purple'}>
+                <Space size={4} onClick={(event) => event.stopPropagation()} style={{ lineHeight: '56px' }}>
+                  <Tag color={item.type === 'learning' ? 'blue' : 'purple'} style={{ margin: 0 }}>
                     {item.type_display}
                   </Tag>
                   <Popconfirm
@@ -237,14 +260,20 @@ const TopicList: React.FC = () => {
                 )
               }
             >
-              <Paragraph ellipsis={{ rows: 2 }}>
-                {item.goal || '还没有学习目标'}
-              </Paragraph>
-              <div style={{ marginTop: 16 }}>
-                <Space wrap size={[4, 4]}>
-                  <Tag>{item.materials.length} 份材料</Tag>
+              <Tooltip title={item.goal || '还没有学习目标'}>
+                <Paragraph
+                  ellipsis={{ rows: 2 }}
+                  type="secondary"
+                  style={{ marginBottom: 8, flex: '1 1 auto', fontSize: '13px' }}
+                >
+                  {item.goal || '还没有学习目标'}
+                </Paragraph>
+              </Tooltip>
+              <div style={{ marginTop: 'auto', flex: '0 0 auto' }}>
+                <Space wrap size={[8, 8]}>
+                  <Tag color="default" style={{ margin: 0 }}>{item.topic_materials.length} 份材料</Tag>
                   {item.type === 'learning' && (
-                    <Tag color="blue">掌握度: {item.mastery_level_display}</Tag>
+                    <Tag color="processing" style={{ margin: 0 }}>掌握度: {item.mastery_level_display}</Tag>
                   )}
                 </Space>
               </div>

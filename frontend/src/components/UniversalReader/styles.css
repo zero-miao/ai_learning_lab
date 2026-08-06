@@ -13,6 +13,10 @@
   background: #171717;
 }
 
+.universal-reader--video {
+  padding-inline: clamp(20px, 3vw, 48px);
+}
+
 .universal-reader__header {
   display: flex;
   align-items: flex-start;
@@ -33,6 +37,51 @@
   margin: 32px 0 36px !important;
 }
 
+.universal-reader__video {
+  margin: 0 auto 32px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.universal-reader__video-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(340px, 2fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.universal-reader__video-workspace .universal-reader__video {
+  width: 100%;
+  margin: 0;
+}
+
+.universal-reader__video media-player {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+
+.universal-reader__video-markers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+  background: #f5f5f5;
+}
+
+.universal-reader__video-markers .ant-btn {
+  color: #0958d9;
+}
+
+.universal-reader--dark .universal-reader__video-markers {
+  background: #27272a;
+}
+
+.universal-reader--dark .universal-reader__video-markers .ant-btn {
+  color: #91caff;
+}
+
 .universal-reader--dark .universal-reader__divider {
   border-color: #3f3f46;
 }
@@ -48,6 +97,46 @@
 .universal-reader__content p {
   margin: 0 0 1.5em;
   white-space: pre-wrap;
+}
+
+.universal-reader__transcript {
+  width: 100%;
+  max-width: none;
+  height: min(60vh, 620px);
+  min-height: 420px;
+  padding: 20px;
+  overflow-y: auto;
+  box-sizing: border-box;
+  border-radius: 12px;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+}
+
+.universal-reader--dark .universal-reader__transcript {
+  background: #202020;
+  border-color: #303030;
+}
+
+.universal-reader__timestamp {
+  display: inline-block;
+  min-width: 42px;
+  margin-right: 8px;
+  color: #8c8c8c;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.universal-reader__content p.universal-reader__chunk--active {
+  padding: 8px 12px;
+  margin-right: -12px;
+  margin-left: -12px;
+  background: #e6f4ff;
+  border-radius: 8px;
+  transition: background-color 120ms ease;
+}
+
+.universal-reader--dark .universal-reader__content p.universal-reader__chunk--active {
+  background: #15395b;
 }
 
 .universal-reader__content ::selection {
@@ -162,6 +251,18 @@
 
 .universal-reader--dark .universal-reader__selection-menu .ant-btn {
   color: #e5e7eb;
+}
+
+@media (max-width: 1000px) {
+  .universal-reader__video-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .universal-reader__transcript {
+    height: auto;
+    min-height: 0;
+    max-height: 560px;
+  }
 }
 
 @media (max-width: 640px) {

@@ -1,5 +1,17 @@
 import React from 'react';
 import {
+  MediaPlayer,
+  MediaProvider,
+  type MediaPlayerInstance,
+} from '@vidstack/react';
+import {
+  defaultLayoutIcons,
+  DefaultVideoLayout,
+} from '@vidstack/react/player/layouts/default';
+import '@vidstack/react/player/styles/base.css';
+import '@vidstack/react/player/styles/default/theme.css';
+import '@vidstack/react/player/styles/default/layouts/video.css';
+import {
   BookOutlined,
   CommentOutlined,
   HighlightOutlined,
@@ -38,6 +50,7 @@ interface UniversalReaderProps {
     type: 'concept' | 'question' | 'highlight';
     id: number | null;
   }>;
+  seekTime?: { time: number | null; nonce: string };
 }
 
 interface ReaderChunk {
@@ -45,12 +58,21 @@ interface ReaderChunk {
   content: string;
   startOffset: number;
   endOffset: number;
+  startTime: number | null;
+  endTime: number | null;
 }
 
 interface SelectionMenu {
   selection: TextSelectionAnchor;
   top: number;
   left: number;
+}
+
+function formatTimestamp(seconds: number) {
+  const totalSeconds = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainingSeconds = totalSeconds % 60;
+  return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
 }
 
 function getReaderChunks(material: Material): ReaderChunk[] {
@@ -60,6 +82,8 @@ function getReaderChunks(material: Material): ReaderChunk[] {
       content: chunk.content,
       startOffset: chunk.start_offset,
       endOffset: chunk.end_offset,
+      startTime: chunk.start_time,
+      endTime: chunk.end_time,
     }));
   }
   return [
@@ -68,6 +92,8 @@ function getReaderChunks(material: Material): ReaderChunk[] {
       content: material.clean_text,
       startOffset: 0,
       endOffset: material.clean_text.length,
+      startTime: null,
+      endTime: null,
     },
   ];
 }
@@ -107,7 +133,11 @@ function getOffsetInElement(
   const range = document.createRange();
   range.selectNodeContents(element);
   range.setEnd(container, offset);
-  return range.toString().length;
+  const fragment = range.cloneContents();
+  fragment
+    .querySelectorAll('[data-reader-ignore-offset]')
+    .forEach((node) => node.remove());
+  return fragment.textContent?.length ?? 0;
 }
 
 type AnnotationType = 'highlight' | 'concept' | 'question';
@@ -130,40 +160,39 @@ function renderChunk(
   selectedAnnotations: UniversalReaderProps['selectedAnnotations'],
 ) {
   const ranges: AnnotationRange[] = [
-    ...highlights.map((highlight) => ({
-      type: 'highlight' as const,
-      variant: 'highlight',
-      id: highlight.id,
-      start: highlight.start_offset,
-      end: highlight.end_offset,
-      sourceStart: highlight.start_offset,
-    })),
+    ...highlights.flatMap((highlight) =>
+      highlight.locators.map((locator) => ({
+        type: 'highlight' as const,
+        variant: 'highlight',
+        id: highlight.id,
+        start: locator.start_offset,
+        end: locator.end_offset,
+        sourceStart: locator.start_offset,
+      })),
+    ),
     ...concepts.flatMap((concept) =>
-      concept.anchors.map((anchor) => ({
+      concept.locators.map((locator) => ({
         type: 'concept' as const,
         variant:
           concept.status === 'confirmed'
             ? 'concept-confirmed'
             : 'concept-draft',
         id: concept.id,
-        start: anchor.start_offset,
-        end: anchor.end_offset,
-        sourceStart: anchor.start_offset,
+        start: locator.start_offset,
+        end: locator.end_offset,
+        sourceStart: locator.start_offset,
       })),
     ),
-    ...questions
-      .filter(
-        (question) =>
-          question.start_offset !== null && question.end_offset !== null,
-      )
-      .map((question) => ({
+    ...questions.flatMap((question) =>
+      question.locators.map((locator) => ({
         type: 'question' as const,
-        variant: question.is_saved ? 'question-saved' : 'question',
+        variant: question.status === 'closed' ? 'question-saved' : 'question',
         id: question.id,
-        start: question.start_offset!,
-        end: question.end_offset!,
-        sourceStart: question.start_offset!,
+        start: locator.start_offset,
+        end: locator.end_offset,
+        sourceStart: locator.start_offset,
       })),
+    ),
   ].filter(
     (range) => range.start < chunk.endOffset && range.end > chunk.startOffset,
   );
@@ -252,11 +281,74 @@ export default function UniversalReader({
   onClearAnnotationSelection,
   onAnnotationClick,
   selectedAnnotations,
+  seekTime,
 }: UniversalReaderProps) {
   const chunks = getReaderChunks(material);
+  const playerRef = React.useRef<MediaPlayerInstance | null>(null);
+  const transcriptRef = React.useRef<HTMLDivElement | null>(null);
   const [selectionMenu, setSelectionMenu] = React.useState<SelectionMenu | null>(
     null,
   );
+  const [currentTime, setCurrentTime] = React.useState(0);
+  const isVideo = material.media_type === 'video' && Boolean(material.media_url);
+  const activeChunkId = isVideo
+    ? chunks.find(
+        (chunk) =>
+          chunk.startTime !== null &&
+          chunk.endTime !== null &&
+          currentTime >= chunk.startTime &&
+          currentTime < chunk.endTime,
+      )?.id
+    : undefined;
+  const seekTo = (time: number | null) => {
+    if (time === null || !playerRef.current) return;
+    playerRef.current.remoteControl.seek(time);
+  };
+  React.useEffect(() => {
+    if (isVideo && seekTime?.time !== null && seekTime?.time !== undefined) {
+      seekTo(seekTime.time);
+    }
+  }, [isVideo, seekTime?.nonce, seekTime?.time]);
+  React.useEffect(() => {
+    if (!isVideo || activeChunkId === undefined) return;
+    const chunk = transcriptRef.current?.querySelector<HTMLElement>(
+      `#reader-chunk-${activeChunkId}`,
+    );
+    chunk?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [activeChunkId, isVideo]);
+  const videoMarkers = isVideo
+    ? [
+        ...concepts.flatMap((concept) =>
+          concept.locators.map((locator) => ({
+            id: `concept-${concept.id}-${locator.id}`,
+            label: '概念',
+            offset: locator.start_offset,
+          })),
+        ),
+        ...highlights.flatMap((highlight) =>
+          highlight.locators.map((locator) => ({
+            id: `highlight-${highlight.id}-${locator.id}`,
+            label: '高亮',
+            offset: locator.start_offset,
+          })),
+        ),
+        ...questions.flatMap((question) =>
+          question.locators.map((locator) => ({
+            id: `question-${question.id}-${locator.id}`,
+            label: '问答',
+            offset: locator.start_offset,
+          })),
+        ),
+      ]
+        .map((marker) => ({
+          ...marker,
+          time: chunks.find(
+            (chunk) =>
+              chunk.startOffset <= marker.offset && marker.offset < chunk.endOffset,
+          )?.startTime,
+        }))
+        .filter((marker): marker is typeof marker & { time: number } => marker.time !== null && marker.time !== undefined)
+    : [];
 
   const clearSelection = () => {
     window.getSelection()?.removeAllRanges();
@@ -315,28 +407,32 @@ export default function UniversalReader({
 
   return (
     <article
-      className={`universal-reader ${darkMode ? 'universal-reader--dark' : ''}`}
+      className={[
+        'universal-reader',
+        darkMode ? 'universal-reader--dark' : '',
+        isVideo ? 'universal-reader--video' : '',
+      ].filter(Boolean).join(' ')}
     >
       <header className="universal-reader__header">
         <div>
           <Space size={8} wrap>
             <Tag
               icon={<BookOutlined />}
-              color={material.source_type === 'manual' ? 'default' : 'purple'}
+              color={material.created_by === 'manual' ? 'default' : 'purple'}
             >
-              {material.source_type_display}
+              {material.created_by === 'manual' ? '人工添加' : 'AI 推荐'}
             </Tag>
-            <Text type="secondary">{material.type_display}</Text>
+            <Text type="secondary">{material.media_type}</Text>
           </Space>
           <Title level={1} className="universal-reader__title">
             {material.title}
           </Title>
         </div>
         <Space>
-          {material.source_url && (
+          {material.media_type === 'web_page' && material.media_uri && (
             <Button
               icon={<LinkOutlined />}
-              href={material.source_url}
+              href={material.media_uri}
               target="_blank"
               rel="noreferrer"
             >
@@ -353,28 +449,80 @@ export default function UniversalReader({
 
       <Divider className="universal-reader__divider" />
 
-      <div
-        className="universal-reader__content"
-        onMouseUp={handleMouseUp}
-        onClick={onClearAnnotationSelection}
-      >
-        {chunks.map((chunk) => (
-          <p
-            id={`reader-chunk-${chunk.id}`}
-            key={chunk.id}
-            data-start-offset={chunk.startOffset}
-            data-end-offset={chunk.endOffset}
-          >
-            {renderChunk(
-              chunk,
-              highlights,
-              concepts,
-              questions,
-              onAnnotationClick,
-              selectedAnnotations,
+      <div className={isVideo ? 'universal-reader__video-workspace' : undefined}>
+        {isVideo && (
+          <section className="universal-reader__video">
+            <MediaPlayer
+              key={material.id}
+              ref={playerRef}
+              src={material.media_url}
+              title={material.title}
+              onTimeUpdate={(detail) => setCurrentTime(detail.currentTime)}
+              playsInline
+              viewType="video"
+              load="eager"
+            >
+              <MediaProvider />
+              <DefaultVideoLayout icons={defaultLayoutIcons} />
+            </MediaPlayer>
+            {videoMarkers.length > 0 && (
+              <div className="universal-reader__video-markers" aria-label="视频学习标记">
+                {videoMarkers.map((marker) => (
+                  <Button
+                    key={marker.id}
+                    size="small"
+                    type="text"
+                    onClick={() => seekTo(marker.time)}
+                  >
+                    {marker.label} {formatTimestamp(marker.time)}
+                  </Button>
+                ))}
+              </div>
             )}
-          </p>
-        ))}
+          </section>
+        )}
+
+        <div
+          className={`universal-reader__content ${isVideo ? 'universal-reader__transcript' : ''}`}
+          ref={transcriptRef}
+          onMouseUp={handleMouseUp}
+          onClick={onClearAnnotationSelection}
+        >
+          {chunks.map((chunk) => (
+            <p
+              id={`reader-chunk-${chunk.id}`}
+              key={chunk.id}
+              data-start-offset={chunk.startOffset}
+              data-end-offset={chunk.endOffset}
+              className={chunk.id === activeChunkId ? 'universal-reader__chunk--active' : undefined}
+              onClick={() => {
+                const selection = window.getSelection();
+                if (selection && !selection.isCollapsed) return;
+
+                if (chunk.startTime !== null) {
+                  seekTo(chunk.startTime);
+                }
+              }}
+            >
+              {isVideo && (
+                <span
+                  className="universal-reader__timestamp"
+                  data-reader-ignore-offset
+                >
+                  {chunk.startTime !== null ? formatTimestamp(chunk.startTime) : '--'}
+                </span>
+              )}
+              {renderChunk(
+                chunk,
+                highlights,
+                concepts,
+                questions,
+                onAnnotationClick,
+                selectedAnnotations,
+              )}
+            </p>
+          ))}
+        </div>
       </div>
 
       {selectionMenu && (
