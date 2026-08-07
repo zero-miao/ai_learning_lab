@@ -6,6 +6,25 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 backend_pid=""
 frontend_pid=""
 
+node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)"
+if [[ ! "$node_major" =~ ^[0-9]+$ ]] || ((node_major < 20)); then
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    set +u
+    # shellcheck disable=SC1090
+    source "$NVM_DIR/nvm.sh"
+    nvm use 20 >/dev/null
+    set -u
+  fi
+fi
+
+node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)"
+if [[ ! "$node_major" =~ ^[0-9]+$ ]] || ((node_major < 20)); then
+  printf 'Node.js 20 or newer is required. Install it with: nvm install 20\n' >&2
+  exit 1
+fi
+node_binary="$(command -v node)"
+
 cleanup() {
   trap - EXIT INT TERM
   if [[ -n "$frontend_pid" ]]; then
@@ -47,7 +66,7 @@ backend_pid=$!
 
 (
   cd "$project_root/frontend"
-  exec ./node_modules/.bin/vite
+  exec "$node_binary" ./node_modules/vite/bin/vite.js
 ) &
 frontend_pid=$!
 
