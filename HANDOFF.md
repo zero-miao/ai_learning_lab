@@ -1,247 +1,123 @@
 # AI Learning Lab 交接文档
 
-> 本文是当前工作区的 V2-alpha 交接基线。以代码、迁移、自动化测试及本文为准；旧 V1 文档只保留产品历史参考，不可作为 API 或数据模型契约。
->
-> 最近更新：2026-08-07，已纳入统一话题讨论、材料人工采纳、全站主题、持久化系统设置、Provider 模型发现、材料关联管理及讨论 Markdown 的验收结果。
+> 本文只记录长期有效的产品/工程决策、V2-alpha 整体进度和不易复现的验收结论。API、迁移、分支和具体实现以代码与 Git 为准。
 
-## 1. 项目边界
+## 1. V1 与 V2 的关系
 
-`ai-learning-lab` 是本地单用户的 AI 辅助学习系统，覆盖材料导入、阅读理解、概念沉淀、掌握度评估、复习安排、本地视频学习和自动补料。
+V2 不是独立新产品，也不是 V1 的缩减版重写，而是同一产品的数据模型和实现架构升级。
 
-- 保持本地单体架构；不引入 Celery、Redis、消息队列、复杂 Docker Compose 或多用户鉴权。
-- 所有长耗时 LLM、ASR、检索和抓取调用必须经持久化 `AITask` 和后台 worker 执行，前端以轮询获取结果。
-- 不支持公网部署、HTTPS、云备份、多租户、同步协作或移动端适配。
-- 本地 SQLite 是唯一持久化存储；用户自行控制 Django、Ollama、Docker、SearxNG 与 Crawl4AI 的启动和停止。
+- V1 已跑通“导入 -> 阅读理解 -> 概念/高亮/问答 -> 评估 -> 复习”的完整学习闭环；V2 在继承该闭环的基础上增加视频学习、自动补料和统一的数据模型。
+- V1 已有能力默认必须保留。V2 文档未提及某项 V1 能力，不代表该能力被移除；只有明确记录的产品决策才能下线功能。
+- V1 文档用于确认历史产品能力和设计意图，不作为当前 API、字段或数据模型契约。
+- V2 的实现契约以当前模型、迁移、测试和代码为准。V1 兼容表、兼容字段和旧 API 可以删除，但不能以迁移为理由造成功能退化。
+- 新增或恢复 UI 必须直接使用 V2 模型和 API，不重新引入 V1 兼容层。
 
-## 2. 关键文档
+相关文档：
 
-接手时按以下顺序阅读：
+- [docs/V1-ALPHA.md](docs/V1-ALPHA.md)、[docs/PRD.md](docs/PRD.md)：V1 能力与产品历史
+- [docs/product_design_v2_alpha.md](docs/product_design_v2_alpha.md)：V2-alpha 产品范围
+- [docs/development_design_v2_alpha.md](docs/development_design_v2_alpha.md)：V2-alpha 工程设计
+- [docs/frontend_interaction_design.md](docs/frontend_interaction_design.md)：当前前端关键行为与“简洁高效”的设计标准
+- [docs/local_service_integration.md](docs/local_service_integration.md)：本地服务联调
+- [DEV.md](DEV.md)：开发与启动说明
 
-1. [HANDOFF.md](HANDOFF.md)
-2. [docs/development_design_v2_alpha.md](docs/development_design_v2_alpha.md)
-3. [docs/product_design_v2_alpha.md](docs/product_design_v2_alpha.md)
-4. [docs/local_service_integration.md](docs/local_service_integration.md)
-5. [DEV.md](DEV.md)
-6. [docs/V1-ALPHA.md](docs/V1-ALPHA.md) 与 [docs/PRD.md](docs/PRD.md)，仅用于产品历史和能力对照
-7. [requirements.txt](requirements.txt)、[pyproject.toml](pyproject.toml) 及相关模型、迁移、API、前端页面
+## 2. 产品与架构边界
 
-V2 实现行为以模型、迁移、测试和本文为准。V1 文档可用于防止产品能力回退，但不得作为数据模型、字段或 API 契约。
+`ai-learning-lab` 是本地单用户的 AI 辅助学习系统，覆盖材料导入、阅读理解、知识沉淀、掌握度评估、间隔复习、本地视频学习和自动补料。
 
-## 3. 技术栈与环境
+- 保持本地单体架构和 SQLite 持久化，不引入多用户鉴权、Celery、Redis、消息队列或复杂 Docker 编排。
+- 不以公网部署、移动端、云备份、同步协作为目标。
+- 实现功能时，若已有稳定、活跃维护且满足需求的开源组件，必须优先复用，不得重复自研；确需自研时必须记录现有组件无法满足的具体原因。
+- 长耗时 LLM、ASR、TTS、检索和抓取必须通过持久化 `AITask` 与单 worker 异步执行；前端必须展示排队、执行、失败状态并提供重试。
+- `AITask` 通过 `trigger_type + trigger_id` 关联业务对象。新增任务类型必须利用 Python 元类能力接入 `TaskRegistry` 自动注册，并将任务逻辑、提示词和显示名称内聚在任务类中；禁止维护中心分发表或增加硬编码任务分支。
+- 环境变量只负责基础设施参数和系统配置首次初始化。运行期模型路由、本地服务地址、补料阈值和界面默认值由单例 `SystemConfiguration` 管理。
+- 任务入队时固化实际模型；重试继续使用原模型。所有环境默认项必须在 `.env.example` 中完整声明并附中文说明。
+- LLM 通过 OpenAI-compatible 接口接入，必须支持本地 Ollama。当前模型只是可变配置，不写入 handoff 作为固定契约。
 
-后端采用 Python 3.12、Django 4.2、Django REST Framework、SQLite、APScheduler、Edge TTS 和 OpenAI-compatible SDK；前端采用 React、TypeScript、Vite、Ant Design、Axios 和 Vidstack。
+## 3. V2 核心契约
 
-已验证的本机环境：
+### 数据归属
 
-- Python 3.12.13，虚拟环境为根目录 `.venv`
-- Node.js v20.20.2，npm 10.8.2
-- 可选本地 Ollama；视频与补料联调额外依赖 ffmpeg、faster-whisper、Docker、SearxNG、Crawl4AI
-
-根目录 `.env` 保存启动配置和系统配置首次初始化值。不要提交 `.env`；模板见 [.env.example](.env.example)。
-启动基础设施参数始终读取 `.env`；模型路由、本地服务、补料阈值和界面默认值在首次运行时由 `.env` 初始化到 `SystemConfiguration`，之后通过 `/settings` 持久化管理。
-
-```dotenv
-LLM_PROVIDER_TYPE=ollama
-LLM_BASE_URL=http://localhost:11434/v1
-LLM_API_KEY=ollama
-LLM_MODEL=qwen3.6:35b-a3b
-LLM_MODEL_TOPIC_CHAT=qwen3:30b-a3b
-LLM_MODEL_SUPPLEMENT_QUERY=qwen3:30b-a3b
-LLM_MODEL_SUPPLEMENT_EVALUATE=qwen3.6:35b-a3b
-ASR_MODEL=small
-SEARXNG_BASE_URL=http://127.0.0.1:8080
-CRAWL4AI_BASE_URL=http://127.0.0.1:11235
-SUPPLEMENT_RELEVANCE_THRESHOLD=0.8
-```
-
-首次初始化时，`LLM_MODEL_<TASK_TYPE>` 可指定各任务模型，未配置时回退 `LLM_MODEL`；初始化后统一在 `/settings` 修改。任务入队时会持久化实际模型，重试继续使用该模型。
-
-当前本机数据库按任务特征配置为：学习讨论、阅读问答和复习提示使用 `qwen3:30b-a3b`；正文清洗、阅读前导、补料检索与评估、概念草稿、出题、阅卷和复盘评分使用 `qwen3.6:35b-a3b`。补料检索词生成与候选评估统一模型，正文清洗与阅读前导统一模型，以减少 48 GB 单 worker 环境中的模型切换。
-
-## 4. 当前基线
-
-项目已完成 V2 ER 硬切换和核心前端迁移，`feat/unified-learning-settings` 已通过 PR #7 合并到 `main`；后续问答与 Topic 清理修复位于 `fix/multiturn-question-topic-cleanup`。V2 的原则是：
-
-> 只移除 V1 数据兼容层，不移除既有产品功能。任何恢复或新增 UI 必须直接使用 V2 模型和 API。
-
-当前迁移序列到 `api.0030_systemconfiguration`：
-
-- `0021_v2_core_foundation`
-- `0022_migrate_v1_data_to_v2_core`
-- `0023_add_video_material_type`
-- `0024_prepare_v2_er_cutover`
-- `0025_remove_v1_compatibility`
-- `0026_aitask_full_context`
-- `0027_remove_aitask_input_json_and_more`
-- `0028_alter_material_status`
-- `0029_unify_topic_and_material_recommendations`
-- `0030_systemconfiguration`
-
-切换前的 SQLite 备份为 `backend/db.sqlite3.v2-er-pre-cutover-20260805-001132`，该文件已忽略且不应提交。
-
-## 5. V2 数据契约
-
-已删除的 V1 表：
-
-- `AIResponse`
-- `ConceptAnchor`
-- `DiscussionMessage`
-
-V2 核心模型：
-
-| 模型 | 责任 |
+| 模型 | 稳定责任 |
 | --- | --- |
-| `Material` | 全局资料实体，保存内容、媒体属性、状态、摘要及 Chunk。 |
-| `TopicMaterial` | Topic 与 Material 的关联语境，保存类别、相关度、导入理由、移除时间。移除只影响当前 Topic。 |
-| `MaterialRecommendation` | 补料候选及人工采纳状态；只有采纳后才创建或恢复 TopicMaterial。 |
-| `MaterialChunk` | 文字 offset；视频/音频额外有起止时间。 |
-| `MaterialTextLocator` | Concept / Highlight / Question 的统一定位器，保存 Topic、Material、Chunk、文本及时间坐标。 |
-| `Concept` | Topic 内结构化概念卡片。 |
-| `Highlight` | 高亮备注实体；定位完全由 Locator 承载。 |
-| `Question` | 基于 Session 的问题卡片与结论。 |
-| `Session` / `SessionMessage` | 阅读问答和 Topic 讨论的统一会话模型。 |
-| `AITask` | 使用 `trigger_type + trigger_id` 关联业务触发方，结果写入 `result_json`。 |
-| `SystemConfiguration` | 单例系统配置，持久化模型路由、本地服务、补料阈值和界面默认值。 |
-| `Exam` / `ExamQuestion` / `ReviewRecord` | 掌握度评估与间隔复习。 |
+| `Material` | 全局资料实体，保存原文、清洗正文、媒体信息、摘要和处理状态。 |
+| `TopicMaterial` | Topic 与 Material 的关联语境，保存分类、相关度、导入理由和软删除状态。 |
+| `MaterialRecommendation` | 自动补料候选及人工采纳状态。候选不会直接成为 Topic 材料。 |
+| `MaterialChunk` | 正文 offset；视频/音频额外保存真实时间区间。 |
+| `MaterialTextLocator` | Concept、Highlight、Question 共用的原文定位器，同时承载文字和媒体时间坐标。 |
+| `Session` / `SessionMessage` | 阅读问答和 Topic 讨论的统一多轮会话。 |
+| `Exam` / `ExamQuestion` / `ReviewRecord` | 掌握度评估和间隔复习闭环。 |
+| `AITask` | 所有异步任务的持久化状态、输入、完整上下文、结果和错误。 |
+| `SystemConfiguration` | 可持久化修改的运行期系统配置。 |
 
-禁止重新增加 V1 兼容字段、旧表或 AITask 的业务外键。前端也不得消费旧字段，例如 `materials`、`anchors`、`ai_responses`、`import_status`、`source_type`。
+V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新增加这些表、V1 兼容字段、`AITask` 业务外键，或让前端重新消费 `materials`、`anchors`、`ai_responses`、`import_status`、`source_type` 等旧契约。
 
-## 6. 已完成能力
+### 材料与补料
 
-### Topic 与材料
+- Material 是可跨 Topic 复用的全局实体。解除 TopicMaterial 只移除当前 Topic 的关联；删除 Topic 不得删除共享 Material 或实体文件。
+- 全局删除 Material 必须取消其运行中任务，并清理主媒体、外挂字幕和 TTS 文件。
+- 自动补料只生成 `MaterialRecommendation`。用户人工采纳后才能创建/恢复 TopicMaterial 并启动材料处理流水线。
+- 材料流水线按原文获取/ASR -> 清洗 -> 摘要 -> TTS 顺序推进，并支持幂等续跑。
+- 长文本清洗必须按自然段分段，并向每段提供已清洗上文和待处理下文，不能通过截断规避上下文长度。
+- `raw_text` 保存原始文本或转录，`clean_text` 保存 AI 清洗后的正文；MaterialChunk 只基于 `clean_text` 创建。
 
-- Topic 统一为学习话题，不再区分学习型和讨论型；支持搜索和删除。删除 Topic 时会同步清理其独占的讨论 Session、消息及关联通用 AITask，共享 Material 与其他 Topic 数据不受影响。
-- Topic 卡片布局：强制每行 4 个卡片（桌面端），设置 `width: 100%` 确保宽度严格一致，不受内容长短影响；标题与目标超出时省略并支持悬浮查看全文。
-- Topic 详情支持网页链接、粘贴文本、本地视频导入；视频上传已收敛到“添加材料”弹窗。
-- Topic 标题区支持编辑标题、学习目标和学习范围，保存后立即更新当前详情。
+### Locator 与媒体
 
-### 阅读、定位与学习产出
+- 文本、网页和视频共用 MaterialTextLocator。概念、高亮、问题不得各自维护另一套定位字段。
+- 视频 Chunk 的时间坐标必须依据原始字幕/ASR segments 与清洗正文做单调文本对齐；禁止按清洗后的段落序号硬配时间戳。
+- 阅读器中的时间戳、按钮等展示节点必须标记为不参与正文 offset，避免污染划词定位。
+- 视频和 TTS 媒体响应必须保留 HTTP Range 支持。
+- 标注跳转遵循同一规则：有时间坐标则 seek，无时间坐标则按正文 offset 滚动。
 
-- `UniversalReader` 支持文本和 Vidstack 视频阅读。
-- 联动与跳转：
-    - 支持从“学习产出”跳转至原文：优先按 Locator 精确滚动，视频 seek 到时间点，并对目标条目进行 2 秒临时高亮视觉反馈。
-    - **双向联动**：在学习工作区点击概念或高亮可“回原文”；点击文中批注可自动弹出工作区并切换到对应 Tab，问题批注会同时打开对应对话。
-    - **重复点击修复**：引入 nonce (时间戳) 机制，确保连续点击同一条目也能触发跳转和高亮。
-- 学习工作区：
-    - Tab 平铺展示：问答、概念、高亮独立平铺，减少点击层级。
-    - 操作图标化：补资料、编辑、删除、回原文等操作统一使用图标并与标题同行显示，最大化内容区域。
-    - 深色模式增强：修复了深色背景下摘要文字与选中条目文字的可见性；优化了 Drawer 列表项在深色模式下的 hover (对比度增强) 和 active 状态。
-    - **全条目点击**：概念和高亮列表项支持全区域点击触发“回原文”定位；问答列表项全区域点击进入对应对话。
-    - **连续学习体验**：阅读页新增粘性工具栏，标题栏常驻展示当前材料的概念、问答和高亮数量并提供学习工作区入口；右下角重复入口已移除。
-    - **问答界面修复**：新问题输入与历史对话输入已拆分；AI 回复任务完成后自动刷新当前 Session 并滚动至最新消息。
-    - **问答上下文反馈**：对话顶部固定展示最初划词引用并支持回原文；任务排队或运行时在消息区展示“AI 正在回复”，刷新页面后可按最后一条用户消息恢复任务状态。
-    - **状态与防误触**：补齐加载骨架、材料不可用状态、工作区空态、材料处理中提示和 AI 任务失败重试；概念、问答和高亮删除前均需二次确认。
-- 阅读器体验：
-    - 视频区在宽屏双栏下保持 sticky，转录稿滚动时播放器持续可见；窄屏自动恢复普通文档流。
-    - 媒体类型统一展示本地化文本；选区菜单自动避让视口边缘；文中标注支持键盘聚焦与回车打开。
-    - 取消选区、滚动正文或按下 `Escape` 时，划词操作框会立即收起，不再残留失效菜单。
-    - 文本与网页材料在 `briefing` 后自动进入 `edge_tts` AITask，按系统设置中的 TTS 音色生成并缓存 `materials/tts/{material_id}/{voice}.mp3`；首次初始化值来自 `TTS_VOICES`。正文指纹未变化时复用缓存；至少一个音色成功即可将材料标记为 `ready`，全部失败才重试并最终失败。
-    - 前端不再使用 Web Speech API，直接加载 Material API 返回的 `tts_assets`。播放键作为独立主按钮，背景、音色、倍速组成下方设置组；支持播放、暂停、双击停止、音色切换及 `0.5x`～`3x` 九档倍速，并按播放进度同步高亮当前段落。
-    - 全站背景支持纯白、暖黄、护眼绿、柔灰、深黑、夜蓝、炭灰、暖黑八种主题并持久化；阅读页与站点共享当前主题，暗色主题同步启用 Ant Design 深色算法。
-    - 阅读正文支持系统字体、宋体、楷体、衬线字体四种选择并独立持久化；朗读音色由后端配置并显示简短标签。历史材料可通过 `python backend/manage.py backfill_tts [--force]` 批量排队生成。
-    - 文本与网页正文使用 `react-markdown + remark-gfm` 渲染标题、加粗、列表、引用、链接、代码及 GFM 表格；自定义 rehype 插件将渲染节点映射回 Markdown 源码 offset，保留 Locator 划词和回跳契约。
-    - 材料前置摘要已统一使用 `react-markdown + remark-gfm`，不再使用逐行正则解析，支持标题、加粗、列表、引用、代码和 GFM 表格。
-    - Edge TTS 是在线服务，正文会发送至微软朗读接口；当前实现不提供 Web Speech 回退。音频接口沿用统一媒体服务并支持 `206 Partial Content`。
-    - 顶部返回入口明确展示 `返回主题：《主题名》`，长主题名自动单行省略。
-- 摘要默认折叠，并通过 `react-markdown + remark-gfm` 完整渲染 GFM。
+### 前端与阅读体验
 
-### 概念、讨论、问答与复习
+- 页面必须简洁高效，学习页面优先保障连续阅读：减少重复入口和无意义层级，把主要空间留给正文与学习内容，同时保证关键操作在长页面中始终容易触达。
+- 前端文案必须使用清晰的本地化描述，不直接展示内部状态 Key。长文本应控制行宽、段落间距和换行，正文行高原则上不低于 `1.6`，避免拥挤或过度稀疏。
+- AI 输出、摘要、讨论、问答和复习提示统一按 Markdown/GFM 渲染，完整支持标题、列表、引用、链接、代码和表格；Markdown 容器不得使用 `white-space: pre-wrap` 破坏排版。
+- 阅读字体由用户选择并持久化，正文、字幕和阅读型内容应一致继承当前字体；代码等具有明确语义的内容除外，不得在局部组件中随意写死字体。
+- 背景颜色和文字颜色必须跟随全站主题。浅色主题不得用大面积深色背景承载长文本或代码上下文；深色主题必须使用 Ant Design token 或主题相关颜色保证对比度和可读性。
 
-- 话题详情页提供右侧“学习讨论”抽屉，可随时围绕话题目标、范围、已有材料摘要和最近对话继续交流。
-- 学习讨论中的用户和 AI 消息均通过 `react-markdown + remark-gfm` 渲染，支持标题、列表、引用、代码、链接及 GFM 表格。
-- 话题对话默认使用 `qwen3:30b-a3b`，材料评估等分析任务默认使用 `qwen3.6:35b-a3b`，均可在 `/settings` 调整；不再暴露探索/定义问题/决策阶段。
-- AI 识别材料缺口后异步生成结构化候选卡片；用户必须点击“采纳”后才会关联材料并启动处理流水线。
-- 概念与高亮：支持草稿生成、确认、**在线编辑**与删除。
-- 问答系统升级：
-    - **Session 多轮会话**：首次问题与每次追问均保存为独立 `SessionMessage` 并触发独立 AITask；`AnswerQuestionTask` 使用本次追问、最近 20 条 Session 历史、Locator 选中文字和材料正文组装上下文。
-    - **历史展示**：支持从问答列表进入已有 Session 查看消息并继续追问，AI 回复会追加到同一 Session 并更新 Question 结论。
-    - **即问即聊**：新发起的划词问答自动初始化 Session 并进入聊天界面。
-- 学习产出页（TopicDetail）展示增强：
-    - **三行式布局**：概念（名/定义/原文引用）、问答（问题/原文引用/结论）、高亮（原文/原文引用/备注）均采用清晰的三行结构展示。
-    - **原文引用格式**：统一使用引用块样式，并标注“—— 来自《材料名》”。
-    - **问答引用文字**：显式展示问题关联的原文选中文字，建立清晰语境。
-- 概念图 `/topics/:id/map`：可视化思维导图，移除冗余列表，支持节点/连线交互；点击连线可编辑关系类型或直接删除。
-- 掌握度评估 `/topics/:topicId/exam` 支持异步出题、作答、阅卷、查看当前结果和历史评估。
-- 复习计划 `/reviews` 支持查看记录、生成复习提示、提交复盘和跳转 Topic。
+### 删除与可观测性
 
-### SPA 交互优化
+- Topic 删除必须清理其独占 Session、SessionMessage 和关联 AITask，但不得误删共享 Material。
+- 所有异步用户路径必须具备持久化任务、刷新后状态恢复、可读错误和页面内重试。
 
-- 统一使用 `useNavigate` 进行页面间跳转，消除浏览器刷新，保持单页应用状态连贯性。
-- `BrowserRouter` 已提升至入口文件 `main.tsx`。
-- **无感进入**：修复了点击“学习”按钮进入阅读器时因 URL 参数解析导致的非预期自动滚动。
+## 4. V2-alpha 进度
 
-### 视频与补料
+### 已完成
 
-- 视频上传 API：`POST /api/materials/upload-video/`，支持 `.mp4/.mov/.m4v/.webm/.avi/.mkv` 和可选 `.srt/.vtt`。
-- `asr` 任务：字幕优先，`faster-whisper` 为无字幕兜底。
-- **无字幕视频已真实跑通**：本机使用 `ffmpeg/ffprobe + faster-whisper` 成功完成约 99 秒 MP4 的 ASR，生成 60 个原始时间片；Hugging Face 模型下载后缓存在本机，不会每次重复下载。
-- **视频随机访问**：新增支持单 Range 请求的媒体响应端点，返回 `206 Partial Content`、`Accept-Ranges` 和 `Content-Range`，Chrome 播放器可拖动进度条并执行程序化 seek。
-- **清洗后时间轴对齐**：原始 ASR `segments` 持久化在 `media_meta`；`CleanTextTask` 重建 Chunk 时通过单调文本序列对齐，将 AI 合并、纠错后的段落映射回真实 ASR 起止时间，禁止再按段落序号硬配时间戳。
-- **视频学习工作台**：
-    - 桌面端使用最大 `1480px` 宽屏布局，视频与字幕约按 `3:2` 左右并排；小于 `1000px` 自动回落为上下布局。
-    - 字幕根据播放时间自动高亮和滚动，点击字幕使用 Vidstack `remoteControl.seek()` 跳转。
-    - 已补齐 Vidstack 默认视频布局 CSS，播放器只展示一套正确定位的控制栏。
-    - 字幕时间戳属于展示信息，标注 offset 计算必须忽略 `data-reader-ignore-offset` 节点，否则会产生固定字符偏移。
-- 候选补料：Topic、Concept、Question、Highlight 和话题对话均可触发 `supplement_search`；检索结果不会自动入库。
-- 话题对话抽屉持续展示补料任务阶段、候选总数、已处理数和推荐数；首个候选出现时仍明确提示任务尚未完成。
-- **关联已有材料**：添加材料弹窗新增“已有材料”选项，支持从全局材料库搜索并关联至当前 Topic，后端支持 TopicMaterial 复用逻辑。
-- 补料任务阶段与候选过滤原因保存在 `AITask.result_json`。
+- 完成 V2 ER 硬切换，移除 V1 数据兼容层，并保留 V1 完整学习闭环。
+- Topic 统一为学习话题；支持编辑目标/范围、搜索、删除、右侧学习讨论和材料管理。
+- Material 全局化；支持网页、粘贴文本、本地视频、已有材料复用、Topic 关联治理和全局彻底删除。
+- 文本与视频统一进入阅读器；支持字幕同步、点击 seek、划词创建概念/高亮/问答、双向回跳和重复定位。
+- 阅读问答支持基于 Session 的多轮对话、最近历史、Locator 选中文字和材料正文上下文；刷新后可恢复回复任务。
+- 概念、高亮支持生成、确认、编辑、删除；概念图支持关系创建、编辑和删除。
+- Topic 讨论支持 Markdown/GFM，并能识别材料缺口、生成结构化补料候选。
+- 自动补料支持 Topic、Concept、Question、Highlight 和讨论触发；候选必须人工采纳后才进入材料流水线。
+- 视频支持外挂字幕优先、faster-whisper 兜底、真实时间轴对齐、HTTP Range 播放和字幕标注。
+- 文本/网页支持 Edge TTS 多音色缓存、Range 播放、倍速、播放段落高亮和历史材料回填。
+- 全站主题、阅读字体、LLM/任务模型、本地服务和超时等配置已持久化到设置页；支持 Provider 模型发现。
+- 全局材料页已表格化，展示原文/清洗/摘要/TTS 状态，并支持 Topic 筛选与关联。
+- 掌握度评估支持异步出题、草稿保存、提交阅卷、任务恢复/重试、历史结果和逐题反馈。
+- 复习计划支持异步提示、复盘评分、任务恢复/重试、反馈和下一次复习安排。
+- 任务管理页支持状态/类型筛选、完整上下文查看和失败任务重试。
 
-### 任务与管理
+### 已实现但仍待真实验收
 
-- `/settings` 提供系统设置页面，支持持久化 LLM 服务、各任务模型、Ollama 保活、ASR、TTS、SearxNG、Crawl4AI、补料阈值、全局背景、学习字体和前端请求超时。
-- 新任务优先读取数据库系统配置；数据库配置首次由 `.env` 初始化。LLM 地址、密钥或模型保存后会清理 Provider 缓存并立即对新任务生效。
-- 设置页通过 Provider 的 OpenAI-compatible Models API 动态读取可用模型；默认模型和所有任务模型均使用可搜索下拉，同时保留手动输入能力。Provider 地址或密钥修改后需重新读取候选列表。
+- 外挂 `.srt/.vtt` 字幕优先处理已覆盖上传测试，仍缺真实视频与字幕的浏览器验收。
+- 思维导图拖拽建关系、关系编辑和删除仍缺浏览器交互验收。
+- 评估历史结果及评估/复习任务反馈仍缺完整浏览器验收。
 
-- **AITask 插件化架构**：
-    - 引入了基于 `TaskRegistry` 元类的自动注册机制，彻底移除了硬编码的任务分发逻辑。
-    - 任务类（如 `CleanTextTask`, `BriefingTask`）独立维护其 `verbose_name`、`run` 方法及 LLM 提示词。
-    - `AITask` 模型移除了 `prompt_version`，默认使用类中最新的逻辑版本；`input_json` 重命名为 `task_data`。
-- **任务可观测性**：
-    - `/tasks` 任务表格优化：支持查看 LLM 完整上下文 (`full_context`)，优化了 JSON 块的视觉样式（去除了黑色背景，增加了行高）。
-    - 任务类型展示：前端通过 `task_type_display` 动态展示由 TaskRegistry 定义的中文名称。
+### 尚未完成
 
-### 材料管理与流水线
+1. 阅读页在“当前 Topic 标注 / 全部标注”之间切换。
+2. 将视频学习标记绘制到播放器进度条；当前只有播放器下方的可点击标记列表。
+3. 建立关键 V2 用户路径的端到端自动化测试，至少覆盖视频导入 -> ASR -> 清洗 -> 字幕 seek -> 划词 Locator。
+4. 前端代码分割；当前主 bundle 约 1.79 MB，gzip 约 560 kB。
 
-- **全局材料页重构**：
-    - **表格化布局**：从卡片列表改为高效的表格展示，支持行点击展开详情。
-    - **处理进度可视化**：行内实时展示“原”（原文）、“清”（清洗）、“摘”（摘要）的就绪状态（对勾/红差）。
-    - **朗读音频状态**：音频状态列紧邻处理进度列，按音色展示 Edge TTS 文件的就绪或失败状态，展开详情可再次核对。
-    - **话题关联管理**：每行可直接关联已有话题；支持按具体话题筛选，也可单独筛选未关联任何话题的材料。重复关联会恢复此前软删除的 TopicMaterial。
-    - **全局删除**：删除材料会取消其运行中任务，并同步删除主媒体、外挂字幕和 `backend/media/materials/tts/{material_id}` 下的朗读文件。
-    - **交互增强**：失败状态支持 Tooltip 查看原因；网页链接简化为“原始链接”超链接；关联主题标签支持一键跳转。
-- **智能导入流水线**：
-    - 实现了“幂等自检”逻辑：触发重新导入时，系统按顺序检查 `Process/ASR` -> `CleanText` -> `Briefing`，若某一环节已有内容则跳过 AI 调用但继续触发下一环。
-    - **状态细化**：材料状态与流水线同步，细化为：`pending` (待处理)、`importing` (导入中)、`cleaning` (清洗中)、`summarizing` (摘要中)、`generating_audio` (生成朗读音频)、`ready` (已就绪)、`failed` (失败)。
-- **长文本清洗优化**：
-    - **分段处理**：`CleanTextTask` 实现了基于自然段落的分段清洗，支持超长文本（无字符上限）。
-    - **上下文参考窗口**：在清洗每一段时提供上文（已清洗）和下文（待处理）的参考背景，解决了分段导致的“断章取义”问题，且不产生重复内容。
-    - **摘要增强**：`BriefingTask` 输入窗口扩大至 15,000 字符，确保覆盖核心要点。
-- **数据流转修正**：网页导入优先生成 `raw_text` (原文)，再由 AI 清洗生成 `clean_text`；`MaterialChunk` 仅基于清洗后的正文生成。
-- **视频数据例外**：视频 `raw_text` 同样是原始转录存档，最终 `MaterialChunk` 基于 `clean_text` 生成，但时间坐标必须从 `media_meta.segments` 对齐恢复。
+后续优先完成跨 Topic 标注和待验收交互，再建设端到端测试与播放器标记，最后处理 bundle 体积。
 
-## 7. 当前 API 与任务触发
-
-| 能力 | API | V2 trigger |
-| --- | --- | --- |
-| 创建文本/网页材料 | `POST /api/materials/` | `Material`（后续 process -> clean_text -> briefing） |
-| 上传视频 | `POST /api/materials/upload-video/` | `Material` / `asr` -> clean_text -> briefing |
-| 创建概念 | `POST /api/topics/{id}/concepts/` | `Concept` / `concept_draft` |
-| 创建高亮 | `POST /api/topics/{id}/highlights/` | 无 AI 任务 |
-| 创建问题 | `POST /api/questions/` | `Question` / `answer_question` |
-| 查找候选材料 | `POST /api/topics/{id}/supplement/` | Topic / Concept / Question / Highlight |
-| 采纳/忽略候选 | `POST /api/material-recommendations/{id}/adopt/`、`dismiss/` | `MaterialRecommendation` |
-| Topic 讨论 | `GET/POST /api/topics/{id}/discussion/` | `SessionMessage` / `discussion_reply` |
-| 生成评估 | `POST /api/exams/` | `Topic` / `generate_exam` |
-| 阅卷 | `POST /api/exams/{id}/submit/` | `Exam` / `grade_exam` |
-| 保存评估草稿 | `POST /api/exams/{id}/save/` | 无 AI 任务 |
-| 复习提示 | `POST /api/reviews/{id}/prompt/` | `ReviewRecord` / `review_prompt` |
-| 复盘提交 | `POST /api/reviews/{id}/submit/` | `ReviewRecord` / `grade_review` |
-| 任务查询 / 重试 | `GET /api/ai-tasks/`、`POST /api/ai-tasks/{id}/retry/` | - |
-| 系统配置 | `GET/PUT /api/system-configuration/` | 单例 `SystemConfiguration` |
-| Provider 模型发现 | `POST /api/system-configuration/models/` | 按当前 Provider 连接参数返回模型 ID |
-
-## 8. 验证基线
+## 5. 验证证据
 
 标准回归命令：
 
@@ -255,76 +131,36 @@ V2 核心模型：
 (cd frontend && npm run lint)
 ```
 
-- `ruff check backend` 已通过；`ruff format --check backend` 当前仍会报告历史迁移 `0026_aitask_full_context.py`、`0027_remove_aitask_input_json_and_more.py` 需要格式化。
-- 前端：`npm run build` 已通过；Vidstack 默认视频布局 CSS 已进入产物。
-- 学习页体验优化后已再次通过 `npm run build` 与 `npm run lint`；主 bundle 体积告警仍存在。
-- 后端：`manage.py check` 通过；媒体 Range、媒体 URL、视频合并段落时间轴对齐 3 项定向测试通过。
-- HTTP 实测：带 `Range: bytes=4096-8191` 的媒体请求返回 `206 Partial Content`、正确 `Content-Range` 和 4096 字节响应体。
-- Edge TTS 实测：`zh-CN-XiaoxiaoNeural` 可生成 24 kHz、48 kbps 单声道 MP3；Material API 正确返回 `tts_assets`，音频 Range 请求返回 `206 Partial Content`。
-- 历史回填已完成：15 个 `edge_tts` 任务全部成功，共生成 30 份 MP3（默认“晓晓、云希”各一份），无失败任务。
-- 浏览器实测（Chrome）：
-    - 视频播放、进度条拖动正常。
-    - 点击字幕可跳转到正确时间。
-    - 字幕随播放高亮并滚动。
-    - 视频与字幕宽屏双栏正常。
-    - 划词“防火”创建概念后，Locator 与高亮均准确落在“防火”。
-    - 阅读页可加载后端缓存 MP3，音色菜单展示“晓晓/云希”；切换“云希”后请求对应 MP3，播放按钮正确切换为暂停状态。
-    - 夜蓝主题可跨材料管理页、话题详情页和阅读页保持一致；阅读页可切换四种正文字体。
-    - 材料页“未关联任何话题”筛选正确；从筛选结果关联话题后成功请求 `POST /api/topic-materials/`，材料立即移出未关联列表。
-    - 学习讨论消息中的 Markdown 标题、加粗列表和 GFM 表格正确渲染。
-- Edge TTS 新增 3 项定向测试均通过：多音色部分成功、`briefing -> edge_tts` 串联、历史材料回填排队。
-- **完整后端回归已通过**：`manage.py test api` 共 26 项测试全部通过，覆盖系统配置持久化、配置校验、Provider 模型发现、阅读多轮问答及 Topic 删除闭环；补料测试验证“生成候选 -> 人工采纳 -> 进入清洗流水线”。
-- **问答引用定位**：Locator 已正确保存并展示选中文字，`AnswerQuestionTask` 直接从 Locator 读取原文并结合 Session 历史回答首次问题与后续追问。
-- **补料摘要修复**：修复了 AI 推荐材料导入后未自动触发摘要（briefing）任务的问题。
-- `git diff --check` 通过。
-- Vite 仍报告主 bundle 超过 500 kB，尚未做代码分割。
+当前自动化基线：
 
-## 9. 外部服务联调
+- 后端 `manage.py test api` 共 26 项通过，覆盖系统配置、Provider 模型发现、多轮问答、Topic 删除、补料人工采纳、TTS 和视频时间轴等关键契约。
+- `ruff check backend`、`manage.py check`、`makemigrations --check --dry-run`、前端 build/lint 均通过。
+- `ruff format --check backend` 仍会报告两份历史迁移文件需要格式化，不属于当前业务代码问题。
+- Vite 仍报告主 bundle 超过 500 kB。
 
-已验证的本机服务状态：
+已完成且复现成本较高的真实验收：
 
-1. **ASR (faster-whisper)**: ✅ 已安装并完成无字幕视频真实转录。首次运行会从 Hugging Face 下载模型，后续使用本机缓存；未设置 `HF_TOKEN` 只影响下载限速，不影响运行。
-2. **LLM (Ollama)**: ✅ `qwen3.6:35b-a3b` 模型已就绪并可响应。
-3. **Search (SearxNG)**: ✅ Docker 容器运行中，且已配置支持 JSON 格式输出。
-4. **Crawl (Crawl4AI)**: ⚠️ Docker 镜像在 M1/M2 架构上存在 `SIGILL` 兼容性问题。系统已配置自动回退至本地原生的 **trafilatura** 抓取引擎，无需启动该容器。
+- `ffmpeg/ffprobe + faster-whisper` 成功处理约 99 秒无字幕 MP4，生成 60 个原始时间片。
+- Chrome 中视频播放、Range seek、进度条拖动、字幕同步、点击字幕跳转和宽屏双栏均正常。
+- 视频清洗段落可重新对齐原始 ASR 时间轴；字幕划词创建 Locator 后文字 offset 与视频时间均正确。
+- 带 `Range: bytes=4096-8191` 的媒体请求返回 `206`、正确 `Content-Range` 和 4096 字节响应体。
+- Edge TTS `zh-CN-XiaoxiaoNeural` 可生成 24 kHz、48 kbps 单声道 MP3；音频 Range 请求和前端音色切换正常。
+- 历史回填 15 个 TTS 任务全部成功，共生成 30 份 MP3。
+- 夜蓝主题可跨材料页、Topic 页和阅读页保持一致，四种阅读字体可切换。
+- “未关联任何话题”筛选与已有材料关联闭环已在浏览器验证。
+- Topic 讨论的真实 Ollama 回复、Markdown/GFM 展示和补料候选卡片已验证。
 
-已完成真实验收：
+本机服务结论：
 
-1. `ffmpeg/ffprobe + faster-whisper` 无字幕视频转录。
-2. Chrome 视频播放、Range seek、进度条拖动、字幕同步及点击跳转。
-3. 视频清洗段落与原始 ASR 时间轴重新对齐。
-4. 视频字幕划词标注与 Locator offset 一致性。
-5. 统一话题详情、右侧学习讨论抽屉、`qwen3:30b-a3b` 实际回复和材料候选卡片展示。
+- Ollama、faster-whisper 和 SearxNG 已真实跑通。
+- Crawl4AI Docker 镜像在 Apple Silicon 上存在 `SIGILL` 兼容问题；系统已决定自动回退到原生 `trafilatura`，不依赖该容器才能完成补料。
+- Edge TTS 是在线服务，正文会发送给微软朗读接口；当前不提供 Web Speech 回退。
 
-仍待真实验收：
+## 6. 接手守则
 
-1. 外挂 `.srt/.vtt` 字幕优先处理已实现并覆盖上传测试，仍缺真实视频与字幕的浏览器验收。
-2. 思维导图拖拽建关系、关系编辑和删除已实现，仍缺浏览器交互验收。
-3. 历史评估列表与查看已实现，仍缺历史结果的浏览器验收。
-
-仍未完成：
-
-1. 评估闭环：后端已有 `POST /api/exams/{id}/save/`，前端尚未调用；评估任务失败后只有 toast，没有页面内失败状态和重试，且生成入口可能被失败任务状态遮蔽。
-2. 复习任务进度：生成提示和提交复盘后，前端尚未轮询和展示 AITask 的执行、失败及重试状态。
-3. 跨 Topic 标注查看：产品设计要求阅读页可在“当前 Topic 标注 / 全部标注”之间切换，当前仅传入当前 Topic 的标注。
-4. 视频进度条标记：当前已在播放器下方展示可点击的学习标记列表，但尚未将标记点绘制到播放器进度条。
-5. 关键 V2 用户路径的端到端自动化测试尚未建立。
-
-## 10. 接手优先级
-
-1. 接通评估草稿保存、评估失败重试，以及复习任务进度、失败和重试反馈。
-2. 补齐阅读页跨 Topic 标注切换，并完成外挂字幕、思维导图和历史评估结果的浏览器验收。
-3. 为关键 V2 用户路径补端到端测试，至少覆盖视频导入 -> ASR -> 清洗 -> 字幕 seek -> 划词 Locator。
-4. 将视频学习标记接入播放器进度条。
-5. 之后再处理前端代码分割和 bundle 体积告警（当前主 bundle 约 1.79 MB，gzip 约 558 kB）。
-
-## 11. 接手规则
-
-1. 不覆盖当前工作区未提交变更。
-2. 先读本文件、`docs/development_design_v2_alpha.md` 和 `docs/local_service_integration.md`。
-3. V2 ER 升级不等于功能下线；保留已有产品能力，并直接适配 V2 模型。
-4. 所有异步能力必须有持久化任务、错误状态、重试路径和前端可观测性。
-5. 修改 Locator、视频或阅读器时，验证文本滚动与视频时间回跳。
-6. 视频媒体响应必须保留 HTTP Range 支持；不要退回 Django 默认 `static()` 媒体响应。
-7. 视频清洗后不得按段落序号恢复时间戳，必须依据原始 ASR segments 做单调文本对齐。
-8. 阅读器中的时间戳、按钮等展示节点必须标记为不参与正文 offset，避免污染 Locator。
+1. 不覆盖或回退工作区中来源不明的未提交变更。
+2. 判断功能是否可删除时，先对照 V1 能力；V2 迁移本身不是下线理由。
+3. 修改 Locator、阅读器或视频链路时，同时验证文本滚动、视频 seek 和 offset 一致性。
+4. 修改异步功能时，同时补齐状态恢复、失败反馈和重试路径。
+5. 修改材料或 Topic 删除逻辑时，检查共享 Material、文件和关联任务的清理边界。
+6. 交付前执行标准回归；涉及视频、Locator、TTS 或浏览器交互时补做对应真实验收。

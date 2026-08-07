@@ -1,0 +1,63 @@
+.review__markdown {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.review__markdown > :first-child {
+  margin-top: 0;
+}
+
+.review__markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.review__markdown p,
+.review__markdown ul,
+.review__markdown ol,
+.review__markdown blockquote,
+.review__markdown pre,
+.review__markdown table {
+  margin: 0 0 0.75em;
+}
+
+.review__markdown ul,
+.review__markdown ol {
+  padding-left: 1.5em;
+}
+
+.review__markdown blockquote {
+  padding-left: 0.9em;
+  border-left: 3px solid currentColor;
+  opacity: 0.78;
+}
+
+.review__markdown code {
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.review__markdown pre {
+  overflow-x: auto;
+  padding: 0.75em;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 4px;
+}
+
+.review__markdown pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.review__markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.review__markdown th,
+.review__markdown td {
+  padding: 0.4em 0.6em;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+}
