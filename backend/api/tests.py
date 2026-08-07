@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
+from django.db import connection
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -200,6 +201,52 @@ class V2ErApiTests(TestCase):
                     {"count", "next", "previous", "results"},
                 )
                 self.assertLessEqual(len(response.data["results"]), 1)
+
+    def test_collection_query_indexes_cover_filter_and_order_paths(self):
+        expected_indexes = {
+            "api_aitask": {
+                "task_trigger_lookup_idx",
+                "task_status_due_idx",
+                "task_status_type_idx",
+            },
+            "api_concept": {"concept_topic_updated_idx"},
+            "api_exam": {"exam_topic_created_idx"},
+            "api_reviewrecord": {"review_result_due_idx"},
+            "api_session": {"session_updated_idx"},
+            "api_topic": {"topic_updated_idx"},
+            "api_topicmaterial": {
+                "topicmat_active_topic_idx",
+                "topicmat_active_mat_idx",
+            },
+        }
+        with connection.cursor() as cursor:
+            for table, names in expected_indexes.items():
+                constraints = connection.introspection.get_constraints(cursor, table)
+                self.assertTrue(names.issubset(constraints))
+
+            cursor.execute(
+                """
+                EXPLAIN QUERY PLAN
+                SELECT id FROM api_aitask
+                WHERE trigger_type = %s AND trigger_id = %s AND task_type = %s
+                ORDER BY created_at DESC LIMIT 20
+                """,
+                ["Material", self.material.id, "process"],
+            )
+            task_plan = " ".join(str(row[-1]) for row in cursor.fetchall())
+            cursor.execute(
+                """
+                EXPLAIN QUERY PLAN
+                SELECT id FROM api_topicmaterial
+                WHERE topic_id = %s AND removed_at IS NULL
+                """,
+                [self.topic.id],
+            )
+            relation_plan = " ".join(str(row[-1]) for row in cursor.fetchall())
+
+        self.assertIn("task_trigger_lookup_idx", task_plan)
+        self.assertNotIn("TEMP B-TREE", task_plan)
+        self.assertIn("topicmat_active_topic_idx", relation_plan)
 
     @patch("api.ai_gateway.OpenAI")
     def test_system_configuration_discovers_provider_models(self, openai):

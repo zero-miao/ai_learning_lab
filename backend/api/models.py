@@ -140,6 +140,9 @@ class Topic(models.Model):
         verbose_name = "学习主题"
         verbose_name_plural = "学习主题"
         ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["-updated_at"], name="topic_updated_idx"),
+        ]
 
     def __str__(self):
         return self.title
@@ -273,6 +276,18 @@ class TopicMaterial(models.Model):
     class Meta:
         verbose_name = "主题材料关联"
         verbose_name_plural = "主题材料关联"
+        indexes = [
+            models.Index(
+                fields=["topic", "material"],
+                name="topicmat_active_topic_idx",
+                condition=models.Q(removed_at__isnull=True),
+            ),
+            models.Index(
+                fields=["material", "topic"],
+                name="topicmat_active_mat_idx",
+                condition=models.Q(removed_at__isnull=True),
+            ),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["topic", "material"], name="unique_topic_material"
@@ -302,6 +317,9 @@ class Session(models.Model):
         verbose_name = "会话"
         verbose_name_plural = "会话"
         ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["-updated_at"], name="session_updated_idx"),
+        ]
 
 
 class SessionMessage(models.Model):
@@ -508,6 +526,12 @@ class Concept(models.Model):
         verbose_name = "概念卡片"
         verbose_name_plural = "概念卡片"
         ordering = ["-updated_at"]
+        indexes = [
+            models.Index(
+                fields=["topic", "-updated_at"],
+                name="concept_topic_updated_idx",
+            ),
+        ]
 
     def __str__(self):
         return self.title
@@ -618,6 +642,12 @@ class Exam(models.Model):
         verbose_name = "考试"
         verbose_name_plural = "考试"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["topic", "-created_at"],
+                name="exam_topic_created_idx",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.topic.title} - {self.get_exam_type_display()}"
@@ -700,6 +730,12 @@ class ReviewRecord(models.Model):
         verbose_name = "复习记录"
         verbose_name_plural = "复习记录"
         ordering = ["due_at"]
+        indexes = [
+            models.Index(
+                fields=["result", "due_at"],
+                name="review_result_due_idx",
+            ),
+        ]
 
 
 class AITask(models.Model):
@@ -747,6 +783,26 @@ class AITask(models.Model):
         verbose_name = "AI任务"
         verbose_name_plural = "AI任务"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=[
+                    "trigger_type",
+                    "trigger_id",
+                    "task_type",
+                    "-created_at",
+                    "status",
+                ],
+                name="task_trigger_lookup_idx",
+            ),
+            models.Index(
+                fields=["status", "-priority", "next_run_at", "id"],
+                name="task_status_due_idx",
+            ),
+            models.Index(
+                fields=["status", "task_type", "-created_at"],
+                name="task_status_type_idx",
+            ),
+        ]
 
     def __str__(self):
         from .tasks import TaskRegistry

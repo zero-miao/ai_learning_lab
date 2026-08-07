@@ -36,6 +36,7 @@ V2 不是独立新产品，也不是 V1 的缩减版重写，而是同一产品�
 - LLM 通过 OpenAI-compatible 接口接入，必须支持本地 Ollama。当前模型只是可变配置，不写入 handoff 作为固定契约。
 - 集合接口使用面向列表场景的摘要 serializer，只返回渲染和筛选所需字段；大文本与嵌套业务对象由详情接口按需返回。列表计数使用数据库聚合，禁止通过完整序列化关联对象后在前端计数。
 - 所有标准 REST 集合接口统一使用服务端页码分页，响应结构为 `count / next / previous / results`；默认每页 20 条，`page_size` 最大 100。前端列表的搜索、筛选和翻页必须传给后端，禁止先获取全集再在浏览器中分页。
+- 集合查询索引必须与实际过滤和排序字段成组设计。当前已覆盖 Topic/Session/Concept 分页、活跃 TopicMaterial、Exam/Review 历史以及 AITask 触发源、状态和 worker 领取任务路径；SQLite `%关键词%` 搜索不添加无效的普通 B-tree 索引。
 
 ## 3. V2 核心契约
 
@@ -130,7 +131,7 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 
 当前自动化基线：
 
-- 后端 `manage.py test api` 共 32 项通过，覆盖系统配置、Provider 模型发现、多轮问答、Topic 删除、集合摘要与统一分页响应、补料人工采纳、TTS、跨 Topic 标注和视频学习全链路等关键契约。
+- 后端 `manage.py test api` 共 33 项通过，覆盖系统配置、Provider 模型发现、多轮问答、Topic 删除、集合摘要、统一分页与查询索引、补料人工采纳、TTS、跨 Topic 标注和视频学习全链路等关键契约。
 - `ruff check backend`、`manage.py check`、`makemigrations --check --dry-run`、前端 build/lint 均通过。
 - `ruff format --check backend` 仍会报告两份历史迁移文件需要格式化，不属于当前业务代码问题。
 - Vite 主入口约 10 kB；路由与依赖完成分包，最大 chunk 约 483 kB，不再报告 500 kB 体积告警。
