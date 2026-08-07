@@ -16,7 +16,6 @@ import {
   Tag,
   Tabs,
   Typography,
-  Upload,
   message,
   theme,
 } from 'antd';
@@ -60,7 +59,6 @@ interface MaterialFormValues {
   type: 'url' | 'text' | 'video' | 'existing';
   source_url?: string;
   raw_text?: string;
-  video_file?: File;
   existing_material_id?: number;
 }
 
@@ -77,6 +75,8 @@ const TopicDetail: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [supplementTask, setSupplementTask] = useState<AITask | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
   const [allMaterials, setAllMaterials] = useState<Material[]>([]);
   const [materialForm] = Form.useForm<MaterialFormValues>();
   const [outputTab, setOutputTab] = useState<OutputTab>('concepts');
@@ -265,16 +265,23 @@ const TopicDetail: React.FC = () => {
           existing_material_id: values.existing_material_id
         } as any);
       } else if (values.type === 'video') {
-        if (!values.video_file) {
+        if (!videoFile) {
           message.error('请选择视频文件');
           return;
         }
         const data = new FormData();
         data.append('topic', String(topic.id));
         data.append('title', values.title);
-        data.append('video', values.video_file);
+        data.append('video', videoFile);
+        if (subtitleFile) {
+          data.append('subtitle', subtitleFile);
+        }
         await uploadVideo(data);
-        message.success('视频已上传，正在生成转录稿');
+        message.success(
+          subtitleFile
+            ? '视频与字幕已上传，正在处理时间轴'
+            : '视频已上传，正在生成转录稿',
+        );
       } else {
         await createMaterial({
           topic: topic.id,
@@ -286,6 +293,8 @@ const TopicDetail: React.FC = () => {
         message.success('材料已导入');
       }
       setImportOpen(false);
+      setVideoFile(null);
+      setSubtitleFile(null);
       materialForm.resetFields();
       await loadTopic();
     } catch (error) {
@@ -542,7 +551,17 @@ const TopicDetail: React.FC = () => {
           />
         </Card>
       </Space>
-      <Modal title="添加材料" open={importOpen} onCancel={() => setImportOpen(false)} onOk={() => materialForm.submit()}>
+      <Modal
+        title="添加材料"
+        open={importOpen}
+        onCancel={() => {
+          setImportOpen(false);
+          setVideoFile(null);
+          setSubtitleFile(null);
+          materialForm.resetFields();
+        }}
+        onOk={() => materialForm.submit()}
+      >
         <Form form={materialForm} layout="vertical" initialValues={{ type: 'url' }} onFinish={(values) => void importMaterial(values)}>
           <Form.Item
             noStyle
@@ -591,27 +610,37 @@ const TopicDetail: React.FC = () => {
               }
               if (type === 'video') {
                 return (
-                  <Form.Item
-                    name="video_file"
-                    label="选择视频"
-                    valuePropName="file"
-                    getValueFromEvent={(event) => (Array.isArray(event) ? event[0] : event?.file)}
-                    rules={[{ required: true, message: '请选择视频文件' }]}
-                  >
-                    <Upload
-                      beforeUpload={(file) => {
-                        setFieldsValue({ video_file: file });
-                        if (!materialForm.getFieldValue('title')) {
-                          setFieldsValue({ title: file.name.replace(/\.[^.]+$/, '') });
-                        }
-                        return false;
-                      }}
-                      maxCount={1}
-                      accept="video/*"
+                  <>
+                    <Form.Item label="选择视频" required>
+                      <input
+                        type="file"
+                        accept="video/*"
+                        aria-label="选择视频文件"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          setVideoFile(file ?? null);
+                          if (file && !materialForm.getFieldValue('title')) {
+                            setFieldsValue({
+                              title: file.name.replace(/\.[^.]+$/, ''),
+                            });
+                          }
+                        }}
+                      />
+                    </Form.Item>
+                    <Form.Item
+                      label="外挂字幕（可选）"
+                      extra="支持 .srt 和 .vtt；提供后将优先使用字幕，不再执行语音识别。"
                     >
-                      <Button icon={<PlusOutlined />}>选择视频文件</Button>
-                    </Upload>
-                  </Form.Item>
+                      <input
+                        type="file"
+                        accept=".srt,.vtt,text/vtt,application/x-subrip"
+                        aria-label="选择外挂字幕文件"
+                        onChange={(event) => {
+                          setSubtitleFile(event.target.files?.[0] ?? null);
+                        }}
+                      />
+                    </Form.Item>
+                  </>
                 );
               }
               return null;

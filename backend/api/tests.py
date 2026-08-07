@@ -157,6 +157,47 @@ class V2ErApiTests(TestCase):
         self.assertEqual(task.trigger_type, "Concept")
         self.assertEqual(task.trigger_id, concept.id)
 
+    def test_material_annotations_support_current_topic_and_all_topics(self):
+        other_topic = Topic.objects.create(title="数据库查询")
+        TopicMaterial.objects.create(topic=other_topic, material=self.material)
+        current_highlight = self.client.post(
+            f"/api/topics/{self.topic.id}/highlights/",
+            {
+                "material": self.material.id,
+                "start_offset": 0,
+                "end_offset": 6,
+                "user_note": "当前话题",
+            },
+            format="json",
+        )
+        other_highlight = self.client.post(
+            f"/api/topics/{other_topic.id}/highlights/",
+            {
+                "material": self.material.id,
+                "start_offset": 14,
+                "end_offset": 22,
+                "user_note": "其他话题",
+            },
+            format="json",
+        )
+        self.assertEqual(current_highlight.status_code, 201)
+        self.assertEqual(other_highlight.status_code, 201)
+
+        all_response = self.client.get(
+            f"/api/materials/{self.material.id}/annotations/"
+        )
+        current_response = self.client.get(
+            f"/api/materials/{self.material.id}/annotations/",
+            {"topic": self.topic.id},
+        )
+
+        self.assertEqual(all_response.status_code, 200)
+        self.assertEqual(len(all_response.data["highlights"]), 2)
+        self.assertEqual(len(current_response.data["highlights"]), 1)
+        locator = current_response.data["highlights"][0]["locators"][0]
+        self.assertEqual(locator["topic"], self.topic.id)
+        self.assertEqual(locator["topic_title"], self.topic.title)
+
     def test_question_uses_session_and_locator(self):
         response = self.client.post(
             "/api/questions/",
@@ -380,8 +421,94 @@ class V2ErApiTests(TestCase):
 
         self.assertEqual(response.status_code, 202)
         material = Material.objects.get(pk=response.data["material"]["id"])
+        self.assertEqual(response.data["material"]["status"], "pending")
+        self.assertEqual(response.data["material"]["status_display"], "待处理")
         self.assertEqual(material.media_meta["subtitle_uri"], "materials/subtitle.srt")
         self.assertEqual(save.call_count, 2)
+
+    @patch("api.tasks.BaseTask._call_llm")
+    @patch(
+        "api.video_service._probe_video",
+        return_value={
+            "duration": 3.0,
+            "format": "mp4",
+            "has_embedded_subtitle": False,
+        },
+    )
+    def test_video_learning_pipeline_reaches_timed_locator(self, _probe, call_llm):
+        call_llm.side_effect = [
+            "Alpha beta\n\nGamma",
+            "核心内容摘要",
+        ]
+        subtitle = (
+            "1\n00:00:00,000 --> 00:00:01,000\nAlpha\n\n"
+            "2\n00:00:01,000 --> 00:00:02,000\nbeta\n\n"
+            "3\n00:00:02,000 --> 00:00:03,000\nGamma\n"
+        )
+
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            upload = self.client.post(
+                "/api/materials/upload-video/",
+                {
+                    "topic": self.topic.id,
+                    "title": "完整视频学习路径",
+                    "video": SimpleUploadedFile(
+                        "course.mp4", b"fake video", "video/mp4"
+                    ),
+                    "subtitle": SimpleUploadedFile(
+                        "course.srt", subtitle.encode(), "application/x-subrip"
+                    ),
+                },
+                format="multipart",
+            )
+            self.assertEqual(upload.status_code, 202)
+            material = Material.objects.get(pk=upload.data["material"]["id"])
+
+            for task_type in ("asr", "clean_text", "briefing", "edge_tts"):
+                task = AITask.objects.get(
+                    task_type=task_type,
+                    trigger_type="Material",
+                    trigger_id=material.id,
+                )
+                TaskRegistry.get_task_class(task_type)(
+                    task_id=task.id,
+                    task_data=task.task_data,
+                    trigger_type=task.trigger_type,
+                    trigger_id=task.trigger_id,
+                    model=task.model,
+                ).run()
+
+            material.refresh_from_db()
+            self.assertEqual(material.status, "ready")
+            self.assertEqual(material.clean_text, "Alpha beta\n\nGamma")
+            self.assertEqual(material.digest, "核心内容摘要")
+            self.assertEqual(material.media_meta["transcript_source"], "subtitle")
+            self.assertTrue(material.media_meta["subtitle_uri"].endswith(".srt"))
+            self.assertEqual(
+                list(material.chunks.values_list("start_time", "end_time")),
+                [(0.0, 2.0), (2.0, 3.0)],
+            )
+
+            start = material.clean_text.index("beta")
+            annotation = self.client.post(
+                f"/api/topics/{self.topic.id}/highlights/",
+                {
+                    "material": material.id,
+                    "start_offset": start,
+                    "end_offset": start + len("beta"),
+                    "user_note": "验证视频划词定位",
+                },
+                format="json",
+            )
+
+        self.assertEqual(annotation.status_code, 201)
+        locator = MaterialTextLocator.objects.get(
+            entity_type="highlight",
+            entity_id=annotation.data["id"],
+        )
+        self.assertEqual(locator.source_text, "beta")
+        self.assertEqual(locator.time_start_offset, 0.0)
+        self.assertEqual(locator.time_end_offset, 2.0)
 
     def test_media_url_uses_api_host_for_video(self):
         video = Material.objects.create(

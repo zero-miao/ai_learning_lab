@@ -1,16 +1,7 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { BgColorsOutlined, SettingOutlined } from '@ant-design/icons';
-import { Button, ConfigProvider, Layout, Popover, Space, Typography, theme } from 'antd';
-import TopicList from './pages/TopicList';
-import TopicDetail from './pages/TopicDetail';
-import MaterialReader from './pages/MaterialReader';
-import TopicMap from './pages/TopicMap';
-import TaskManagement from './pages/TaskManagement';
-import MaterialManagement from './pages/MaterialManagement';
-import ExamPage from './pages/Exam';
-import ReviewPage from './pages/Review';
-import SystemSettings from './pages/SystemSettings';
+import { Button, ConfigProvider, Layout, Popover, Space, Spin, Typography, theme } from 'antd';
 import {
   applySiteTheme,
   hasStoredSiteTheme,
@@ -21,6 +12,15 @@ import { getSystemConfiguration, setApiTimeout } from './api';
 
 const { Header, Content, Footer } = Layout;
 const { Title } = Typography;
+const TopicList = lazy(() => import('./pages/TopicList'));
+const TopicDetail = lazy(() => import('./pages/TopicDetail'));
+const MaterialReader = lazy(() => import('./pages/MaterialReader'));
+const TopicMap = lazy(() => import('./pages/TopicMap'));
+const TaskManagement = lazy(() => import('./pages/TaskManagement'));
+const MaterialManagement = lazy(() => import('./pages/MaterialManagement'));
+const ExamPage = lazy(() => import('./pages/Exam'));
+const ReviewPage = lazy(() => import('./pages/Review'));
+const SystemSettings = lazy(() => import('./pages/SystemSettings'));
 
 function App() {
   const navigate = useNavigate();
@@ -124,18 +124,20 @@ function App() {
         </Popover>
       </Header>
       <Content style={{ background: option.page, transition: 'background-color 160ms ease' }}>
-        <Routes>
-          <Route path="/" element={<Navigate to="/topics" replace />} />
-          <Route path="/topics" element={<TopicList />} />
-          <Route path="/topics/:id" element={<TopicDetail />} />
-          <Route path="/topics/:id/map" element={<TopicMap />} />
-          <Route path="/topics/:topicId/materials/:materialId" element={<MaterialReader />} />
-          <Route path="/topics/:topicId/exam" element={<ExamPage />} />
-          <Route path="/materials" element={<MaterialManagement />} />
-          <Route path="/tasks" element={<TaskManagement />} />
-          <Route path="/reviews" element={<ReviewPage />} />
-          <Route path="/settings" element={<SystemSettings />} />
-        </Routes>
+        <Suspense fallback={<Spin size="large" style={{ display: 'block', margin: 80 }} />}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/topics" replace />} />
+            <Route path="/topics" element={<TopicList />} />
+            <Route path="/topics/:id" element={<TopicDetail />} />
+            <Route path="/topics/:id/map" element={<TopicMap />} />
+            <Route path="/topics/:topicId/materials/:materialId" element={<MaterialReader />} />
+            <Route path="/topics/:topicId/exam" element={<ExamPage />} />
+            <Route path="/materials" element={<MaterialManagement />} />
+            <Route path="/tasks" element={<TaskManagement />} />
+            <Route path="/reviews" element={<ReviewPage />} />
+            <Route path="/settings" element={<SystemSettings />} />
+          </Routes>
+        </Suspense>
       </Content>
       <Footer style={{ textAlign: 'center' }}>
         AI Learning Lab ©{new Date().getFullYear()} Created for Personal Learning

@@ -5,7 +5,9 @@ import remarkGfm from 'remark-gfm';
 import {
   MediaPlayer,
   MediaProvider,
+  TimeSlider,
   type MediaPlayerInstance,
+  useMediaState,
 } from '@vidstack/react';
 import {
   defaultLayoutIcons,
@@ -86,6 +88,58 @@ function formatTimestamp(seconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const remainingSeconds = totalSeconds % 60;
   return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
+}
+
+interface VideoMarker {
+  id: string;
+  label: string;
+  type: 'concept' | 'highlight' | 'question';
+  time: number;
+}
+
+function VideoTimeline({
+  markers,
+  onSeek,
+}: {
+  markers: VideoMarker[];
+  onSeek: (time: number) => void;
+}) {
+  const duration = useMediaState('duration');
+
+  return (
+    <TimeSlider.Root
+      className="vds-time-slider vds-slider universal-reader__timeline"
+      aria-label="视频进度与学习标记"
+    >
+      <TimeSlider.Track className="vds-slider-track">
+        <TimeSlider.TrackFill className="vds-slider-track-fill vds-slider-track" />
+        <TimeSlider.Progress className="vds-slider-progress vds-slider-track" />
+      </TimeSlider.Track>
+      {duration > 0 && (
+        <div className="universal-reader__timeline-markers" aria-label="进度条学习标记">
+          {markers.map((marker) => (
+            <button
+              key={marker.id}
+              type="button"
+              className={`universal-reader__timeline-marker universal-reader__timeline-marker--${marker.type}`}
+              style={{ left: `${Math.min(100, Math.max(0, marker.time / duration * 100))}%` }}
+              title={`${marker.label} ${formatTimestamp(marker.time)}`}
+              aria-label={`跳转到${marker.label} ${formatTimestamp(marker.time)}`}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSeek(marker.time);
+              }}
+            />
+          ))}
+        </div>
+      )}
+      <TimeSlider.Thumb className="vds-slider-thumb" />
+      <TimeSlider.Preview className="vds-slider-preview">
+        <TimeSlider.Value className="vds-slider-value" />
+      </TimeSlider.Preview>
+    </TimeSlider.Root>
+  );
 }
 
 const mediaTypeLabels: Record<Material['media_type'], string> = {
@@ -595,32 +649,39 @@ export default function UniversalReader({
           concept.locators.map((locator) => ({
             id: `concept-${concept.id}-${locator.id}`,
             label: '概念',
+            type: 'concept' as const,
             offset: locator.start_offset,
+            locatorTime: locator.time_start_offset,
           })),
         ),
         ...highlights.flatMap((highlight) =>
           highlight.locators.map((locator) => ({
             id: `highlight-${highlight.id}-${locator.id}`,
             label: '高亮',
+            type: 'highlight' as const,
             offset: locator.start_offset,
+            locatorTime: locator.time_start_offset,
           })),
         ),
         ...questions.flatMap((question) =>
           question.locators.map((locator) => ({
             id: `question-${question.id}-${locator.id}`,
             label: '问答',
+            type: 'question' as const,
             offset: locator.start_offset,
+            locatorTime: locator.time_start_offset,
           })),
         ),
       ]
         .map((marker) => ({
           ...marker,
-          time: chunks.find(
-            (chunk) =>
-              chunk.startOffset <= marker.offset && marker.offset < chunk.endOffset,
+          time: marker.locatorTime ?? chunks.find(
+            (chunk) => chunk.startOffset <= marker.offset && marker.offset < chunk.endOffset,
           )?.startTime,
         }))
-        .filter((marker): marker is typeof marker & { time: number } => marker.time !== null && marker.time !== undefined)
+        .filter((marker): marker is VideoMarker & typeof marker => (
+          marker.time !== null && marker.time !== undefined
+        ))
     : [];
 
   const clearSelection = () => {
@@ -1057,7 +1118,14 @@ export default function UniversalReader({
               load="eager"
             >
               <MediaProvider />
-              <DefaultVideoLayout icons={defaultLayoutIcons} />
+              <DefaultVideoLayout
+                icons={defaultLayoutIcons}
+                slots={{
+                  timeSlider: (
+                    <VideoTimeline markers={videoMarkers} onSeek={seekTo} />
+                  ),
+                }}
+              />
             </MediaPlayer>
             {videoMarkers.length > 0 && (
               <div className="universal-reader__video-markers" aria-label="视频学习标记">

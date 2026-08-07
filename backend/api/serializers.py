@@ -79,6 +79,7 @@ class SystemConfigurationSerializer(serializers.ModelSerializer):
 
 class MaterialTextLocatorSerializer(serializers.ModelSerializer):
     material_title = serializers.CharField(source="material.title", read_only=True)
+    topic_title = serializers.CharField(source="topic.title", read_only=True)
 
     class Meta:
         model = MaterialTextLocator
@@ -88,6 +89,7 @@ class MaterialTextLocatorSerializer(serializers.ModelSerializer):
             "material_title",
             "chunk",
             "topic",
+            "topic_title",
             "source_text",
             "start_offset",
             "end_offset",
@@ -231,7 +233,13 @@ class QuestionSerializer(serializers.ModelSerializer):
     def get_locators(self, question):
         locators = MaterialTextLocator.objects.filter(
             entity_type="question", entity_id=question.id
-        ).select_related("material", "chunk")
+        ).select_related("material", "chunk", "topic")
+        material_id = self.context.get("material_id")
+        topic_id = self.context.get("topic_id")
+        if material_id is not None:
+            locators = locators.filter(material_id=material_id)
+        if topic_id is not None:
+            locators = locators.filter(topic_id=topic_id)
         return MaterialTextLocatorSerializer(locators, many=True).data
 
     class Meta:
@@ -256,7 +264,13 @@ class ConceptSerializer(serializers.ModelSerializer):
     def get_locators(self, concept):
         locators = MaterialTextLocator.objects.filter(
             entity_type="concept", entity_id=concept.id
-        ).select_related("material", "chunk")
+        ).select_related("material", "chunk", "topic")
+        material_id = self.context.get("material_id")
+        topic_id = self.context.get("topic_id")
+        if material_id is not None:
+            locators = locators.filter(material_id=material_id)
+        if topic_id is not None:
+            locators = locators.filter(topic_id=topic_id)
         return MaterialTextLocatorSerializer(locators, many=True).data
 
     class Meta:
@@ -284,7 +298,13 @@ class HighlightSerializer(serializers.ModelSerializer):
     def get_locators(self, highlight):
         locators = MaterialTextLocator.objects.filter(
             entity_type="highlight", entity_id=highlight.id
-        ).select_related("material", "chunk")
+        ).select_related("material", "chunk", "topic")
+        material_id = self.context.get("material_id")
+        topic_id = self.context.get("topic_id")
+        if material_id is not None:
+            locators = locators.filter(material_id=material_id)
+        if topic_id is not None:
+            locators = locators.filter(topic_id=topic_id)
         return MaterialTextLocatorSerializer(locators, many=True).data
 
     class Meta:
