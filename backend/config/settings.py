@@ -137,6 +137,11 @@ STATIC_URL = "static/"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = PROJECT_ROOT / os.getenv("DJANGO_MEDIA_ROOT", "backend/media")
 
+REST_FRAMEWORK = {
+    "DEFAULT_PAGINATION_CLASS": "api.pagination.StandardPageNumberPagination",
+    "PAGE_SIZE": 20,
+}
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 

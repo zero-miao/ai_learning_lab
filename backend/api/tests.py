@@ -93,13 +93,20 @@ class V2ErApiTests(TestCase):
         self.assertEqual(update_response.status_code, 400)
 
     def test_topic_list_returns_summary_without_nested_business_data(self):
-        Topic.objects.create(title="Python")
+        Topic.objects.bulk_create(
+            [Topic(title=f"Python {index}") for index in range(25)]
+        )
 
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(2):
             response = self.client.get("/api/topics/")
 
         self.assertEqual(response.status_code, 200)
-        serialized = next(item for item in response.data if item["id"] == self.topic.id)
+        self.assertEqual(response.data["count"], 26)
+        self.assertEqual(len(response.data["results"]), 20)
+        self.assertIsNotNone(response.data["next"])
+        filtered_response = self.client.get("/api/topics/", {"q": "Django ORM"})
+        self.assertEqual(filtered_response.data["count"], 1)
+        serialized = filtered_response.data["results"][0]
         self.assertEqual(
             set(serialized),
             {
@@ -123,12 +130,12 @@ class V2ErApiTests(TestCase):
         self.material.save(update_fields=["digest", "media_meta"])
         Material.objects.create(title="无关材料", raw_text="other")
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(3):
             response = self.client.get("/api/materials/", {"q": "查询摘要"})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        serialized = response.data[0]
+        self.assertEqual(response.data["count"], 1)
+        serialized = response.data["results"][0]
         self.assertEqual(serialized["id"], self.material.id)
         self.assertEqual(serialized["raw_text_length"], len(self.material.raw_text))
         self.assertEqual(serialized["clean_text_length"], len(self.material.clean_text))
@@ -153,11 +160,13 @@ class V2ErApiTests(TestCase):
             next_run_at=timezone.now(),
         )
 
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(2):
             response = self.client.get("/api/ai-tasks/")
 
         self.assertEqual(response.status_code, 200)
-        serialized = next(item for item in response.data if item["id"] == task.id)
+        serialized = next(
+            item for item in response.data["results"] if item["id"] == task.id
+        )
         for field in ("task_data", "full_context", "result_json"):
             self.assertNotIn(field, serialized)
 
@@ -166,6 +175,31 @@ class V2ErApiTests(TestCase):
         self.assertEqual(detail.data["task_data"], task.task_data)
         self.assertEqual(detail.data["full_context"], task.full_context)
         self.assertEqual(detail.data["result_json"], task.result_json)
+
+    def test_all_standard_list_endpoints_are_paginated(self):
+        endpoints = [
+            "topics",
+            "sessions",
+            "materials",
+            "material-recommendations",
+            "topic-materials",
+            "questions",
+            "concepts",
+            "concept-relations",
+            "highlights",
+            "exams",
+            "reviews",
+            "ai-tasks",
+        ]
+        for endpoint in endpoints:
+            with self.subTest(endpoint=endpoint):
+                response = self.client.get(f"/api/{endpoint}/", {"page_size": 1})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    set(response.data),
+                    {"count", "next", "previous", "results"},
+                )
+                self.assertLessEqual(len(response.data["results"]), 1)
 
     @patch("api.ai_gateway.OpenAI")
     def test_system_configuration_discovers_provider_models(self, openai):

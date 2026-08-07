@@ -26,6 +26,9 @@ const ReviewPage: React.FC = () => {
   const [active, setActive] = useState<ReviewRecord | null>(null);
   const [tasks, setTasks] = useState<Record<string, AITaskSummary>>({});
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [total, setTotal] = useState(0);
   const [form] = Form.useForm<{ response_text: string }>();
   const navigate = useNavigate();
 
@@ -33,12 +36,13 @@ const ReviewPage: React.FC = () => {
     setLoading(true);
     try {
       const [reviewsResponse, tasksResponse] = await Promise.all([
-        getReviews(),
+        getReviews({ page, page_size: pageSize }),
         listAITasks({ trigger_type: 'ReviewRecord' }),
       ]);
-      setReviews(reviewsResponse.data);
+      setReviews(reviewsResponse.data.results);
+      setTotal(reviewsResponse.data.count);
       const latestTasks: Record<string, AITaskSummary> = {};
-      tasksResponse.data.forEach((task) => {
+      tasksResponse.data.results.forEach((task) => {
         if (
           ['review_prompt', 'grade_review'].includes(task.task_type)
           && !latestTasks[taskKey(task)]
@@ -50,7 +54,7 @@ const ReviewPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, pageSize]);
 
   useEffect(() => {
     void load().catch(() => message.error('加载复习计划失败'));
@@ -154,7 +158,20 @@ const ReviewPage: React.FC = () => {
 
   return <div style={{ maxWidth: 1100, margin: '0 auto', padding: 24 }}>
     <Card title="复习计划" extra={<Button loading={loading} onClick={() => void load()}>刷新</Button>}>
-      <List dataSource={reviews} locale={{ emptyText: <Empty description="暂无复习计划" /> }} renderItem={(item) => (
+      <List
+        dataSource={reviews}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: true,
+          onChange: (nextPage, nextPageSize) => {
+            setPage(nextPageSize === pageSize ? nextPage : 1);
+            setPageSize(nextPageSize);
+          },
+        }}
+        locale={{ emptyText: <Empty description="暂无复习计划" /> }}
+        renderItem={(item) => (
         (() => {
           const promptTask = tasks[`${item.id}:review_prompt`];
           const gradeTask = tasks[`${item.id}:grade_review`];
@@ -214,7 +231,8 @@ const ReviewPage: React.FC = () => {
             </List.Item>
           );
         })()
-      )} />
+        )}
+      />
     </Card>
     <Modal
       title="提交复盘"

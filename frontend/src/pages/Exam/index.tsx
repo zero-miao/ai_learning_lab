@@ -26,6 +26,9 @@ const ExamPage: React.FC = () => {
   const [task, setTask] = useState<AITaskSummary | null>(null);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [history, setHistory] = useState<Exam[]>([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyPageSize, setHistoryPageSize] = useState(10);
+  const [historyTotal, setHistoryTotal] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -44,7 +47,11 @@ const ExamPage: React.FC = () => {
     const numericTopicId = Number(topicId);
     const [topicResponse, examsResponse, generationTasksResponse] = await Promise.all([
       getTopic(numericTopicId),
-      getExams({ topic: numericTopicId }),
+      getExams({
+        topic: numericTopicId,
+        page: historyPage,
+        page_size: historyPageSize,
+      }),
       listAITasks({
         trigger_type: 'Topic',
         trigger_id: numericTopicId,
@@ -52,11 +59,13 @@ const ExamPage: React.FC = () => {
       }),
     ]);
     setTopic(topicResponse.data);
-    setHistory(examsResponse.data);
+    const exams = examsResponse.data.results;
+    setHistory(exams);
+    setHistoryTotal(examsResponse.data.count);
     const current = (
-      examsResponse.data.find((item) => item.id === preferredExamId)
-      ?? examsResponse.data.find((item) => ['draft', 'submitted'].includes(item.status))
-      ?? examsResponse.data[0]
+      exams.find((item) => item.id === preferredExamId)
+      ?? exams.find((item) => ['draft', 'submitted'].includes(item.status))
+      ?? exams[0]
       ?? null
     );
     selectExam(current);
@@ -68,18 +77,18 @@ const ExamPage: React.FC = () => {
           trigger_id: current.id,
           task_type: 'grade_exam',
         })
-      ).data;
+      ).data.results;
       setTask(gradingTasks.find((item) => visibleTaskStatuses.includes(item.status)) ?? null);
       return;
     }
 
-    const latestExamCreatedAt = examsResponse.data[0]?.created_at;
-    const generationTask = generationTasksResponse.data.find(
+    const latestExamCreatedAt = exams[0]?.created_at;
+    const generationTask = generationTasksResponse.data.results.find(
       (item) => visibleTaskStatuses.includes(item.status)
         && (!latestExamCreatedAt || new Date(item.created_at) > new Date(latestExamCreatedAt)),
     );
     setTask(generationTask ?? null);
-  }, [selectExam, topicId]);
+  }, [historyPage, historyPageSize, selectExam, topicId]);
 
   useEffect(() => { void load().catch(() => message.error('加载掌握度评估失败')); }, [load]);
 
@@ -238,6 +247,16 @@ const ExamPage: React.FC = () => {
       <Card title="历史评估" style={{ marginTop: 20 }}>
         <List
           dataSource={history}
+          pagination={{
+            current: historyPage,
+            pageSize: historyPageSize,
+            total: historyTotal,
+            showSizeChanger: true,
+            onChange: (page, pageSize) => {
+              setHistoryPage(pageSize === historyPageSize ? page : 1);
+              setHistoryPageSize(pageSize);
+            },
+          }}
           locale={{ emptyText: '暂无历史评估' }}
           renderItem={(item) => (
             <List.Item actions={[<Button key="view" type="link" onClick={() => selectExam(item)}>查看</Button>]}>

@@ -253,7 +253,7 @@ const MaterialReader: React.FC = () => {
           trigger_id: latestUserMessage.id,
           task_type: 'answer_question',
         });
-        const activeTask = tasksResponse.data.find((item) =>
+        const activeTask = tasksResponse.data.results.find((item) =>
           ['pending', 'running'].includes(item.status),
         );
         if (activeTask) setTask((await getAITask(activeTask.id)).data);

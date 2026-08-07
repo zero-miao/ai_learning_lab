@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Button,
   Card,
@@ -38,26 +38,35 @@ const TopicList: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [keyword, setKeyword] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
   const [deletingTopicId, setDeletingTopicId] = useState<number | null>(null);
   const [form] = Form.useForm<CreateTopicValues>();
   const navigate = useNavigate();
 
-  const fetchTopics = async () => {
+  const fetchTopics = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await getTopics();
-      setTopics(response.data);
+      const response = await getTopics({
+        page,
+        page_size: pageSize,
+        q: searchQuery || undefined,
+      });
+      setTopics(response.data.results);
+      setTotal(response.data.count);
     } catch (error) {
       console.error('Failed to fetch topics:', error);
       message.error('获取话题列表失败');
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, pageSize, searchQuery]);
 
   useEffect(() => {
     void fetchTopics();
-  }, []);
+  }, [fetchTopics]);
 
   const handleCreate = async (values: CreateTopicValues) => {
     try {
@@ -89,26 +98,10 @@ const TopicList: React.FC = () => {
       message.error('创建话题失败');
     } finally {
       setLoading(false);
-      void fetchTopics();
+      if (page === 1) void fetchTopics();
+      else setPage(1);
     }
   };
-
-  const visibleTopics = useMemo(() => {
-    const normalizedKeyword = keyword.trim().toLowerCase();
-    return topics
-      .filter((topic) => {
-        return (
-          !normalizedKeyword ||
-          topic.title.toLowerCase().includes(normalizedKeyword) ||
-          topic.goal.toLowerCase().includes(normalizedKeyword)
-        );
-      })
-      .sort(
-        (left, right) =>
-          new Date(right.created_at).getTime() -
-          new Date(left.created_at).getTime(),
-      );
-  }, [keyword, topics]);
 
   const closeModal = () => {
     setIsModalVisible(false);
@@ -119,8 +112,9 @@ const TopicList: React.FC = () => {
     try {
       setDeletingTopicId(topic.id);
       await deleteTopic(topic.id);
-      setTopics((current) => current.filter((item) => item.id !== topic.id));
       message.success(`已删除话题“${topic.title}”`);
+      if (topics.length === 1 && page > 1) setPage((current) => current - 1);
+      else void fetchTopics();
     } catch (error) {
       console.error('Failed to delete topic:', error);
       message.error('删除话题失败');
@@ -163,7 +157,19 @@ const TopicList: React.FC = () => {
             allowClear
             placeholder="搜索话题或学习目标"
             style={{ width: 280 }}
-            onChange={(event) => setKeyword(event.target.value)}
+            value={keyword}
+            onChange={(event) => {
+              const value = event.target.value;
+              setKeyword(value);
+              if (!value && searchQuery) {
+                setSearchQuery('');
+                setPage(1);
+              }
+            }}
+            onSearch={(value) => {
+              setSearchQuery(value.trim());
+              setPage(1);
+            }}
           />
         </Space>
       </Card>
@@ -171,15 +177,25 @@ const TopicList: React.FC = () => {
       <List
         grid={{ gutter: 24, column: 4, xs: 1, sm: 2, md: 2, lg: 4, xl: 4, xxl: 4 }}
         loading={loading}
-        dataSource={visibleTopics}
+        dataSource={topics}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: true,
+          onChange: (nextPage, nextPageSize) => {
+            setPage(nextPageSize === pageSize ? nextPage : 1);
+            setPageSize(nextPageSize);
+          },
+        }}
         locale={{
           emptyText: (
             <Empty
               description={
-                keyword ? '没有匹配的话题' : '还没有话题'
+                searchQuery ? '没有匹配的话题' : '还没有话题'
               }
             >
-              {!keyword && (
+              {!searchQuery && (
                 <Button type="primary" onClick={() => setIsModalVisible(true)}>
                   新建话题
                 </Button>

@@ -31,6 +31,18 @@ export type AITaskStatus =
   | 'failed'
   | 'cancelled';
 
+export interface PaginatedResponse<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
+
+export interface PaginationParams {
+  page?: number;
+  page_size?: number;
+}
+
 export interface MaterialChunk {
   id: number;
   chunk_index: number;
@@ -365,7 +377,8 @@ export const createSessionMessage = (sessionId: number, content: string) =>
     { content },
   );
 
-export const getTopics = () => api.get<TopicSummary[]>('topics/');
+export const getTopics = (params?: PaginationParams & { q?: string }) =>
+  api.get<PaginatedResponse<TopicSummary>>('topics/', { params });
 export const getTopic = (id: number) => api.get<Topic>(`topics/${id}/`);
 export const createTopic = (data: Pick<Topic, 'title'> & Partial<Pick<Topic, 'goal' | 'scope'>>) =>
   api.post<Topic>('topics/', data);
@@ -384,7 +397,7 @@ export const createMaterial = (data: {
   existing_material_id?: number;
 }) => api.post<Material>('materials/', data);
 export const getMaterials = (params?: Record<string, string | number>) =>
-  api.get<MaterialSummary[]>('materials/', { params });
+  api.get<PaginatedResponse<MaterialSummary>>('materials/', { params });
 export const getMaterial = (id: number) => api.get<Material>(`materials/${id}/`);
 export const getMaterialAnnotations = (id: number, topic?: number) =>
   api.get<MaterialAnnotations>(`materials/${id}/annotations/`, {
@@ -466,8 +479,8 @@ export const createHighlight = (
 export const deleteHighlight = (id: number) => api.delete(`highlights/${id}/`);
 export const updateHighlight = (id: number, data: Pick<Highlight, 'user_note'>) =>
   api.patch<Highlight>(`highlights/${id}/`, data);
-export const getExams = (params?: { topic?: number }) =>
-  api.get<Exam[]>('exams/', { params });
+export const getExams = (params?: PaginationParams & { topic?: number }) =>
+  api.get<PaginatedResponse<Exam>>('exams/', { params });
 export const getExam = (id: number) => api.get<Exam>(`exams/${id}/`);
 export const createExam = (topic: number) =>
   api.post<{ task: AITask }>('exams/', { topic });
@@ -479,8 +492,9 @@ export const submitExam = (
   id: number,
   answers: Array<{ id: number; answer_text: string }>,
 ) => api.post<{ task: AITask }>(`exams/${id}/submit/`, { answers });
-export const getReviews = (params?: { result?: ReviewRecord['result'] }) =>
-  api.get<ReviewRecord[]>('reviews/', { params });
+export const getReviews = (
+  params?: PaginationParams & { result?: ReviewRecord['result'] },
+) => api.get<PaginatedResponse<ReviewRecord>>('reviews/', { params });
 export const createReviewPrompt = (id: number) =>
   api.post<{ task: AITask }>(`reviews/${id}/prompt/`);
 export const submitReview = (id: number, responseText: string) =>
@@ -489,7 +503,7 @@ export const submitReview = (id: number, responseText: string) =>
   });
 export const getAITask = (id: number) => api.get<AITask>(`ai-tasks/${id}/`);
 export const listAITasks = (params?: Record<string, string | number>) =>
-  api.get<AITaskSummary[]>('ai-tasks/', { params });
+  api.get<PaginatedResponse<AITaskSummary>>('ai-tasks/', { params });
 export const retryAITask = (id: number) =>
   api.post<AITask>(`ai-tasks/${id}/retry/`);
 

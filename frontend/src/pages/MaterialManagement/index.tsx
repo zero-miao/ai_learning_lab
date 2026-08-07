@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Button,
@@ -81,27 +81,49 @@ const MaterialManagement: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [status, setStatus] = useState<MaterialStatus | 'all'>('all');
   const [topicFilter, setTopicFilter] = useState<string>('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
   const [topics, setTopics] = useState<TopicSummary[]>([]);
   const [linkingMaterial, setLinkingMaterial] = useState<MaterialSummary | null>(null);
   const [linkingTopicId, setLinkingTopicId] = useState<number | null>(null);
   const [linking, setLinking] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
-  const load = async (query = searchQuery) => {
-    const [materialsResponse, topicsResponse] = await Promise.all([
-      getMaterials(query ? { q: query } : undefined),
-      getTopics(),
-    ]);
-    setMaterials(materialsResponse.data);
-    setTopics(topicsResponse.data);
-    setMaterialDetails({});
-  };
-  useEffect(() => { void load(); }, []);
+  const loadMaterials = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await getMaterials({
+        page,
+        page_size: pageSize,
+        ...(searchQuery ? { q: searchQuery } : {}),
+        ...(status !== 'all' ? { status } : {}),
+        ...(topicFilter !== 'all' ? { topic: topicFilter } : {}),
+      });
+      setMaterials(response.data.results);
+      setTotal(response.data.count);
+      setMaterialDetails({});
+    } finally {
+      setLoading(false);
+    }
+  }, [page, pageSize, searchQuery, status, topicFilter]);
+
+  const loadTopicOptions = useCallback(async (query = '') => {
+    const response = await getTopics({
+      page_size: 20,
+      q: query || undefined,
+    });
+    setTopics(response.data.results);
+  }, []);
+
+  useEffect(() => { void loadMaterials(); }, [loadMaterials]);
+  useEffect(() => { void loadTopicOptions(); }, [loadTopicOptions]);
   const handleReImport = async (id: number) => {
     try {
       await reImportMaterial(id);
       message.success('已触发重新导入任务');
-      void load();
+      void loadMaterials();
     } catch (error) {
       console.error('Re-import failed:', error);
       message.error('触发重新导入失败');
@@ -111,8 +133,9 @@ const MaterialManagement: React.FC = () => {
     setDeletingId(material.id);
     try {
       await deleteMaterial(material.id);
-      setMaterials((current) => current.filter((item) => item.id !== material.id));
       message.success('材料及相关媒体文件已删除');
+      if (materials.length === 1 && page > 1) setPage((current) => current - 1);
+      else void loadMaterials();
     } catch (error) {
       console.error('Delete material failed:', error);
       message.error('删除材料失败');
@@ -144,25 +167,13 @@ const MaterialManagement: React.FC = () => {
       message.success('已关联话题');
       setLinkingMaterial(null);
       setLinkingTopicId(null);
-      await load();
+      await loadMaterials();
     } catch {
       message.error('关联话题失败');
     } finally {
       setLinking(false);
     }
   };
-
-  const visible = useMemo(
-    () => materials.filter((item) =>
-      (status === 'all' || item.status === status) &&
-      (
-        topicFilter === 'all' ||
-        (topicFilter === 'unlinked' && item.topic_links.length === 0) ||
-        item.topic_links.some((link) => String(link.topic) === topicFilter)
-      ),
-    ),
-    [materials, status, topicFilter],
-  );
 
   const columns: TableColumnsType<MaterialSummary> = [
     { title: 'ID', dataIndex: 'id', width: 70, responsive: ['md'] },
@@ -338,7 +349,7 @@ const MaterialManagement: React.FC = () => {
 
   return (
     <div style={{ maxWidth: 1480, margin: '0 auto', padding: 24 }}>
-      <Card title={`全局材料管理 (${visible.length})`} extra={<Button onClick={() => void load()}>刷新</Button>}>
+      <Card title={`全局材料管理 (${total})`} extra={<Button onClick={() => void loadMaterials()} loading={loading}>刷新</Button>}>
         <Space style={{ marginBottom: 16 }} wrap>
           <Input.Search
             style={{ width: 320 }}
@@ -349,17 +360,24 @@ const MaterialManagement: React.FC = () => {
               setKeyword(value);
               if (!value && searchQuery) {
                 setSearchQuery('');
-                void load('');
+                setPage(1);
               }
             }}
             onSearch={(value) => {
               const query = value.trim();
               setSearchQuery(query);
-              void load(query);
+              setPage(1);
             }}
             allowClear
           />
-          <Select value={status} onChange={setStatus} style={{ width: 150 }} options={[
+          <Select
+            value={status}
+            onChange={(value) => {
+              setStatus(value);
+              setPage(1);
+            }}
+            style={{ width: 150 }}
+            options={[
             { value: 'all', label: '全部状态' },
             { value: 'pending', label: '待处理' },
             { value: 'importing', label: '导入中' },
@@ -367,10 +385,17 @@ const MaterialManagement: React.FC = () => {
             { value: 'summarizing', label: '摘要中' },
             { value: 'ready', label: '已就绪' },
             { value: 'failed', label: '失败' },
-          ]} />
+            ]}
+          />
           <Select
+            showSearch
+            filterOption={false}
+            onSearch={(value) => void loadTopicOptions(value.trim())}
             value={topicFilter}
-            onChange={setTopicFilter}
+            onChange={(value) => {
+              setTopicFilter(value);
+              setPage(1);
+            }}
             style={{ width: 220 }}
             options={[
               { value: 'all', label: '全部关联状态' },
@@ -386,8 +411,18 @@ const MaterialManagement: React.FC = () => {
         <Table
           rowKey="id"
           columns={columns}
-          dataSource={visible}
-          pagination={{ pageSize: 20, showSizeChanger: true }}
+          dataSource={materials}
+          loading={loading}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            onChange: (nextPage, nextPageSize) => {
+              setPage(nextPageSize === pageSize ? nextPage : 1);
+              setPageSize(nextPageSize);
+            },
+          }}
           locale={{ emptyText: <Empty description="没有符合条件的全局材料" /> }}
           expandable={{
             onExpand: (expanded, material) => {
@@ -471,7 +506,8 @@ const MaterialManagement: React.FC = () => {
       >
         <Select
           showSearch
-          optionFilterProp="label"
+          filterOption={false}
+          onSearch={(value) => void loadTopicOptions(value.trim())}
           style={{ width: '100%' }}
           placeholder="选择要关联的话题"
           value={linkingTopicId}

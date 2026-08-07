@@ -5,7 +5,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Count, Prefetch, Q
+from django.db.models import Count, Exists, OuterRef, Prefetch, Q
 from django.db.models.functions import Length
 from django.utils import timezone
 from rest_framework import status, viewsets
@@ -214,6 +214,11 @@ class TopicViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         if self.action == "list":
+            query = self.request.query_params.get("q", "").strip()
+            if query:
+                queryset = queryset.filter(
+                    Q(title__icontains=query) | Q(goal__icontains=query)
+                )
             return queryset.annotate(
                 material_count=Count(
                     "topic_materials",
@@ -552,6 +557,24 @@ class MaterialViewSet(viewsets.ModelViewSet):
                     Q(title__icontains=query)
                     | Q(media_uri__icontains=query)
                     | Q(digest__icontains=query)
+                )
+            status_filter = self.request.query_params.get("status")
+            if status_filter:
+                queryset = queryset.filter(status=status_filter)
+            topic_filter = self.request.query_params.get("topic")
+            if topic_filter == "unlinked":
+                queryset = queryset.annotate(
+                    has_active_topic=Exists(
+                        TopicMaterial.objects.filter(
+                            material_id=OuterRef("pk"),
+                            removed_at__isnull=True,
+                        )
+                    )
+                ).filter(has_active_topic=False)
+            elif topic_filter and topic_filter.isdigit():
+                queryset = queryset.filter(
+                    topic_materials__topic_id=int(topic_filter),
+                    topic_materials__removed_at__isnull=True,
                 )
             return (
                 queryset.annotate(

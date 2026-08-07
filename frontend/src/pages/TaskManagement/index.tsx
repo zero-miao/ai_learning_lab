@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Card, Descriptions, Select, Space, Spin, Table, Tag, Typography, message } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
@@ -42,17 +42,27 @@ const TaskManagement: React.FC = () => {
   const [status, setStatus] = useState<AITaskStatus | 'all'>('all');
   const [taskType, setTaskType] = useState('all');
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      setTasks((await listAITasks()).data);
+      const response = await listAITasks({
+        page,
+        page_size: pageSize,
+        ...(status !== 'all' ? { status } : {}),
+        ...(taskType !== 'all' ? { task_type: taskType } : {}),
+      });
+      setTasks(response.data.results);
+      setTotal(response.data.count);
       setTaskDetails({});
     } finally {
       setLoading(false);
     }
-  };
-  useEffect(() => { void load(); }, []);
+  }, [page, pageSize, status, taskType]);
+  useEffect(() => { void load(); }, [load]);
   const types = useMemo(() => {
     const map = new Map<string, string>();
     tasks.forEach((task) => {
@@ -62,10 +72,6 @@ const TaskManagement: React.FC = () => {
     });
     return Array.from(map.entries()).map(([value, label]) => ({ value, label }));
   }, [tasks]);
-  const visible = useMemo(
-    () => tasks.filter((task) => (status === 'all' || task.status === status) && (taskType === 'all' || task.task_type === taskType)),
-    [status, taskType, tasks],
-  );
   const retry = async (task: AITaskSummary) => {
     await retryAITask(task.id);
     message.success('任务已重新进入队列');
@@ -93,9 +99,9 @@ const TaskManagement: React.FC = () => {
 
   return (
     <div style={{ maxWidth: 1480, margin: '0 auto', padding: 24 }}>
-      <Card title={`任务管理 (${visible.length})`} extra={<Button onClick={() => void load()} loading={loading}>刷新</Button>}>
+      <Card title={`任务管理 (${total})`} extra={<Button onClick={() => void load()} loading={loading}>刷新</Button>}>
         <Space style={{ marginBottom: 16 }} wrap>
-          <Select value={status} onChange={setStatus} style={{ width: 150 }} options={[
+          <Select value={status} onChange={(value) => { setStatus(value); setPage(1); }} style={{ width: 150 }} options={[
             { value: 'all', label: '全部状态' },
             { value: 'pending', label: '排队中' },
             { value: 'running', label: '执行中' },
@@ -103,15 +109,24 @@ const TaskManagement: React.FC = () => {
             { value: 'failed', label: '失败' },
             { value: 'cancelled', label: '已取消' },
           ]} />
-          <Select value={taskType} onChange={setTaskType} style={{ width: 220 }} options={[{ value: 'all', label: '全部任务类型' }, ...types]} />
+          <Select value={taskType} onChange={(value) => { setTaskType(value); setPage(1); }} style={{ width: 220 }} options={[{ value: 'all', label: '全部任务类型' }, ...types]} />
         </Space>
         <Table
           rowKey="id"
           columns={columns}
-          dataSource={visible}
+          dataSource={tasks}
           loading={loading}
           scroll={{ x: 1050 }}
-          pagination={{ pageSize: 20, showSizeChanger: true }}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            onChange: (nextPage, nextPageSize) => {
+              setPage(nextPageSize === pageSize ? nextPage : 1);
+              setPageSize(nextPageSize);
+            },
+          }}
           expandable={{
             onExpand: (expanded, task) => {
               if (expanded) void loadDetail(task.id);

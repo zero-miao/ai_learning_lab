@@ -117,10 +117,10 @@ const TopicDetail: React.FC = () => {
     try {
       const [topicRes, materialsRes] = await Promise.all([
         getTopic(Number(id)),
-        getMaterials()
+        getMaterials({ page_size: 20 })
       ]);
       setTopic(topicRes.data);
-      setAllMaterials(materialsRes.data);
+      setAllMaterials(materialsRes.data.results);
     } catch {
       message.error('加载数据失败');
     } finally {
@@ -603,7 +603,15 @@ const TopicDetail: React.FC = () => {
                     <Select
                       showSearch
                       placeholder="搜索并选择已有材料"
-                      optionFilterProp="children"
+                      filterOption={false}
+                      onSearch={(value) => {
+                        void getMaterials({
+                          page_size: 20,
+                          ...(value.trim() ? { q: value.trim() } : {}),
+                        }).then((response) => {
+                          setAllMaterials(response.data.results);
+                        });
+                      }}
                       options={available.map(m => ({ label: m.title, value: m.id }))}
                     />
                   </Form.Item>
