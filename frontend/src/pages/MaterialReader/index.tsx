@@ -14,9 +14,11 @@ import {
   Modal,
   Popconfirm,
   Result,
+  Segmented,
   Skeleton,
   Space,
   Spin,
+  Tag,
   Tabs,
   Typography,
   message,
@@ -39,6 +41,7 @@ import {
   deleteHighlight,
   deleteQuestion,
   getAITask,
+  getMaterialAnnotations,
   getSession,
   getTopic,
   listAITasks,
@@ -48,7 +51,16 @@ import {
   updateHighlight,
   createSessionMessage,
 } from '../../api';
-import type { AITask, Concept, Highlight, Material, Question, Topic, Session } from '../../api';
+import type {
+  AITask,
+  Concept,
+  Highlight,
+  Material,
+  MaterialAnnotations,
+  Question,
+  Topic,
+  Session,
+} from '../../api';
 import UniversalReader from '../../components/UniversalReader';
 import type { ReaderFont, TextSelectionAnchor } from '../../components/UniversalReader';
 import { useSiteTheme } from '../../appearance';
@@ -75,6 +87,12 @@ const MaterialReader: React.FC = () => {
   const location = useLocation();
   const [topic, setTopic] = useState<Topic | null>(null);
   const [material, setMaterial] = useState<Material | null>(null);
+  const [allAnnotations, setAllAnnotations] = useState<MaterialAnnotations>({
+    concepts: [],
+    questions: [],
+    highlights: [],
+  });
+  const [annotationScope, setAnnotationScope] = useState<'topic' | 'all'>('topic');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [tab, setTab] = useState('questions');
   const [selection, setSelection] = useState<TextSelectionAnchor | null>(null);
@@ -112,8 +130,12 @@ const MaterialReader: React.FC = () => {
     if (!topicId || !materialId) return;
     setLoadError('');
     try {
-      const response = await getTopic(Number(topicId));
+      const [response, annotationsResponse] = await Promise.all([
+        getTopic(Number(topicId)),
+        getMaterialAnnotations(Number(materialId)),
+      ]);
       setTopic(response.data);
+      setAllAnnotations(annotationsResponse.data);
       const relation = response.data.topic_materials.find(
         (item) => item.material_id === Number(materialId),
       );
@@ -168,7 +190,7 @@ const MaterialReader: React.FC = () => {
     chatEndRef.current?.scrollIntoView({ block: 'nearest' });
   }, [activeSession?.messages, task?.id, task?.status]);
 
-  const scoped = useMemo(() => {
+  const currentTopicAnnotations = useMemo(() => {
     if (!topic || !material) {
       return { concepts: [] as Concept[], highlights: [] as Highlight[], questions: [] as Question[] };
     }
@@ -194,6 +216,9 @@ const MaterialReader: React.FC = () => {
         .filter((item) => item.locators.length),
     };
   }, [material, topic]);
+  const scoped = annotationScope === 'all'
+    ? allAnnotations
+    : currentTopicAnnotations;
 
   const activeQuestion = useMemo(
     () => scoped.questions.find((item) => item.session === activeSession?.id) ?? null,
@@ -360,9 +385,13 @@ const MaterialReader: React.FC = () => {
     }
   };
 
-  const runSupplement = async (type: 'Concept' | 'Question' | 'Highlight', id: number) => {
+  const runSupplement = async (
+    type: 'Concept' | 'Question' | 'Highlight',
+    id: number,
+    targetTopicId: number,
+  ) => {
     if (!topic) return;
-    const response = await triggerSupplement(topic.id, type, id);
+    const response = await triggerSupplement(targetTopicId, type, id);
     setTask(response.data.task);
     message.info('正在检索补充资料。');
   };
@@ -385,15 +414,15 @@ const MaterialReader: React.FC = () => {
   const nonce = searchParams.get('t') || '';
 
   const requestedLocator = useMemo(() => {
-    if (!topic || !requestedLocatorId) return null;
-    const conceptLocator = topic.concepts.flatMap((c) => c.locators.map((l) => ({ ...l, type: 'concept', ownerId: c.id }))).find((l) => l.id === requestedLocatorId);
+    if (!requestedLocatorId) return null;
+    const conceptLocator = scoped.concepts.flatMap((c) => c.locators.map((l) => ({ ...l, type: 'concept', ownerId: c.id }))).find((l) => l.id === requestedLocatorId);
     if (conceptLocator) return conceptLocator;
-    const questionLocator = topic.questions.flatMap((q) => q.locators.map((l) => ({ ...l, type: 'question', ownerId: q.id }))).find((l) => l.id === requestedLocatorId);
+    const questionLocator = scoped.questions.flatMap((q) => q.locators.map((l) => ({ ...l, type: 'question', ownerId: q.id }))).find((l) => l.id === requestedLocatorId);
     if (questionLocator) return questionLocator;
-    const highlightLocator = topic.highlights.flatMap((h) => h.locators.map((l) => ({ ...l, type: 'highlight', ownerId: h.id }))).find((l) => l.id === requestedLocatorId);
+    const highlightLocator = scoped.highlights.flatMap((h) => h.locators.map((l) => ({ ...l, type: 'highlight', ownerId: h.id }))).find((l) => l.id === requestedLocatorId);
     if (highlightLocator) return highlightLocator;
     return null;
-  }, [topic, requestedLocatorId]);
+  }, [requestedLocatorId, scoped]);
 
   useEffect(() => {
     if (!material || (!requestedLocator && requestedAnchor === null)) return;
@@ -412,7 +441,9 @@ const MaterialReader: React.FC = () => {
 
         // Also scroll the annotation in the drawer
         setTimeout(() => {
-          document.getElementById(`annotation-${requestedLocator.ownerId}`)?.scrollIntoView({
+          document.getElementById(
+            `annotation-${requestedLocator.type}-${requestedLocator.ownerId}`,
+          )?.scrollIntoView({
             behavior: 'smooth',
             block: 'center',
           });
@@ -508,6 +539,18 @@ const MaterialReader: React.FC = () => {
               返回主题：《{topic.title}》
             </Button>
             <div className="material-reader__toolbar-actions">
+              <Segmented
+                size="small"
+                value={annotationScope}
+                options={[
+                  { label: '当前主题标注', value: 'topic' },
+                  { label: '全部标注', value: 'all' },
+                ]}
+                onChange={(value) => {
+                  setAnnotationScope(value as 'topic' | 'all');
+                  setActiveSession(null);
+                }}
+              />
               <Text type="secondary">
                 {scoped.concepts.length} 概念 · {scoped.questions.length} 问答 · {scoped.highlights.length} 高亮
               </Text>
@@ -598,7 +641,7 @@ const MaterialReader: React.FC = () => {
 
             // Wait for drawer to open before scrolling
             setTimeout(() => {
-              const el = document.getElementById(`annotation-${id}`);
+              const el = document.getElementById(`annotation-${type}-${id}`);
               if (el) {
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 el.classList.add('reader-drawer-item--active');
@@ -753,20 +796,32 @@ const MaterialReader: React.FC = () => {
                       locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选中原文后发起第一个问答" /> }}
                       renderItem={(item) => (
                         <List.Item
-                          id={`annotation-${item.id}`}
+                          id={`annotation-question-${item.id}`}
                           className="reader-drawer-item"
                           style={{ display: 'block', padding: '12px 8px', borderRadius: 8, cursor: 'pointer' }}
                           onClick={() => openQuestionChat(item)}
                         >
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                            <Text strong style={{ flex: 1, marginRight: 8 }}>{item.question_text}</Text>
+                            <Space size={6} wrap style={{ flex: 1, marginRight: 8 }}>
+                              <Text strong>{item.question_text}</Text>
+                              {annotationScope === 'all' && item.locators[0] && (
+                                <Tag>{item.locators[0].topic_title}</Tag>
+                              )}
+                            </Space>
                             <Space size={0} onClick={(e) => e.stopPropagation()}>
                               <Button
                                 type="text"
                                 size="small"
                                 icon={<FileSearchOutlined />}
                                 title="补资料"
-                                onClick={(e) => { e.stopPropagation(); void runSupplement('Question', item.id); }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void runSupplement(
+                                    'Question',
+                                    item.id,
+                                    item.locators[0]?.topic ?? topic.id,
+                                  );
+                                }}
                               />
                               <Popconfirm
                                 title="删除这个问答？"
@@ -803,13 +858,18 @@ const MaterialReader: React.FC = () => {
                       locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选中原文后标记第一个概念" /> }}
                       renderItem={(item) => (
                         <List.Item
-                          id={`annotation-${item.id}`}
+                          id={`annotation-concept-${item.id}`}
                           className="reader-drawer-item"
                           style={{ display: 'block', padding: '12px 8px', borderRadius: 8, cursor: 'pointer' }}
                           onClick={() => jumpToSource(item.locators[0]?.id)}
                         >
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                            <Text strong style={{ flex: 1, marginRight: 8 }}>{item.title}</Text>
+                            <Space size={6} wrap style={{ flex: 1, marginRight: 8 }}>
+                              <Text strong>{item.title}</Text>
+                              {annotationScope === 'all' && item.locators[0] && (
+                                <Tag>{item.locators[0].topic_title}</Tag>
+                              )}
+                            </Space>
                             <Space size={0} onClick={(e) => e.stopPropagation()}>
                               <Button
                                 type="text"
@@ -823,7 +883,11 @@ const MaterialReader: React.FC = () => {
                                 size="small"
                                 icon={<FileSearchOutlined />}
                                 title="补资料"
-                                onClick={() => void runSupplement('Concept', item.id)}
+                                onClick={() => void runSupplement(
+                                  'Concept',
+                                  item.id,
+                                  item.locators[0]?.topic ?? topic.id,
+                                )}
                               />
                               {item.status !== 'confirmed' && (
                                 <Button
@@ -860,15 +924,18 @@ const MaterialReader: React.FC = () => {
                       locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选中原文后添加第一条高亮" /> }}
                       renderItem={(item) => (
                         <List.Item
-                          id={`annotation-${item.id}`}
+                          id={`annotation-highlight-${item.id}`}
                           className="reader-drawer-item"
                           style={{ display: 'block', padding: '12px 8px', borderRadius: 8, cursor: 'pointer' }}
                           onClick={() => jumpToSource(item.locators[0]?.id)}
                         >
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                            <Text strong ellipsis style={{ flex: 1, marginRight: 8 }}>
-                              {item.locators[0]?.source_text}
-                            </Text>
+                            <Space size={6} wrap style={{ flex: 1, marginRight: 8 }}>
+                              <Text strong ellipsis>{item.locators[0]?.source_text}</Text>
+                              {annotationScope === 'all' && item.locators[0] && (
+                                <Tag>{item.locators[0].topic_title}</Tag>
+                              )}
+                            </Space>
                             <Space size={0} onClick={(e) => e.stopPropagation()}>
                               <Button
                                 type="text"
@@ -882,7 +949,11 @@ const MaterialReader: React.FC = () => {
                                 size="small"
                                 icon={<FileSearchOutlined />}
                                 title="补资料"
-                                onClick={() => void runSupplement('Highlight', item.id)}
+                                onClick={() => void runSupplement(
+                                  'Highlight',
+                                  item.id,
+                                  item.locators[0]?.topic ?? topic.id,
+                                )}
                               />
                               <Popconfirm
                                 title="删除这条高亮？"

@@ -63,7 +63,19 @@ const TopicMap: React.FC = () => {
             <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" /></marker></defs>
             {topic.concept_relations.map((item) => {
               const from = nodePositions.get(item.from_concept); const to = nodePositions.get(item.to_concept);
-              return from && to ? <g key={item.id} onClick={() => openRelation(item)} style={{ cursor: 'pointer' }}><line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="#94a3b8" strokeWidth="2" markerEnd="url(#arrow)" /><text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 6} textAnchor="middle" fill="#475569">{item.relation_type}</text></g> : null;
+              return from && to ? <g
+                key={item.id}
+                role="button"
+                tabIndex={0}
+                aria-label={`编辑关系：${item.from_concept_title}到${item.to_concept_title}`}
+                onClick={() => openRelation(item)}
+                onKeyDown={(event) => {
+                  if (!['Enter', ' '].includes(event.key)) return;
+                  event.preventDefault();
+                  openRelation(item);
+                }}
+                style={{ cursor: 'pointer' }}
+              ><line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="#94a3b8" strokeWidth="2" markerEnd="url(#arrow)" /><text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 6} textAnchor="middle" fill="#475569">{item.relation_type}</text></g> : null;
             })}
           </svg>
           {topic.concepts.map((concept) => {

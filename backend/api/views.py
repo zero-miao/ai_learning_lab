@@ -652,7 +652,7 @@ class MaterialViewSet(viewsets.ModelViewSet):
             media_type="video",
             media_uri=uri,
             media_meta=media_meta,
-            status="processing",
+            status="pending",
             created_by="manual",
         )
         TopicMaterial.objects.create(topic=topic, material=material, import_by="manual")
@@ -677,6 +677,58 @@ class MaterialViewSet(viewsets.ModelViewSet):
         ).order_by("time_start_offset")
         return Response(
             {"markers": MaterialTextLocatorSerializer(markers, many=True).data}
+        )
+
+    @action(detail=True, methods=["get"])
+    def annotations(self, request, pk=None):
+        material = self.get_object()
+        locators = MaterialTextLocator.objects.filter(material=material)
+        topic_id = request.query_params.get("topic")
+        if topic_id:
+            if not str(topic_id).isdigit():
+                return Response(
+                    {"detail": "话题参数无效。"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            locators = locators.filter(topic_id=int(topic_id))
+
+        entity_ids = {
+            entity_type: list(
+                locators.filter(entity_type=entity_type).values_list(
+                    "entity_id", flat=True
+                )
+            )
+            for entity_type in ("concept", "question", "highlight")
+        }
+        serializer_context = {
+            "request": request,
+            "material_id": material.id,
+            "topic_id": int(topic_id) if topic_id else None,
+        }
+        return Response(
+            {
+                "concepts": ConceptSerializer(
+                    Concept.objects.filter(id__in=entity_ids["concept"]).order_by(
+                        "created_at"
+                    ),
+                    many=True,
+                    context=serializer_context,
+                ).data,
+                "questions": QuestionSerializer(
+                    Question.objects.filter(id__in=entity_ids["question"]).order_by(
+                        "created_at"
+                    ),
+                    many=True,
+                    context=serializer_context,
+                ).data,
+                "highlights": HighlightSerializer(
+                    Highlight.objects.filter(id__in=entity_ids["highlight"]).order_by(
+                        "created_at"
+                    ),
+                    many=True,
+                    context=serializer_context,
+                ).data,
+            }
         )
 
 

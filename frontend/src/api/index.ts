@@ -94,6 +94,7 @@ export interface MaterialTextLocator {
   material_title: string;
   chunk: number | null;
   topic: number;
+  topic_title: string;
   source_text: string;
   start_offset: number;
   end_offset: number;
@@ -212,6 +213,12 @@ export interface Topic {
     question_count: number;
     map_node_count: number;
   };
+}
+
+export interface MaterialAnnotations {
+  concepts: Concept[];
+  questions: Question[];
+  highlights: Highlight[];
 }
 
 export interface AITask {
@@ -356,6 +363,10 @@ export const createMaterial = (data: {
 }) => api.post<Material>('materials/', data);
 export const getMaterials = (params?: Record<string, string | number>) =>
   api.get<Material[]>('materials/', { params });
+export const getMaterialAnnotations = (id: number, topic?: number) =>
+  api.get<MaterialAnnotations>(`materials/${id}/annotations/`, {
+    params: topic ? { topic } : undefined,
+  });
 export const reImportMaterial = (id: number) =>
   api.post<{ material: Material; task: AITask | null }>(`materials/${id}/re_import/`);
 export const deleteMaterial = (id: number) => api.delete(`materials/${id}/`);

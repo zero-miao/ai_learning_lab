@@ -121,7 +121,7 @@ def process_video(material, model_name):
         raise ValueError("只有视频材料可以执行转录。")
 
     video_path = _media_path(material.media_uri)
-    metadata = _probe_video(video_path)
+    metadata = {**material.media_meta, **_probe_video(video_path)}
     metadata["md5"] = _file_md5(video_path)
     subtitle_uri = material.media_meta.get("subtitle_uri", "")
     segments = []

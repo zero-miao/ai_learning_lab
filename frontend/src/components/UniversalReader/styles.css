@@ -184,6 +184,48 @@
   aspect-ratio: 16 / 9;
 }
 
+.universal-reader__timeline {
+  position: relative;
+}
+
+.universal-reader__timeline-markers {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.universal-reader__timeline-marker {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 16px;
+  padding: 0;
+  pointer-events: auto;
+  cursor: pointer;
+  border: 2px solid #fff;
+  border-radius: 5px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+  transform: translate(-50%, -50%);
+}
+
+.universal-reader__timeline-marker:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.universal-reader__timeline-marker--concept {
+  background: #1677ff;
+}
+
+.universal-reader__timeline-marker--question {
+  background: #fa8c16;
+}
+
+.universal-reader__timeline-marker--highlight {
+  background: #fadb14;
+}
+
 .universal-reader__video-markers {
   display: flex;
   flex-wrap: wrap;
