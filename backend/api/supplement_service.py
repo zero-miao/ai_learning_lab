@@ -1,12 +1,13 @@
 import hashlib
 import json
-import os
 from datetime import datetime, timezone
 from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 import trafilatura
+
+from .system_config import get_config_value
 
 
 def _json_request(url, *, method="GET", payload=None, timeout=20):
@@ -25,7 +26,7 @@ def _json_request(url, *, method="GET", payload=None, timeout=20):
 
 
 def search(query, limit=10):
-    base_url = os.getenv("SEARXNG_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
+    base_url = get_config_value("searxng_base_url").rstrip("/")
     payload = _json_request(
         f"{base_url}/search?{urlencode({'q': query, 'format': 'json', 'categories': 'general'})}"
     )
@@ -45,7 +46,7 @@ def search(query, limit=10):
 
 
 def crawl(url):
-    base_url = os.getenv("CRAWL4AI_BASE_URL", "http://127.0.0.1:11235").rstrip("/")
+    base_url = get_config_value("crawl4ai_base_url").rstrip("/")
     try:
         payload = _json_request(
             f"{base_url}/crawl",

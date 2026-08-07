@@ -1,19 +1,16 @@
 import abc
 import json
-import re
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 from django.db import transaction
-from django.utils import timezone
 
 from .ai_gateway import AIGateway
 
-DISCUSSION_STAGES = ("explore", "frame", "decide")
-
 
 def _supplement_context(task):
-    from .models import Topic, MaterialTextLocator
+    from .models import MaterialTextLocator, Topic
+
     topic_id = task.task_data.get("topic_id")
     if not isinstance(topic_id, int):
         raise ValueError("补料任务缺少主题。")
@@ -51,6 +48,10 @@ def _supplement_context(task):
         if locator is None:
             raise ValueError("高亮不属于补料主题。")
         context = f"高亮片段：{locator.source_text}\n备注：{trigger.user_note or '无'}"
+    elif trigger_type == "SessionMessage":
+        if trigger.session_id != topic.session_id:
+            raise ValueError("会话消息不属于补料主题。")
+        context = f"话题讨论中识别的材料缺口：{trigger.msg_content}"
     else:
         raise ValueError("不支持的补料触发方。")
     return topic, context
@@ -58,6 +59,7 @@ def _supplement_context(task):
 
 def _update_task_progress(task, result):
     from .models import AITask
+
     AITask.objects.filter(pk=task.id, status="running").update(result_json=result)
 
 
@@ -145,13 +147,16 @@ def _video_paragraph_times(paragraphs, segments):
 
 def _create_material_chunks(material):
     from .models import MaterialChunk
+
     text = material.clean_text
     if not text:
         return
 
     chunks = []
     offset = 0
-    paragraphs = [paragraph.strip() for paragraph in text.split("\n\n") if paragraph.strip()]
+    paragraphs = [
+        paragraph.strip() for paragraph in text.split("\n\n") if paragraph.strip()
+    ]
     paragraph_times = (
         _video_paragraph_times(paragraphs, material.media_meta.get("segments", []))
         if material.media_type == "video"
@@ -194,49 +199,9 @@ def _review_interval_days(score):
     return 2
 
 
-def _extract_json_object(raw_response: str) -> str:
-    content = raw_response.strip()
-    if content.startswith("```"):
-        content = content.split("\n", 1)[-1]
-        if content.endswith("```"):
-            content = content[:-3].strip()
-    start = content.find("{")
-    end = content.rfind("}")
-    if start < 0 or end <= start:
-        raise ValueError("回复中未找到 JSON 对象。")
-    return content[start : end + 1]
-
-
-def _fallback_discussion_response(
-    raw_response: str, discussion_context: dict[str, Any]
-) -> dict[str, Any]:
-    match = re.search(
-        r'"reply"\s*:\s*("(?:\\.|[^"\\])*")',
-        raw_response,
-        flags=re.DOTALL,
-    )
-    if match:
-        try:
-            reply = json.loads(match.group(1)).strip()
-        except json.JSONDecodeError:
-            reply = ""
-        if reply:
-            return {
-                "reply": reply,
-                "context": discussion_context,
-                "suggested_stage": None,
-                "stage_suggestion_reason": "",
-            }
-    return {
-        "reply": raw_response.strip(),
-        "context": discussion_context,
-        "suggested_stage": None,
-        "stage_suggestion_reason": "",
-    }
-
-
 class TaskRegistry(type):
     """元类，用于自动注册任务类"""
+
     _registry: Dict[str, Type["BaseTask"]] = {}
 
     def __new__(mcs, name, bases, attrs):
@@ -290,12 +255,18 @@ class BaseTask(metaclass=TaskRegistry):
         """获取触发对象"""
         if not self.trigger_type or self.trigger_id is None:
             return None
-        
+
         from .models import (
-            Concept, Exam, Highlight, Material, Question, 
-            ReviewRecord, SessionMessage, Topic
+            Concept,
+            Exam,
+            Highlight,
+            Material,
+            Question,
+            ReviewRecord,
+            SessionMessage,
+            Topic,
         )
-        
+
         model_map = {
             "Concept": Concept,
             "Exam": Exam,
@@ -306,21 +277,22 @@ class BaseTask(metaclass=TaskRegistry):
             "SessionMessage": SessionMessage,
             "Topic": Topic,
         }
-        
+
         model_cls = model_map.get(self.trigger_type)
         if not model_cls:
             return None
         return model_cls.objects.filter(pk=self.trigger_id).first()
 
     def _call_llm(
-        self, 
-        messages: List[Dict[str, str]], 
-        response_format: Optional[Dict[str, str]] = None
+        self,
+        messages: List[Dict[str, str]],
+        response_format: Optional[Dict[str, str]] = None,
+        model: Optional[str] = None,
     ) -> str:
         """调用 LLM 并记录上下文"""
-        provider = AIGateway.get_provider(self.model)
+        provider = AIGateway.get_provider(model or self.model)
         response = provider.generate_response(messages, response_format=response_format)
-        
+
         # 记录上下文
         self._append_context(messages)
         return response
@@ -328,11 +300,11 @@ class BaseTask(metaclass=TaskRegistry):
     def _append_context(self, messages: List[Dict[str, str]]):
         """将 LLM 交互记录到 AITask 的 full_context 中"""
         from .models import AITask
-        
+
         context_str = "\n\n".join(
             [f"[{m['role'].upper()}]\n{m['content']}" for m in messages]
         )
-        
+
         task = AITask.objects.get(pk=self.task_id)
         if task.full_context:
             task.full_context += f"\n\n--- Next LLM Call ---\n\n{context_str}"
@@ -349,7 +321,7 @@ class BaseTask(metaclass=TaskRegistry):
                 clean_content = clean_content[7:]
             if clean_content.endswith("```"):
                 clean_content = clean_content[:-3]
-            
+
             data = json.loads(clean_content.strip())
             return data.get(key) if key else data
         except (json.JSONDecodeError, AttributeError) as e:
@@ -384,15 +356,18 @@ class BriefingTask(BaseTask):
 
         if not material.clean_text:
             raise ValueError("材料正文不存在，无法生成阅读前导。")
-        
+
         messages = [
             {
                 "role": "system",
                 "content": "你是一个专业的学习助手。请为这份学习材料生成一份快速熟悉指南，包含核心问题、关键词和阅读建议。请务必覆盖整份材料的核心要点，不要遗漏重要信息。",
             },
-            {"role": "user", "content": f"学习材料内容（已清洗）：\n{material.clean_text[:15000]}"},
+            {
+                "role": "user",
+                "content": f"学习材料内容（已清洗）：\n{material.clean_text[:15000]}",
+            },
         ]
-        
+
         digest = self._call_llm(messages)
         material.digest = digest
         material.status = "generating_audio"
@@ -468,8 +443,10 @@ class ProcessTask(BaseTask):
         # 注意：MaterialService.process_material 内部可能会把 status 设为 ready，
         # 我们在流水线中应保持其为 processing 直到最后一步。
         if material.status != "failed":
-            enqueue_or_reuse("clean_text", trigger_type="Material", trigger_id=material.id)
-        
+            enqueue_or_reuse(
+                "clean_text", trigger_type="Material", trigger_id=material.id
+            )
+
         return result
 
 
@@ -481,24 +458,31 @@ class CleanTextTask(BaseTask):
         material = self._get_trigger()
         if not material:
             raise ValueError("找不到触发任务的材料。")
-        
+
         from .task_service import enqueue_or_reuse
 
         # 逻辑：如果 clean_text 已存在且不等于 raw_text（说明已清洗过），则跳过执行，直接进入下一环节
         # 如果 raw_text 为空（如网页导入失败），则不能清洗，也尝试跳过看下一环节
-        should_skip = bool(material.clean_text and material.clean_text != material.raw_text)
+        should_skip = bool(
+            material.clean_text and material.clean_text != material.raw_text
+        )
         result = {"material_id": material.id, "skipped": should_skip}
 
         if not should_skip:
             material.status = "cleaning"
             material.save(update_fields=["status"])
-            
+
             source_text = material.raw_text or material.clean_text
-            
+
             if not source_text and material.media_type == "web_page":
                 import trafilatura
+
                 downloaded = trafilatura.fetch_url(material.media_uri)
-                source_text = trafilatura.extract(downloaded, include_comments=False) if downloaded else ""
+                source_text = (
+                    trafilatura.extract(downloaded, include_comments=False)
+                    if downloaded
+                    else ""
+                )
 
             if not source_text:
                 result["error"] = "没有可用的文本内容进行清洗"
@@ -509,19 +493,19 @@ class CleanTextTask(BaseTask):
                 text_chunks = []
                 current_chunk = []
                 current_length = 0
-                
+
                 for para in paragraphs:
                     para = para.strip()
                     if not para:
                         continue
-                    
+
                     # 如果单段超长（极少见），强制切断，但不做重叠
                     if len(para) > max_chunk_size:
                         if current_chunk:
                             text_chunks.append("\n\n".join(current_chunk))
                             current_chunk = []
                             current_length = 0
-                        
+
                         # 强行切分超长段落
                         sub_start = 0
                         while sub_start < len(para):
@@ -536,19 +520,23 @@ class CleanTextTask(BaseTask):
                         current_length = len(para)
                     else:
                         current_chunk.append(para)
-                        current_length += len(para) + 2 # 加上换行符长度
-                
+                        current_length += len(para) + 2  # 加上换行符长度
+
                 if current_chunk:
                     text_chunks.append("\n\n".join(current_chunk))
 
                 clean_parts = []
                 for i, chunk in enumerate(text_chunks):
-                    is_partial = len(text_chunks) > 1
-                    
                     # 构建上下文参考窗口
-                    context_prev = clean_parts[-1][-1000:] if clean_parts else "这是文档的开头"
-                    context_next = text_chunks[i+1][:1000] if i + 1 < len(text_chunks) else "这是文档的结尾"
-                    
+                    context_prev = (
+                        clean_parts[-1][-1000:] if clean_parts else "这是文档的开头"
+                    )
+                    context_next = (
+                        text_chunks[i + 1][:1000]
+                        if i + 1 < len(text_chunks)
+                        else "这是文档的结尾"
+                    )
+
                     messages = [
                         {
                             "role": "system",
@@ -562,30 +550,31 @@ class CleanTextTask(BaseTask):
                             ),
                         },
                         {
-                            "role": "user", 
+                            "role": "user",
                             "content": (
                                 f"【上文参考（已清洗）】：\n...{context_prev}\n\n"
-                                f"【目标文本（待清洗，第 {i+1}/{len(text_chunks)} 段）】：\n{chunk}\n\n"
+                                f"【目标文本（待清洗，第 {i + 1}/{len(text_chunks)} 段）】：\n{chunk}\n\n"
                                 f"【下文参考（待清洗）】：\n{context_next}..."
-                            )
+                            ),
                         },
                     ]
-                    
+
                     part_content = self._call_llm(messages)
                     clean_parts.append(part_content.strip())
 
                 # 合并清洗后的结果，尝试去重重叠部分（简单合并或交给 AI 处理合并，这里采用简单换行合并）
                 clean_content = "\n\n".join(clean_parts)
-                
+
                 with transaction.atomic():
                     material.clean_text = clean_content
                     material.save(update_fields=["clean_text", "updated_at"])
-                    
+
                     # 重新分块
                     from .models import MaterialChunk
+
                     MaterialChunk.objects.filter(material=material).delete()
                     _create_material_chunks(material)
-                
+
                 result["clean_text_length"] = len(clean_content)
                 result["processed_chunks"] = len(text_chunks)
 
@@ -603,7 +592,7 @@ class AnswerQuestionTask(BaseTask):
         context = self.task_data.get("context", "")
         if not context:
             raise ValueError("问题缺少材料上下文。")
-            
+
         messages = [
             {
                 "role": "system",
@@ -618,10 +607,11 @@ class AnswerQuestionTask(BaseTask):
                 ),
             },
         ]
-        
+
         content = self._call_llm(messages)
-        
+
         from .models import SessionMessage
+
         SessionMessage.objects.create(
             session=question.session,
             msg_from="ai",
@@ -663,14 +653,16 @@ class ConceptDraftTask(BaseTask):
                 ),
             },
         ]
-        
+
         raw_response = self._call_llm(messages, response_format={"type": "json_object"})
         draft = self._parse_json(raw_response)
-        
+
         required_fields = ("definition", "principle", "pitfalls", "applications")
-        if not isinstance(draft, dict) or any(not str(draft.get(f, "")).strip() for f in required_fields):
+        if not isinstance(draft, dict) or any(
+            not str(draft.get(f, "")).strip() for f in required_fields
+        ):
             raise ValueError("AI 概念草稿结果格式不正确")
-            
+
         concept.definition = draft["definition"]
         concept.principle = draft["principle"]
         concept.pitfalls = draft["pitfalls"]
@@ -678,194 +670,132 @@ class ConceptDraftTask(BaseTask):
         concept.status = "draft"
         concept.save(
             update_fields=[
-                "definition", "principle", "pitfalls", "applications", 
-                "status", "updated_at"
+                "definition",
+                "principle",
+                "pitfalls",
+                "applications",
+                "status",
+                "updated_at",
             ]
         )
         return {"concept_id": concept.id, **draft}
 
 
-class DiscussionOpeningTask(BaseTask):
-    task_type = "discussion_opening"
-    verbose_name = "讨论开场"
-
-    def run(self) -> Dict[str, Any]:
-        topic = self._get_trigger()
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是学习决策助手。帮助用户判断一个话题是否值得现在系统学习。"
-                    "先说明该话题的核心价值和潜在适用范围，再提出一个开放问题了解用户动机。"
-                    "不要虚构用户已有知识或外部资料。保持简洁、可继续对话。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"讨论话题：{topic.title}\n学习目标：{topic.goal or '未提供'}",
-            },
-        ]
-        
-        content = self._call_llm(messages)
-        return self._create_discussion_message(content, "opening")
-
-    def _create_discussion_message(self, content, message_type):
-        topic = self._get_trigger()
-        if topic.session_id is None:
-            from .models import Session
-            topic.session = Session.objects.create(
-                session_scene="discussion", model=self.model
-            )
-            topic.save(update_fields=["session", "updated_at"])
-        
-        from .models import SessionMessage
-        message = SessionMessage.objects.create(
-            session=topic.session, msg_from="ai", msg_content=content.strip()
-        )
-        return {"session_message_id": message.id, "topic_id": topic.id}
-
-
-class DiscussionAssessmentTask(BaseTask):
-    task_type = "discussion_assessment"
-    verbose_name = "快速评估"
-
-    def run(self) -> Dict[str, Any]:
-        topic = self._get_trigger()
-        material_context = str(self.task_data.get("material_context", "")).strip()
-        if not material_context:
-            raise ValueError("快速评估缺少可用材料。")
-            
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是学习决策助手。基于给定材料进行快速评估："
-                    "1. 用简洁语言概括材料；2. 判断它对当前学习目标的关联度（高/中/低）并说明理由；"
-                    "3. 指出投入系统学习前应澄清的一个问题。"
-                    "不要假装知道用户未提供的背景，也不要推荐外部链接。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"讨论话题：{topic.title}\n学习目标：{topic.goal or '未提供'}\n"
-                    f"材料：\n{material_context}"
-                ),
-            },
-        ]
-        
-        content = self._call_llm(messages)
-        topic.discussion_rationale = content
-        topic.save(update_fields=["discussion_rationale", "updated_at"])
-        
-        # Reuse logic from DiscussionOpeningTask
-        opening_task = DiscussionOpeningTask(self.task_id, self.task_data, self.trigger_type, self.trigger_id, self.model)
-        return opening_task._create_discussion_message(content, "assessment")
-
-
 class DiscussionReplyTask(BaseTask):
     task_type = "discussion_reply"
-    verbose_name = "讨论回复"
+    verbose_name = "话题对话"
 
     def run(self) -> Dict[str, Any]:
         user_message = self._get_trigger()
-        from .models import Topic, SessionMessage
+        from .models import SessionMessage, Topic
+
+        if user_message is None:
+            raise ValueError("话题对话消息不存在。")
         topic = Topic.objects.filter(session=user_message.session).first()
         if topic is None:
             raise ValueError("讨论消息不属于学习主题。")
-            
-        stage = str(self.task_data.get("stage", topic.discussion_stage))
-        discussion_context = self.task_data.get("discussion_context", topic.discussion_context)
-        
-        stage_instructions = {
-            "explore": "接住不完整表达，区分已知与猜测，推动一个最有价值的下一步，不要强迫用户形成学习决策。",
-            "frame": "将已有探索收敛成可检验的问题、约束或选择；先回应用户的具体问题，再决定是否提出一个追问。",
-            "decide": "基于已有对话和材料，比较现在学习、暂缓或先补前置知识等选项，不要虚构事实。",
-        }
-        
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是帮助用户探索学习问题的助手。不要使用固定标题、固定三段式、"
-                    "连续问题清单或无依据的用户画像。一次最多提出一个明确问题。"
-                    f"当前阶段：{stage}。{stage_instructions[stage]}"
-                    "只输出合法 JSON："
-                    '{"reply":"自然语言回复","context":{"confirmed_context":[],"open_questions":[],'
-                    '"working_hypotheses":[],"next_focus":""},"suggested_stage":null,'
-                    '"stage_suggestion_reason":""}。'
-                    "suggested_stage 只能是下一阶段（explore 时为 frame，frame 时为 decide）或 null。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"讨论话题：{topic.title}\n学习目标：{topic.goal or '未提供'}\n"
-                    f"材料上下文：{self.task_data.get('material_context', '暂无材料')}\n"
-                    f"当前工作记忆：{json.dumps(discussion_context, ensure_ascii=False)}\n"
-                    f"最近对话：\n{self.task_data.get('history', '暂无')}\n\n用户新消息：{user_message.msg_content}"
-                ),
-            },
-        ]
-        
-        raw_response = self._call_llm(messages)
-        try:
-            # Re-use extraction logic if needed, but here we try simple parse first
-            response = self._parse_json(raw_response)
-        except Exception:
-            # Fallback logic from AIGateway
-            from .ai_gateway import _fallback_discussion_response
-            response = _fallback_discussion_response(raw_response, discussion_context)
-            
-        from django.db import transaction
-        with transaction.atomic():
-            topic.discussion_context = response["context"]
-            topic.save(update_fields=["discussion_context", "updated_at"])
-            
-            message = SessionMessage.objects.create(
-                session=user_message.session,
-                msg_from="ai",
-                msg_content=response["reply"],
+
+        material_lines = []
+        links = topic.topic_materials.filter(removed_at__isnull=True).select_related(
+            "material"
+        )
+        for link in links:
+            material = link.material
+            summary = material.digest.strip() or material.clean_text[:800].strip()
+            material_lines.append(
+                (
+                    f"- 《{material.title}》；分类：{link.get_category_display()}；"
+                    f"状态：{material.get_status_display()}；摘要：{summary or '暂无摘要'}"
+                )
             )
-            result = {"session_message_id": message.id, "topic_id": topic.id}
-            
-        return {
-            **result,
-            "stage": self.task_data.get("stage"),
-            "suggested_stage": response.get("suggested_stage"),
-        }
-
-
-class LearningPathTask(BaseTask):
-    task_type = "learning_path"
-    verbose_name = "学习路线"
-
-    def run(self) -> Dict[str, Any]:
-        topic = self._get_trigger()
+        recommendation_lines = [
+            f"- {item.title}：{item.reason}"
+            for item in topic.material_recommendations.filter(status="pending")[:10]
+        ]
+        topic_context = (
+            f"话题标题：{topic.title}\n"
+            f"学习目标：{topic.goal or '未设置'}\n"
+            f"学习范围：{topic.scope or '未设置'}\n"
+            f"已有材料：\n{chr(10).join(material_lines) or '暂无材料'}\n"
+            f"待处理材料推荐：\n{chr(10).join(recommendation_lines) or '暂无'}"
+        )
+        history = list(user_message.session.messages.order_by("-id")[:20])
+        history.reverse()
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "你是学习规划助手。为已经决定学习的话题给出一个可执行的起步路线："
-                    "包含 3 到 5 个递进步骤、每步要解决的问题、优先阅读的现有材料（如有）"
-                    "以及一个第一天可完成的小行动。不要虚构外部链接或资料。"
+                    "你是中文学习助手，围绕当前学习话题与用户自然讨论。"
+                    "先直接回应用户，不使用固定三段式，不连续追问，一次最多提出一个问题。"
+                    "严格区分已有材料支持的事实与推测，不虚构链接或用户背景。"
+                    "当现有材料不足以回答关键问题时，可以提出材料检索建议；"
+                    "已有材料足够时不要为了推荐而推荐。只输出合法 JSON："
+                    '{"reply":"自然语言回复","material_search":'
+                    '{"queries":["1到3条中文检索词"],"reason":"为什么需要补充材料"}或null}。'
                 ),
             },
             {
                 "role": "user",
-                "content": (
-                    f"话题：{topic.title}\n学习目标：{topic.goal or '未提供'}\n"
-                    f"现有材料：{self.task_data.get('material_context', '暂无')}\n"
-                    f"讨论上下文：\n{self.task_data.get('history', '暂无')}"
-                ),
+                "content": f"以下是本次对话的学习上下文：\n{topic_context}",
             },
         ]
-        
-        content = self._call_llm(messages)
-        
-        # Reuse logic from DiscussionOpeningTask
-        opening_task = DiscussionOpeningTask(self.task_id, self.task_data, self.trigger_type, self.trigger_id, self.model)
-        return opening_task._create_discussion_message(content, "learning_path")
+        messages.extend(
+            {
+                "role": "user" if item.msg_from == "user" else "assistant",
+                "content": item.msg_content,
+            }
+            for item in history
+        )
+
+        raw_response = self._call_llm(messages, response_format={"type": "json_object"})
+        try:
+            response = self._parse_json(raw_response)
+            reply = str(response.get("reply", "")).strip()
+        except (AttributeError, ValueError):
+            response = {}
+            reply = raw_response.strip()
+        if not reply:
+            raise ValueError("话题对话未生成有效回复。")
+
+        message = SessionMessage.objects.create(
+            session=user_message.session,
+            msg_from="ai",
+            msg_content=reply,
+        )
+        user_message.session.model = self.model
+        user_message.session.save(update_fields=["model", "updated_at"])
+
+        supplement_task_id = None
+        search_request = response.get("material_search")
+        if isinstance(search_request, dict):
+            queries = [
+                str(query).strip()
+                for query in search_request.get("queries", [])
+                if str(query).strip()
+            ][:3]
+            if queries:
+                from .task_service import enqueue_or_reuse
+
+                supplement_task, _ = enqueue_or_reuse(
+                    "supplement_search",
+                    trigger_type="SessionMessage",
+                    trigger_id=message.id,
+                    task_data={
+                        "topic_id": topic.id,
+                        "suggested_queries": queries,
+                        "recommendation_message_id": message.id,
+                        "recommendation_reason": str(
+                            search_request.get("reason", "")
+                        ).strip(),
+                    },
+                )
+                supplement_task_id = supplement_task.id
+
+        return {
+            "session_message_id": message.id,
+            "topic_id": topic.id,
+            "supplement_task_id": supplement_task_id,
+        }
 
 
 class GenerateExamTask(BaseTask):
@@ -897,12 +827,14 @@ class GenerateExamTask(BaseTask):
                 ),
             },
         ]
-        
+
         raw_response = self._call_llm(messages, response_format={"type": "json_object"})
         generated_questions = self._parse_json(raw_response, "questions")
-        
+
         from django.db import transaction
+
         from .models import Exam, ExamQuestion
+
         with transaction.atomic():
             exam = Exam.objects.create(topic=topic)
             for generated in generated_questions[:5]:
@@ -939,7 +871,7 @@ class GradeExamTask(BaseTask):
             }
             for question in questions
         ]
-        
+
         messages = [
             {
                 "role": "system",
@@ -955,10 +887,10 @@ class GradeExamTask(BaseTask):
                 "content": f"学习主题：{exam.topic.title}\n考试数据：\n{json.dumps(payload, ensure_ascii=False)}",
             },
         ]
-        
+
         raw_response = self._call_llm(messages, response_format={"type": "json_object"})
         grading = self._parse_json(raw_response)
-        
+
         grades_by_id = {
             item.get("id"): item
             for item in grading["questions"]
@@ -968,11 +900,13 @@ class GradeExamTask(BaseTask):
         if len(grades_by_id) != len(questions):
             raise ValueError("AI 阅卷未返回全部题目的结果。")
 
+        from datetime import timedelta
+
         from django.db import transaction
         from django.utils import timezone
+
         from .models import ReviewRecord
-        from datetime import timedelta
-        
+
         with transaction.atomic():
             scores = []
             for question in questions:
@@ -1036,13 +970,15 @@ class ReviewPromptTask(BaseTask):
                 ),
             },
         ]
-        
+
         content = self._call_llm(messages).strip()
         if not content:
             raise ValueError("AI 未生成复习提示。")
 
         from django.utils import timezone
+
         from .models import ReviewRecord
+
         generated_at = timezone.now()
         updated = ReviewRecord.objects.filter(pk=review.id, result="pending").update(
             review_prompt=content,
@@ -1082,15 +1018,17 @@ class GradeReviewTask(BaseTask):
                 ),
             },
         ]
-        
+
         raw_response = self._call_llm(messages, response_format={"type": "json_object"})
         grading = self._parse_json(raw_response)
-        
+
+        from datetime import timedelta
+
         from django.db import transaction
         from django.utils import timezone
-        from datetime import timedelta
+
         from .models import ReviewRecord
-        
+
         completed_at = timezone.now()
         with transaction.atomic():
             review = ReviewRecord.objects.select_for_update().get(pk=review.id)
@@ -1107,8 +1045,13 @@ class GradeReviewTask(BaseTask):
             review.next_due_at = next_due_at
             review.save(
                 update_fields=[
-                    "response_text", "feedback", "score", "result",
-                    "completed_at", "graded_at", "next_due_at"
+                    "response_text",
+                    "feedback",
+                    "score",
+                    "result",
+                    "completed_at",
+                    "graded_at",
+                    "next_due_at",
                 ]
             )
             next_review, created = ReviewRecord.objects.get_or_create(
@@ -1122,7 +1065,7 @@ class GradeReviewTask(BaseTask):
             if not created and next_review.due_at != next_due_at:
                 next_review.due_at = next_due_at
                 next_review.save(update_fields=["due_at"])
-                
+
         return {
             "review_id": review.id,
             "score": grading["score"],
@@ -1137,17 +1080,19 @@ class ASRTask(BaseTask):
 
     def run(self) -> Dict[str, Any]:
         from .video_service import process_video
+
         material = self._get_trigger()
-        
+
         material.status = "importing"
         material.save(update_fields=["status"])
-        
+
         result = process_video(material, self.model)
-        
+
         # 视频转录后，触发 AI 清洗以优化排版和修正 ASR 错误
         from .task_service import enqueue_or_reuse
+
         enqueue_or_reuse("clean_text", trigger_type="Material", trigger_id=material.id)
-        
+
         return result
 
 
@@ -1156,36 +1101,38 @@ class SupplementSearchTask(BaseTask):
     verbose_name = "补充资料检索"
 
     def run(self) -> Dict[str, Any]:
-        from .supplement_service import content_md5, crawl, crawl_metadata, search
-        from .models import Material, TopicMaterial
-        from .task_service import enqueue_or_reuse
-        
-        # We need a dummy task object for existing utils or refactor them.
-        from .models import AITask
+        from .models import AITask, MaterialRecommendation, SessionMessage
+        from .supplement_service import content_md5, crawl, search
+
         task_instance = AITask.objects.get(pk=self.task_id)
 
         topic, trigger_context = _supplement_context(task_instance)
-        
-        # 1. Generate queries
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是学习资料检索助手。只输出合法 JSON，不要 Markdown。"
-                    '输出 {"queries":["查询词"]}，生成 1 到 3 条高质量网页检索词。'
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"学习主题：{topic.title}\n学习目标：{topic.goal or '未提供'}\n"
-                    f"触发上下文：{trigger_context}"
-                ),
-            },
-        ]
-        
-        raw_queries = self._call_llm(messages, response_format={"type": "json_object"})
-        queries = self._parse_json(raw_queries, "queries")
+        queries = self.task_data.get("suggested_queries")
+        if not isinstance(queries, list) or not queries:
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是学习资料检索助手。只输出合法 JSON，不要 Markdown。"
+                        '输出 {"queries":["查询词"]}，生成 1 到 3 条高质量网页检索词。'
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"学习主题：{topic.title}\n"
+                        f"学习目标：{topic.goal or '未提供'}\n"
+                        f"学习范围：{topic.scope or '未提供'}\n"
+                        f"触发上下文：{trigger_context}"
+                    ),
+                },
+            ]
+            raw_queries = self._call_llm(
+                messages,
+                response_format={"type": "json_object"},
+                model=AIGateway.get_model_for_task("supplement_query"),
+            )
+            queries = self._parse_json(raw_queries, "queries")
         queries = [str(query).strip() for query in queries if str(query).strip()][:3]
 
         result = {
@@ -1193,11 +1140,10 @@ class SupplementSearchTask(BaseTask):
             "queries": queries,
             "searched_count": 0,
             "candidates": [],
-            "imported_material_ids": [],
-            "reused_material_ids": [],
+            "recommendation_ids": [],
         }
         _update_task_progress(task_instance, result)
-        
+
         candidates_by_url = {}
         for query in queries:
             for candidate in search(query):
@@ -1205,10 +1151,13 @@ class SupplementSearchTask(BaseTask):
 
         result.update(stage="crawling", searched_count=len(candidates_by_url))
         _update_task_progress(task_instance, result)
-        
+
         threshold = float(self.task_data.get("relevance_threshold", 0.8))
-        max_imports = min(int(self.task_data.get("max_imports", 5)), 5)
-        
+        max_recommendations = min(int(self.task_data.get("max_recommendations", 5)), 5)
+        message = SessionMessage.objects.filter(
+            pk=self.task_data.get("recommendation_message_id")
+        ).first()
+
         for candidate in list(candidates_by_url.values())[:20]:
             record = {
                 "title": candidate["title"],
@@ -1223,10 +1172,10 @@ class SupplementSearchTask(BaseTask):
                     record.update(status="filtered", reason="正文过短")
                     result["candidates"].append(record)
                     continue
-                
+
                 result["stage"] = "evaluating"
                 _update_task_progress(task_instance, result)
-                
+
                 eval_messages = [
                     {
                         "role": "system",
@@ -1247,78 +1196,73 @@ class SupplementSearchTask(BaseTask):
                         ),
                     },
                 ]
-                
-                raw_eval = self._call_llm(eval_messages, response_format={"type": "json_object"})
+
+                raw_eval = self._call_llm(
+                    eval_messages, response_format={"type": "json_object"}
+                )
                 assessment = self._parse_json(raw_eval)
-                
+
                 record.update(**assessment)
                 if assessment["relevance_score"] < threshold:
                     record.update(status="filtered", reason="相关度低于阈值")
                     result["candidates"].append(record)
                     continue
-                if len(result["imported_material_ids"]) >= max_imports:
-                    record.update(status="filtered", reason="已达到单次导入上限")
+                if len(result["recommendation_ids"]) >= max_recommendations:
+                    record.update(status="filtered", reason="已达到单次推荐上限")
                     result["candidates"].append(record)
                     continue
-                    
-                digest = content_md5(content)
-                material = (
-                    Material.objects.filter(media_meta__md5=digest).first()
-                    or Material.objects.filter(media_uri=candidate["url"]).first()
-                )
-                reused = material is not None
-                if material is None:
-                    material = Material.objects.create(
-                        title=candidate["title"] or candidate["url"],
-                        media_type="web_page",
-                        media_uri=candidate["url"],
-                        media_meta=crawl_metadata(candidate["url"], content),
-                        raw_text=content,
-                        status="pending",
-                        created_by="ai_recommended",
-                    )
-                    
-                result["stage"] = "importing"
-                _update_task_progress(task_instance, result)
-                
-                from django.db import transaction
-                with transaction.atomic():
-                    relation, created = TopicMaterial.objects.get_or_create(
-                        topic=topic,
-                        material=material,
-                        defaults={
-                            "import_by": "ai_recommended",
-                            "category": assessment["category"],
-                            "relevance_score": assessment["relevance_score"],
-                            "import_reason": assessment["import_reason"],
-                        },
-                    )
-                    if not created and relation.removed_at is not None:
-                        record.update(status="skipped", reason="该资料此前已从当前主题移除")
-                        result["candidates"].append(record)
-                        continue
-                    if not created:
-                        relation.category = assessment["category"]
-                        relation.relevance_score = assessment["relevance_score"]
-                        relation.import_reason = assessment["import_reason"]
-                        relation.save(update_fields=["category", "relevance_score", "import_reason"])
-                
-                # 触发 AI 清洗任务
-                enqueue_or_reuse("clean_text", trigger_type="Material", trigger_id=material.id)
 
-                record.update(
-                    status="imported" if created or not reused else "reused",
-                    material_id=material.id,
+                recommendation, created = MaterialRecommendation.objects.get_or_create(
+                    topic=topic,
+                    url=candidate["url"],
+                    defaults={
+                        "message": message,
+                        "source_task": task_instance,
+                        "title": candidate["title"] or candidate["url"],
+                        "content_snapshot": content,
+                        "content_md5": content_md5(content),
+                        "category": assessment["category"],
+                        "relevance_score": assessment["relevance_score"],
+                        "reason": assessment["import_reason"],
+                    },
                 )
-                result["imported_material_ids"].append(material.id)
-                if reused:
-                    result["reused_material_ids"].append(material.id)
+                if not created and recommendation.status == "pending":
+                    recommendation.message = message or recommendation.message
+                    recommendation.source_task = task_instance
+                    recommendation.title = candidate["title"] or candidate["url"]
+                    recommendation.content_snapshot = content
+                    recommendation.content_md5 = content_md5(content)
+                    recommendation.category = assessment["category"]
+                    recommendation.relevance_score = assessment["relevance_score"]
+                    recommendation.reason = assessment["import_reason"]
+                    recommendation.save(
+                        update_fields=[
+                            "message",
+                            "source_task",
+                            "title",
+                            "content_snapshot",
+                            "content_md5",
+                            "category",
+                            "relevance_score",
+                            "reason",
+                        ]
+                    )
+                record.update(
+                    status=(
+                        "recommended"
+                        if recommendation.status == "pending"
+                        else recommendation.status
+                    ),
+                    recommendation_id=recommendation.id,
+                )
+                if recommendation.status == "pending":
+                    result["recommendation_ids"].append(recommendation.id)
             except Exception as error:
                 record.update(status="failed", reason=str(error)[:300])
             result["candidates"].append(record)
 
         result["stage"] = "completed"
-        result["imported_count"] = len(result["imported_material_ids"])
-        if not result["imported_material_ids"]:
+        result["recommended_count"] = len(result["recommendation_ids"])
+        if not result["recommendation_ids"]:
             result["message"] = "没有找到达到相关度阈值的补充资料。"
         return result

@@ -1,9 +1,20 @@
 import axios from 'axios';
 
+const configuredTimeout = Number(import.meta.env.VITE_API_TIMEOUT_MS);
+
 const api = axios.create({
-  baseURL: 'http://127.0.0.1:8000/api/',
-  timeout: 10000,
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/',
+  timeout:
+    Number.isFinite(configuredTimeout) && configuredTimeout > 0
+      ? configuredTimeout
+      : 10000,
 });
+
+export const setApiTimeout = (timeout: number) => {
+  if (Number.isFinite(timeout) && timeout >= 1000) {
+    api.defaults.timeout = timeout;
+  }
+};
 
 export type MaterialStatus =
   | 'pending'
@@ -149,6 +160,24 @@ export interface SessionMessage {
   msg_at: string;
 }
 
+export interface MaterialRecommendation {
+  id: number;
+  topic: number;
+  message: number | null;
+  source_task: number | null;
+  material: number | null;
+  title: string;
+  url: string;
+  category: 'exam_material' | 'recommended_reading';
+  category_display: string;
+  relevance_score: number;
+  reason: string;
+  status: 'pending' | 'adopted' | 'dismissed';
+  status_display: string;
+  created_at: string;
+  decided_at: string | null;
+}
+
 export interface Session {
   id: number;
   system_prompt: string;
@@ -164,15 +193,8 @@ export interface Session {
 export interface Topic {
   id: number;
   title: string;
-  type: 'learning' | 'discussion';
-  type_display: string;
   goal: string;
   scope: string;
-  discussion_outcome: 'pending' | 'learn' | 'not_learn';
-  discussion_outcome_display: string;
-  discussion_rationale: string;
-  discussion_stage: 'explore' | 'frame' | 'decide';
-  discussion_context: Record<string, unknown>;
   session: number | null;
   status: 'draft' | 'learning' | 'exam_ready' | 'reviewing' | 'archived';
   status_display: string;
@@ -262,6 +284,55 @@ export interface ReviewRecord {
   graded_at: string | null;
 }
 
+export interface SystemConfiguration {
+  llm_provider_type: 'ollama' | 'openai';
+  llm_base_url: string;
+  llm_api_key: string;
+  llm_model: string;
+  llm_model_topic_chat: string;
+  llm_model_supplement_query: string;
+  llm_model_supplement_evaluate: string;
+  llm_model_briefing: string;
+  llm_model_clean_text: string;
+  llm_model_answer_question: string;
+  llm_model_concept_draft: string;
+  llm_model_generate_exam: string;
+  llm_model_grade_exam: string;
+  llm_model_review_prompt: string;
+  llm_model_grade_review: string;
+  ollama_keep_alive: string;
+  asr_model: string;
+  tts_voices: string;
+  searxng_base_url: string;
+  crawl4ai_base_url: string;
+  supplement_relevance_threshold: number;
+  default_site_theme:
+    | 'paper'
+    | 'sepia'
+    | 'green'
+    | 'gray'
+    | 'dark'
+    | 'midnight'
+    | 'charcoal'
+    | 'coffee';
+  default_reader_font: 'system' | 'song' | 'kai' | 'serif';
+  api_timeout_ms: number;
+  updated_at: string;
+}
+
+export const getSystemConfiguration = () =>
+  api.get<SystemConfiguration>('system-configuration/');
+export const discoverProviderModels = (
+  data: Pick<
+    SystemConfiguration,
+    'llm_provider_type' | 'llm_base_url' | 'llm_api_key'
+  >,
+) => api.post<{ models: string[] }>('system-configuration/models/', data);
+export const updateSystemConfiguration = (
+  data: Omit<SystemConfiguration, 'updated_at'>,
+) =>
+  api.put<SystemConfiguration>('system-configuration/', data);
+
 export const getSession = (id: number) => api.get<Session>(`sessions/${id}/`);
 export const createSessionMessage = (sessionId: number, content: string) =>
   api.post<{ message: SessionMessage; task: AITask }>(
@@ -287,6 +358,7 @@ export const getMaterials = (params?: Record<string, string | number>) =>
   api.get<Material[]>('materials/', { params });
 export const reImportMaterial = (id: number) =>
   api.post<{ material: Material; task: AITask | null }>(`materials/${id}/re_import/`);
+export const deleteMaterial = (id: number) => api.delete(`materials/${id}/`);
 export const uploadVideo = (data: FormData) =>
   api.post<{ material: Material; task: AITask }>('materials/upload-video/', data, {
     headers: { 'Content-Type': 'multipart/form-data' },
@@ -304,10 +376,17 @@ export const updateTopicMaterial = (
   id: number,
   data: Pick<TopicMaterial, 'category'>,
 ) => api.patch<TopicMaterial>(`topic-materials/${id}/`, data);
+export const linkMaterialToTopic = (material: number, topic: number) =>
+  api.post<TopicMaterial>('topic-materials/', { material, topic });
 export const removeTopicMaterial = (id: number) =>
   api.delete(`topic-materials/${id}/`);
 export const getDiscussion = (topicId: number) =>
-  api.get<{ topic: Topic; messages: SessionMessage[] }>(
+  api.get<{
+    topic: Topic;
+    messages: SessionMessage[];
+    recommendations: MaterialRecommendation[];
+    active_tasks: AITask[];
+  }>(
     `topics/${topicId}/discussion/`,
   );
 export const createDiscussionMessage = (topicId: number, content: string) =>
@@ -315,6 +394,14 @@ export const createDiscussionMessage = (topicId: number, content: string) =>
     `topics/${topicId}/discussion/`,
     { content },
   );
+export const adoptMaterialRecommendation = (id: number) =>
+  api.post<{
+    recommendation: MaterialRecommendation;
+    topic_material: TopicMaterial;
+    task: AITask | null;
+  }>(`material-recommendations/${id}/adopt/`);
+export const dismissMaterialRecommendation = (id: number) =>
+  api.post<MaterialRecommendation>(`material-recommendations/${id}/dismiss/`);
 export const createQuestion = (data: {
   topic: number;
   material: number;

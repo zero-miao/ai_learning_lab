@@ -41,8 +41,8 @@ AI Learning Lab 是一个本地部署的 AI 辅助学习系统项目。本文档
 
 - **工具**：[Ollama](https://ollama.com/)
 - **接口**：兼容 OpenAI API (默认 `http://localhost:11434/v1`)
-- **正式聊天模型**：`qwen3.6:35b-a3b`
-- **快速模型**：`qwen3:30b-a3b`
+- **话题聊天模型**：`qwen3:30b-a3b`
+- **分析任务模型**：`qwen3.6:35b-a3b`
 - **Embedding 模型**：`nomic-embed-text:latest`
 
 ## 当前本地环境现状
@@ -82,7 +82,11 @@ ai-learning-lab/
 - `.env`：本机正式运行使用的环境变量文件，包含真实运行值；已加入 `.gitignore`，不应提交到 Git。
 - `.env.example`：环境变量模板，用于说明需要配置哪些变量，可提交到 Git 作为参考。
 
-当前 `.env` 默认使用本地 Ollama，核心配置如下：
+`DJANGO_SECRET_KEY`、数据库路径、Host、媒体目录和前端 API 地址属于启动配置，
+始终从 `.env` 读取。模型路由、本地服务、补料阈值和界面默认值只在系统配置
+首次创建时从 `.env` 初始化；之后通过前端“系统设置”页面修改并持久化到 SQLite。
+
+当前 `.env` 默认使用本地 Ollama，初始化配置如下：
 
 | 变量名 | 用途 | 当前正式值 / 示例 |
 | --- | --- | --- |
@@ -95,11 +99,13 @@ ai-learning-lab/
 | `LLM_API_KEY` | OpenAI SDK 兼容要求使用的 API Key，本地 Ollama 可填固定值 | `ollama` |
 | `LLM_MODEL` | 当前后端默认调用模型 | `qwen3.6:35b-a3b` |
 | `LLM_MODEL_<TASK_TYPE>` | 指定 AI 任务类型的模型，未设置时回退 `LLM_MODEL` | `LLM_MODEL_CONCEPT_DRAFT=qwen3.6:35b-a3b` |
-| `LLM_MODEL_DISCUSSION_<STAGE>` | 按讨论阶段选择模型 | `EXPLORE=qwen2.5:14b`、`FRAME=qwen3:30b-a3b`、`DECIDE=qwen3.6:35b-a3b` |
-| `OLLAMA_KEEP_ALIVE` | Ollama 模型空闲保留时间 | `10m` |
-| `OLLAMA_CHAT_MODEL` | 正式聊天模型 | `qwen3.6:35b-a3b` |
-| `OLLAMA_FAST_MODEL` | 快速任务模型 | `qwen3:30b-a3b` |
-| `OLLAMA_EMBED_MODEL` | Embedding 模型 | `nomic-embed-text:latest` |
+| `LLM_MODEL_TOPIC_CHAT` | 话题内高频中文对话模型 | `qwen3:30b-a3b` |
+| `LLM_MODEL_SUPPLEMENT_QUERY` | 补料检索词生成模型 | `qwen3:30b-a3b` |
+| `LLM_MODEL_SUPPLEMENT_EVALUATE` | 候选材料相关度评估模型 | `qwen3.6:35b-a3b` |
+| `OLLAMA_KEEP_ALIVE` | Ollama 模型空闲保留时间 | `2m` |
+| `VITE_DEFAULT_SITE_THEME` | 首次初始化的全局背景 | `paper` |
+| `VITE_DEFAULT_READER_FONT` | 首次初始化的学习页字体 | `system` |
+| `VITE_API_TIMEOUT_MS` | 首次初始化的前端请求超时 | `10000` |
 
 如需重新生成本机环境配置，可复制模板后按需修改：
 
@@ -110,7 +116,8 @@ cp .env.example .env
 `<TASK_TYPE>` 使用任务类型的大写名称，例如 `briefing` 对应
 `LLM_MODEL_BRIEFING`，`answer_question` 对应 `LLM_MODEL_ANSWER_QUESTION`。
 完整可配置任务类型见 `.env.example`；任务入队时会将实际选用模型写入 `AITask`，后续重试继续使用同一模型。
-讨论型话题按 `explore`、`frame`、`decide` 阶段路由模型；48 GB 统一内存下保持单 worker，不要让多个大模型长期同时驻留。修改 `.env` 后需重启 Django 服务。
+话题不再区分学习型和讨论型，也不再按讨论阶段路由模型。48 GB 统一内存下保持单 worker，并使用较短的 `OLLAMA_KEEP_ALIVE` 避免多个大模型长期同时驻留。
+系统配置保存后对新任务立即生效；修改启动配置后仍需重启对应服务。
 
 ## 本地启动步骤
 

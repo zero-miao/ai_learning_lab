@@ -10,22 +10,89 @@ from .models import (
     Highlight,
     Material,
     MaterialChunk,
+    MaterialRecommendation,
     MaterialTextLocator,
     Question,
     ReviewRecord,
     Session,
     SessionMessage,
+    SystemConfiguration,
     Topic,
     TopicMaterial,
 )
 from .tasks import TaskRegistry
 
 
+@admin.register(SystemConfiguration)
+class SystemConfigurationAdmin(admin.ModelAdmin):
+    fieldsets = (
+        (
+            "LLM 服务",
+            {
+                "fields": (
+                    "llm_provider_type",
+                    "llm_base_url",
+                    "llm_api_key",
+                    "llm_model",
+                    "ollama_keep_alive",
+                )
+            },
+        ),
+        (
+            "任务模型",
+            {
+                "fields": (
+                    "llm_model_topic_chat",
+                    "llm_model_supplement_query",
+                    "llm_model_supplement_evaluate",
+                    "llm_model_briefing",
+                    "llm_model_clean_text",
+                    "llm_model_answer_question",
+                    "llm_model_concept_draft",
+                    "llm_model_generate_exam",
+                    "llm_model_grade_exam",
+                    "llm_model_review_prompt",
+                    "llm_model_grade_review",
+                )
+            },
+        ),
+        (
+            "本地服务",
+            {
+                "fields": (
+                    "asr_model",
+                    "tts_voices",
+                    "searxng_base_url",
+                    "crawl4ai_base_url",
+                    "supplement_relevance_threshold",
+                )
+            },
+        ),
+        (
+            "界面默认值",
+            {
+                "fields": (
+                    "default_site_theme",
+                    "default_reader_font",
+                    "api_timeout_ms",
+                )
+            },
+        ),
+        ("时间", {"fields": ("updated_at",)}),
+    )
+    readonly_fields = ("updated_at",)
+
+    def has_add_permission(self, request):
+        return not SystemConfiguration.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(Topic)
 class TopicAdmin(admin.ModelAdmin):
     list_display = (
         "title",
-        "type",
         "status",
         "mastery_level",
         "material_count",
@@ -33,17 +100,14 @@ class TopicAdmin(admin.ModelAdmin):
         "session",
         "updated_at",
     )
-    list_filter = ("type", "status", "mastery_level", "discussion_outcome")
+    list_filter = ("status", "mastery_level")
     search_fields = ("title", "goal", "scope")
     readonly_fields = ("created_at", "updated_at")
     list_select_related = ("session",)
     fieldsets = (
-        (None, {"fields": ("title", "type", "status", "goal", "scope")}),
-        (
-            "学习进度",
-            {"fields": ("mastery_level", "discussion_outcome", "discussion_rationale")},
-        ),
-        ("讨论", {"fields": ("discussion_stage", "discussion_context", "session")}),
+        (None, {"fields": ("title", "status", "goal", "scope")}),
+        ("学习进度", {"fields": ("mastery_level",)}),
+        ("学习讨论", {"fields": ("session",)}),
         ("时间", {"fields": ("created_at", "updated_at")}),
     )
 
@@ -132,6 +196,24 @@ class TopicMaterialAdmin(admin.ModelAdmin):
     list_select_related = ("topic", "material")
     readonly_fields = ("import_at",)
     autocomplete_fields = ("topic", "material")
+
+
+@admin.register(MaterialRecommendation)
+class MaterialRecommendationAdmin(admin.ModelAdmin):
+    list_display = (
+        "title",
+        "topic",
+        "status",
+        "relevance_score",
+        "category",
+        "material",
+        "created_at",
+    )
+    list_filter = ("status", "category")
+    search_fields = ("title", "url", "reason", "topic__title")
+    list_select_related = ("topic", "message", "source_task", "material")
+    readonly_fields = ("created_at", "decided_at", "content_md5")
+    autocomplete_fields = ("topic", "message", "source_task", "material")
 
 
 @admin.register(MaterialChunk)
@@ -387,5 +469,6 @@ class AITaskAdmin(admin.ModelAdmin):
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         if db_field.name == "task_type":
             from django import forms
+
             kwargs["widget"] = forms.Select(choices=TaskRegistry.get_choices())
         return super().formfield_for_dbfield(db_field, request, **kwargs)

@@ -10,15 +10,71 @@ from .models import (
     Highlight,
     Material,
     MaterialChunk,
+    MaterialRecommendation,
     MaterialTextLocator,
     Question,
     ReviewRecord,
     Session,
     SessionMessage,
+    SystemConfiguration,
     Topic,
     TopicMaterial,
 )
 from .tasks import TaskRegistry
+
+
+class ModelDiscoverySerializer(serializers.Serializer):
+    llm_provider_type = serializers.ChoiceField(
+        choices=SystemConfiguration.PROVIDER_CHOICES
+    )
+    llm_base_url = serializers.URLField()
+    llm_api_key = serializers.CharField(
+        allow_blank=True,
+        required=False,
+        default="",
+        trim_whitespace=False,
+    )
+
+
+class SystemConfigurationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SystemConfiguration
+        fields = [
+            "llm_provider_type",
+            "llm_base_url",
+            "llm_api_key",
+            "llm_model",
+            "llm_model_topic_chat",
+            "llm_model_supplement_query",
+            "llm_model_supplement_evaluate",
+            "llm_model_briefing",
+            "llm_model_clean_text",
+            "llm_model_answer_question",
+            "llm_model_concept_draft",
+            "llm_model_generate_exam",
+            "llm_model_grade_exam",
+            "llm_model_review_prompt",
+            "llm_model_grade_review",
+            "ollama_keep_alive",
+            "asr_model",
+            "tts_voices",
+            "searxng_base_url",
+            "crawl4ai_base_url",
+            "supplement_relevance_threshold",
+            "default_site_theme",
+            "default_reader_font",
+            "api_timeout_ms",
+            "updated_at",
+        ]
+        read_only_fields = ["updated_at"]
+
+    def validate_tts_voices(self, value):
+        voices = [item.strip() for item in value.split(",") if item.strip()]
+        if not voices:
+            raise serializers.ValidationError("至少配置一个 TTS 音色。")
+        if any(not item.partition("|")[0].strip() for item in voices):
+            raise serializers.ValidationError("TTS 音色格式无效。")
+        return ",".join(voices)
 
 
 class MaterialTextLocatorSerializer(serializers.ModelSerializer):
@@ -269,6 +325,34 @@ class SessionSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class MaterialRecommendationSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    category_display = serializers.CharField(
+        source="get_category_display", read_only=True
+    )
+
+    class Meta:
+        model = MaterialRecommendation
+        fields = [
+            "id",
+            "topic",
+            "message",
+            "source_task",
+            "material",
+            "title",
+            "url",
+            "category",
+            "category_display",
+            "relevance_score",
+            "reason",
+            "status",
+            "status_display",
+            "created_at",
+            "decided_at",
+        ]
+        read_only_fields = fields
+
+
 class ConceptRelationSerializer(serializers.ModelSerializer):
     from_concept_title = serializers.CharField(
         source="from_concept.title", read_only=True
@@ -316,10 +400,6 @@ class ConceptRelationSerializer(serializers.ModelSerializer):
 
 
 class TopicSerializer(serializers.ModelSerializer):
-    type_display = serializers.CharField(source="get_type_display", read_only=True)
-    discussion_outcome_display = serializers.CharField(
-        source="get_discussion_outcome_display", read_only=True
-    )
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     mastery_level_display = serializers.CharField(
         source="get_mastery_level_display", read_only=True
@@ -370,13 +450,6 @@ class TopicSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "title",
-            "type",
-            "type_display",
-            "discussion_outcome",
-            "discussion_outcome_display",
-            "discussion_rationale",
-            "discussion_stage",
-            "discussion_context",
             "session",
             "goal",
             "scope",
@@ -394,8 +467,6 @@ class TopicSerializer(serializers.ModelSerializer):
             "learning_output",
         ]
         read_only_fields = [
-            "discussion_stage",
-            "discussion_context",
             "session",
             "created_at",
             "updated_at",

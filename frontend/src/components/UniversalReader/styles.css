@@ -13,6 +13,21 @@
   background: #171717;
 }
 
+.universal-reader--midnight {
+  color: #dbe7f5;
+  background: #111827;
+}
+
+.universal-reader--charcoal {
+  color: #e0e4e8;
+  background: #20252b;
+}
+
+.universal-reader--coffee {
+  color: #eadfd6;
+  background: #29211d;
+}
+
 .universal-reader--sepia {
   color: #40382c;
   background: #f7f1df;
@@ -195,10 +210,27 @@
 
 .universal-reader__content {
   max-width: 760px;
-  font-family: Georgia, 'Times New Roman', serif;
   font-size: 19px;
   line-height: 1.9;
   letter-spacing: 0.012em;
+}
+
+.universal-reader--font-system .universal-reader__content {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
+}
+
+.universal-reader--font-song .universal-reader__content {
+  font-family: 'Songti SC', STSong, SimSun, serif;
+}
+
+.universal-reader--font-kai .universal-reader__content {
+  font-family: 'Kaiti SC', STKaiti, KaiTi, serif;
+}
+
+.universal-reader--font-serif .universal-reader__content {
+  font-family: Georgia, 'Noto Serif CJK SC', 'Source Han Serif SC',
+    'Songti SC', serif;
 }
 
 .universal-reader__content p {
@@ -367,6 +399,21 @@
 .universal-reader--gray .universal-reader__transcript {
   background: #e6eaed;
   border-color: #d2d7dc;
+}
+
+.universal-reader--midnight .universal-reader__transcript {
+  background: #172033;
+  border-color: #29364d;
+}
+
+.universal-reader--charcoal .universal-reader__transcript {
+  background: #282e35;
+  border-color: #3a424b;
+}
+
+.universal-reader--coffee .universal-reader__transcript {
+  background: #332923;
+  border-color: #4b3b32;
 }
 
 .universal-reader__timestamp {

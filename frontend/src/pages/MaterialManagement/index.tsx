@@ -6,6 +6,8 @@ import {
   Descriptions,
   Empty,
   Input,
+  Modal,
+  Popconfirm,
   Select,
   Space,
   Table,
@@ -14,9 +16,22 @@ import {
   Typography,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { CheckCircleFilled, CloseCircleFilled, LinkOutlined, ReloadOutlined } from '@ant-design/icons';
-import { getMaterials, reImportMaterial } from '../../api';
-import type { Material, MaterialStatus } from '../../api';
+import {
+  CheckCircleFilled,
+  CloseCircleFilled,
+  DeleteOutlined,
+  LinkOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons';
+import {
+  deleteMaterial,
+  getMaterials,
+  getTopics,
+  linkMaterialToTopic,
+  reImportMaterial,
+} from '../../api';
+import type { Material, MaterialStatus, Topic } from '../../api';
 import { message } from 'antd';
 
 const { Paragraph, Text } = Typography;
@@ -60,8 +75,21 @@ const MaterialManagement: React.FC = () => {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [keyword, setKeyword] = useState('');
   const [status, setStatus] = useState<MaterialStatus | 'all'>('all');
+  const [topicFilter, setTopicFilter] = useState<string>('all');
+  const [topics, setTopics] = useState<Topic[]>([]);
+  const [linkingMaterial, setLinkingMaterial] = useState<Material | null>(null);
+  const [linkingTopicId, setLinkingTopicId] = useState<number | null>(null);
+  const [linking, setLinking] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
-  const load = async () => setMaterials((await getMaterials()).data);
+  const load = async () => {
+    const [materialsResponse, topicsResponse] = await Promise.all([
+      getMaterials(),
+      getTopics(),
+    ]);
+    setMaterials(materialsResponse.data);
+    setTopics(topicsResponse.data);
+  };
   useEffect(() => { void load(); }, []);
   const handleReImport = async (id: number) => {
     try {
@@ -73,13 +101,46 @@ const MaterialManagement: React.FC = () => {
       message.error('触发重新导入失败');
     }
   };
+  const handleDelete = async (material: Material) => {
+    setDeletingId(material.id);
+    try {
+      await deleteMaterial(material.id);
+      setMaterials((current) => current.filter((item) => item.id !== material.id));
+      message.success('材料及相关媒体文件已删除');
+    } catch (error) {
+      console.error('Delete material failed:', error);
+      message.error('删除材料失败');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+  const handleLinkTopic = async () => {
+    if (!linkingMaterial || linkingTopicId === null) return;
+    setLinking(true);
+    try {
+      await linkMaterialToTopic(linkingMaterial.id, linkingTopicId);
+      message.success('已关联话题');
+      setLinkingMaterial(null);
+      setLinkingTopicId(null);
+      await load();
+    } catch {
+      message.error('关联话题失败');
+    } finally {
+      setLinking(false);
+    }
+  };
 
   const visible = useMemo(
     () => materials.filter((item) =>
       (status === 'all' || item.status === status) &&
+      (
+        topicFilter === 'all' ||
+        (topicFilter === 'unlinked' && item.topic_links.length === 0) ||
+        item.topic_links.some((link) => String(link.topic) === topicFilter)
+      ) &&
       (!keyword || [item.title, item.media_uri, item.digest].join(' ').toLowerCase().includes(keyword.toLowerCase())),
     ),
-    [keyword, materials, status],
+    [keyword, materials, status, topicFilter],
   );
 
   const columns: TableColumnsType<Material> = [
@@ -122,6 +183,16 @@ const MaterialManagement: React.FC = () => {
           ) : (
             <Text type="secondary" style={{ fontSize: '12px' }}>无关联</Text>
           )}
+          <Button
+            type="text"
+            size="small"
+            icon={<PlusOutlined />}
+            aria-label={`为 ${material.title} 增加关联话题`}
+            onClick={(event) => {
+              event.stopPropagation();
+              setLinkingMaterial(material);
+            }}
+          />
         </div>
       )
     },
@@ -153,6 +224,40 @@ const MaterialManagement: React.FC = () => {
         );
       }
     },
+    {
+      title: '朗读音频',
+      key: 'tts',
+      width: 170,
+      render: (_, material) =>
+        material.tts_assets.length ? (
+          <Space wrap size={[4, 4]}>
+            {material.tts_assets.map((asset) => (
+              <Tooltip
+                key={asset.voice}
+                title={
+                  asset.status === 'ready'
+                    ? `${asset.label}: 已就绪`
+                    : `${asset.label}: ${asset.error || '生成失败'}`
+                }
+              >
+                <Tag
+                  color={asset.status === 'ready' ? 'success' : 'error'}
+                  icon={
+                    asset.status === 'ready'
+                      ? <CheckCircleFilled />
+                      : <CloseCircleFilled />
+                  }
+                  style={{ margin: 0 }}
+                >
+                  {asset.label}
+                </Tag>
+              </Tooltip>
+            ))}
+          </Space>
+        ) : (
+          <Text type="secondary" style={{ fontSize: 12 }}>未生成</Text>
+        ),
+    },
     { title: '类型', dataIndex: 'media_type', width: 90, render: (type) => <Tag>{type}</Tag> },
     {
       title: '状态',
@@ -175,18 +280,37 @@ const MaterialManagement: React.FC = () => {
     { 
       title: '操作', 
       key: 'actions', 
-      width: 80, 
+      width: 130,
       fixed: 'right',
       render: (_, material) => (
-        <Button 
-          type="link" 
-          size="small" 
-          icon={<ReloadOutlined />} 
-          onClick={(e) => { e.stopPropagation(); handleReImport(material.id); }}
-          loading={material.status === 'pending'}
-        >
-          重导
-        </Button>
+        <Space size={0} onClick={(event) => event.stopPropagation()}>
+          <Tooltip title="重新导入">
+            <Button
+              type="text"
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={() => void handleReImport(material.id)}
+              loading={material.status === 'pending'}
+            />
+          </Tooltip>
+          <Popconfirm
+            title={`删除“${material.title}”？`}
+            description="将删除全局材料、主题关联、标注定位及 backend/media 中的相关文件，且无法恢复。"
+            okText="删除"
+            okButtonProps={{ danger: true, loading: deletingId === material.id }}
+            cancelText="取消"
+            onConfirm={() => void handleDelete(material)}
+          >
+            <Button
+              danger
+              type="text"
+              size="small"
+              title="删除材料"
+              icon={<DeleteOutlined />}
+              aria-label={`删除材料 ${material.title}`}
+            />
+          </Popconfirm>
+        </Space>
       )
     },
   ];
@@ -205,6 +329,19 @@ const MaterialManagement: React.FC = () => {
             { value: 'ready', label: '已就绪' },
             { value: 'failed', label: '失败' },
           ]} />
+          <Select
+            value={topicFilter}
+            onChange={setTopicFilter}
+            style={{ width: 220 }}
+            options={[
+              { value: 'all', label: '全部关联状态' },
+              { value: 'unlinked', label: '未关联任何话题' },
+              ...topics.map((topic) => ({
+                value: String(topic.id),
+                label: topic.title,
+              })),
+            ]}
+          />
         </Space>
         
         <Table
@@ -222,6 +359,20 @@ const MaterialManagement: React.FC = () => {
                   </Descriptions.Item>
                   <Descriptions.Item label="媒体地址">{material.media_url || '无'}</Descriptions.Item>
                   <Descriptions.Item label="片段数">{material.chunks.length}</Descriptions.Item>
+                  <Descriptions.Item label="朗读音频">
+                    {material.tts_assets.length ? (
+                      <Space wrap>
+                        {material.tts_assets.map((asset) => (
+                          <Tag
+                            key={asset.voice}
+                            color={asset.status === 'ready' ? 'success' : 'error'}
+                          >
+                            {asset.label} · {asset.status === 'ready' ? '已就绪' : '失败'}
+                          </Tag>
+                        ))}
+                      </Space>
+                    ) : '未生成'}
+                  </Descriptions.Item>
                   <Descriptions.Item label="原始字符数">{material.raw_text.length}</Descriptions.Item>
                   <Descriptions.Item label="清洗后字符数">{material.clean_text.length}</Descriptions.Item>
                   <Descriptions.Item label="关联主题" span={3}>
@@ -258,6 +409,33 @@ const MaterialManagement: React.FC = () => {
           }}
         />
       </Card>
+      <Modal
+        title={`为“${linkingMaterial?.title ?? ''}”关联话题`}
+        open={Boolean(linkingMaterial)}
+        onCancel={() => {
+          setLinkingMaterial(null);
+          setLinkingTopicId(null);
+        }}
+        onOk={() => void handleLinkTopic()}
+        confirmLoading={linking}
+        okButtonProps={{ disabled: linkingTopicId === null }}
+        okText="关联"
+      >
+        <Select
+          showSearch
+          optionFilterProp="label"
+          style={{ width: '100%' }}
+          placeholder="选择要关联的话题"
+          value={linkingTopicId}
+          onChange={setLinkingTopicId}
+          options={topics
+            .filter(
+              (topic) =>
+                !linkingMaterial?.topic_links.some((link) => link.topic === topic.id),
+            )
+            .map((topic) => ({ value: topic.id, label: topic.title }))}
+        />
+      </Modal>
     </div>
   );
 };

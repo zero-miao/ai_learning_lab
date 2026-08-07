@@ -1,23 +1,27 @@
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from .ai_gateway import AIGateway
 from .models import (
     AITask,
     Concept,
     Highlight,
     Material,
     MaterialChunk,
+    MaterialRecommendation,
     MaterialTextLocator,
     Question,
     ReviewRecord,
     Session,
+    SystemConfiguration,
     Topic,
     TopicMaterial,
 )
@@ -44,6 +48,90 @@ class V2ErApiTests(TestCase):
             start_offset=0,
             end_offset=len(self.material.clean_text),
         )
+
+    def test_system_configuration_persists_and_controls_runtime_models(self):
+        response = self.client.get("/api/system-configuration/")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(SystemConfiguration.objects.filter(singleton_id=1).exists())
+
+        payload = dict(response.data)
+        payload.update(
+            {
+                "llm_model": "default-model",
+                "llm_model_answer_question": "question-model",
+                "supplement_relevance_threshold": 0.65,
+                "default_site_theme": "midnight",
+                "default_reader_font": "song",
+                "api_timeout_ms": 15000,
+            }
+        )
+        update_response = self.client.put(
+            "/api/system-configuration/", payload, format="json"
+        )
+
+        self.assertEqual(update_response.status_code, 200)
+        configuration = SystemConfiguration.load()
+        self.assertEqual(configuration.default_site_theme, "midnight")
+        self.assertEqual(configuration.default_reader_font, "song")
+        self.assertEqual(configuration.supplement_relevance_threshold, 0.65)
+        self.assertEqual(
+            AIGateway.get_model_for_task("answer_question"), "question-model"
+        )
+        self.assertEqual(AIGateway.get_model_for_task("process"), "default-model")
+
+    def test_system_configuration_rejects_invalid_threshold(self):
+        response = self.client.get("/api/system-configuration/")
+        payload = dict(response.data)
+        payload["supplement_relevance_threshold"] = 1.5
+
+        update_response = self.client.put(
+            "/api/system-configuration/", payload, format="json"
+        )
+
+        self.assertEqual(update_response.status_code, 400)
+
+    @patch("api.ai_gateway.OpenAI")
+    def test_system_configuration_discovers_provider_models(self, openai):
+        openai.return_value.models.list.return_value.data = [
+            SimpleNamespace(id="qwen3:30b-a3b"),
+            SimpleNamespace(id="qwen3.6:35b-a3b"),
+            SimpleNamespace(id="qwen3:30b-a3b"),
+        ]
+
+        response = self.client.post(
+            "/api/system-configuration/models/",
+            {
+                "llm_provider_type": "ollama",
+                "llm_base_url": "http://localhost:11434/v1",
+                "llm_api_key": "ollama",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["models"],
+            ["qwen3.6:35b-a3b", "qwen3:30b-a3b"],
+        )
+        openai.assert_called_once_with(
+            api_key="ollama",
+            base_url="http://localhost:11434/v1",
+            max_retries=0,
+            timeout=10.0,
+        )
+
+    def test_model_discovery_requires_key_for_openai_provider(self):
+        response = self.client.post(
+            "/api/system-configuration/models/",
+            {
+                "llm_provider_type": "openai",
+                "llm_base_url": "https://api.openai.com/v1",
+                "llm_api_key": "",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
 
     def test_annotation_uses_locator_without_legacy_anchor_tables(self):
         start = self.material.clean_text.index("QuerySet")
@@ -112,6 +200,28 @@ class V2ErApiTests(TestCase):
         self.assertEqual(delete_response.status_code, 204)
         relation.refresh_from_db()
         self.assertIsNotNone(relation.removed_at)
+
+    def test_global_material_can_be_linked_and_restored_to_topic(self):
+        other_topic = Topic.objects.create(title="另一个话题")
+        response = self.client.post(
+            "/api/topic-materials/",
+            {"topic": other_topic.id, "material": self.material.id},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        relation = TopicMaterial.objects.get(topic=other_topic, material=self.material)
+        self.assertEqual(relation.import_by, "manual")
+
+        relation.removed_at = "2026-08-07T00:00:00Z"
+        relation.save(update_fields=["removed_at"])
+        restore_response = self.client.post(
+            "/api/topic-materials/",
+            {"topic": other_topic.id, "material": self.material.id},
+            format="json",
+        )
+        self.assertEqual(restore_response.status_code, 200)
+        relation.refresh_from_db()
+        self.assertIsNone(relation.removed_at)
 
     @patch("api.views.default_storage.save", return_value="materials/video.mp4")
     def test_video_upload_uses_global_material_and_task_trigger(self, save):
@@ -192,6 +302,55 @@ class V2ErApiTests(TestCase):
         self.assertEqual(response["Content-Length"], "4")
         self.assertEqual(content, b"2345")
 
+    def test_delete_material_removes_media_subtitle_and_tts_files(self):
+        self.material.media_type = "video"
+        self.material.media_uri = "materials/source.mp4"
+        self.material.media_meta = {
+            "subtitle_uri": "materials/source.srt",
+            "tts": {
+                "voices": {
+                    "voice": {
+                        "path": f"materials/tts/{self.material.id}/voice.mp3",
+                        "status": "ready",
+                    }
+                }
+            },
+        }
+        self.material.save(update_fields=["media_type", "media_uri", "media_meta"])
+        task, _ = enqueue_or_reuse(
+            "edge_tts",
+            trigger_type="Material",
+            trigger_id=self.material.id,
+            model="edge-tts",
+        )
+
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            paths = [
+                Path(media_root) / "materials" / "source.mp4",
+                Path(media_root) / "materials" / "source.srt",
+                Path(media_root)
+                / "materials"
+                / "tts"
+                / str(self.material.id)
+                / "voice.mp3",
+            ]
+            for path in paths:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"data")
+
+            response = self.client.delete(f"/api/materials/{self.material.id}/")
+
+            self.assertEqual(response.status_code, 204)
+            self.assertTrue(all(not path.exists() for path in paths))
+            self.assertFalse(
+                (
+                    Path(media_root) / "materials" / "tts" / str(self.material.id)
+                ).exists()
+            )
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, "cancelled")
+
     def test_video_chunks_align_merged_paragraphs_to_asr_timestamps(self):
         video = Material.objects.create(
             title="视频",
@@ -229,17 +388,19 @@ class V2ErApiTests(TestCase):
     @patch("api.tasks.BaseTask._call_llm")
     @patch("api.supplement_service.crawl")
     @patch("api.supplement_service.search")
-    def test_supplement_imports_qualified_candidate(
+    def test_supplement_creates_candidate_for_manual_adoption(
         self, search, crawl, call_llm
     ):
         # Mocking the two LLM calls: generate_queries and evaluate_supplement
         call_llm.side_effect = [
             json.dumps({"queries": ["Django ORM QuerySet"]}),  # generate_queries
-            json.dumps({                                       # evaluate_supplement
-                "relevance_score": 0.92,
-                "category": "exam_material",
-                "import_reason": "直接解释 QuerySet 的查询与惰性求值。",
-            })
+            json.dumps(
+                {  # evaluate_supplement
+                    "relevance_score": 0.92,
+                    "category": "exam_material",
+                    "import_reason": "直接解释 QuerySet 的查询与惰性求值。",
+                }
+            ),
         ]
         search.return_value = [
             {
@@ -250,7 +411,7 @@ class V2ErApiTests(TestCase):
             }
         ]
         crawl.return_value = "Django ORM QuerySet " * 50
-        
+
         task, _ = enqueue_or_reuse(
             "supplement_search",
             trigger_type="Topic",
@@ -264,33 +425,56 @@ class V2ErApiTests(TestCase):
             task_data=task.task_data,
             trigger_type=task.trigger_type,
             trigger_id=task.trigger_id,
-            model=task.model
+            model=task.model,
         )
         result = task_obj.run()
 
-        self.assertEqual(result["imported_count"], 1)
-        relation = TopicMaterial.objects.get(
-            topic=self.topic, material_id=result["imported_material_ids"][0]
+        self.assertEqual(result["recommended_count"], 1)
+        recommendation = MaterialRecommendation.objects.get(
+            pk=result["recommendation_ids"][0]
         )
+        self.assertEqual(recommendation.status, "pending")
+        self.assertFalse(
+            TopicMaterial.objects.filter(
+                topic=self.topic, material__media_uri=recommendation.url
+            ).exists()
+        )
+
+        response = self.client.post(
+            f"/api/material-recommendations/{recommendation.id}/adopt/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        recommendation.refresh_from_db()
+        relation = TopicMaterial.objects.get(
+            topic=self.topic, material=recommendation.material
+        )
+        self.assertEqual(recommendation.status, "adopted")
         self.assertEqual(relation.import_by, "ai_recommended")
         self.assertEqual(relation.category, "exam_material")
         self.assertEqual(relation.relevance_score, 0.92)
-        self.assertTrue(relation.material.chunks.exists())
+        self.assertTrue(
+            AITask.objects.filter(
+                task_type="clean_text",
+                trigger_type="Material",
+                trigger_id=relation.material_id,
+            ).exists()
+        )
 
     @patch("api.tasks.BaseTask._call_llm")
     @patch("api.supplement_service.crawl")
     @patch("api.supplement_service.search")
-    def test_supplement_filters_low_relevance_candidate(
-        self, search, crawl, call_llm
-    ):
+    def test_supplement_filters_low_relevance_candidate(self, search, crawl, call_llm):
         # Mocking the two LLM calls
         call_llm.side_effect = [
             json.dumps({"queries": ["Django ORM QuerySet"]}),  # generate_queries
-            json.dumps({                                       # evaluate_supplement
-                "relevance_score": 0.2,
-                "category": "recommended_reading",
-                "import_reason": "无关。",
-            })
+            json.dumps(
+                {  # evaluate_supplement
+                    "relevance_score": 0.2,
+                    "category": "recommended_reading",
+                    "import_reason": "无关。",
+                }
+            ),
         ]
         search.return_value = [
             {
@@ -301,7 +485,7 @@ class V2ErApiTests(TestCase):
             }
         ]
         crawl.return_value = "无关内容 " * 100
-        
+
         task, _ = enqueue_or_reuse(
             "supplement_search",
             trigger_type="Topic",
@@ -315,12 +499,48 @@ class V2ErApiTests(TestCase):
             task_data=task.task_data,
             trigger_type=task.trigger_type,
             trigger_id=task.trigger_id,
-            model=task.model
+            model=task.model,
         )
         result = task_obj.run()
 
-        self.assertEqual(result["imported_count"], 0)
+        self.assertEqual(result["recommended_count"], 0)
         self.assertEqual(result["candidates"][0]["reason"], "相关度低于阈值")
+
+    @patch("api.tasks.BaseTask._call_llm")
+    def test_topic_discussion_uses_topic_context_and_queues_material_search(
+        self, call_llm
+    ):
+        call_llm.return_value = json.dumps(
+            {
+                "reply": "现有材料没有覆盖事务边界，建议补一份资料。",
+                "material_search": {
+                    "queries": ["Django transaction atomic 事务边界"],
+                    "reason": "当前材料只覆盖 QuerySet。",
+                },
+            }
+        )
+        response = self.client.post(
+            f"/api/topics/{self.topic.id}/discussion/",
+            {"content": "事务部分还需要补什么？"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 202)
+        task = AITask.objects.get(pk=response.data["task"]["id"])
+        result = TaskRegistry.get_task_class(task.task_type)(
+            task_id=task.id,
+            task_data=task.task_data,
+            trigger_type=task.trigger_type,
+            trigger_id=task.trigger_id,
+            model=task.model,
+        ).run()
+
+        self.assertIn("Django ORM", call_llm.call_args.args[0][1]["content"])
+        self.assertIsNotNone(result["supplement_task_id"])
+        supplement_task = AITask.objects.get(pk=result["supplement_task_id"])
+        self.assertEqual(
+            supplement_task.task_data["suggested_queries"],
+            ["Django transaction atomic 事务边界"],
+        )
 
     def test_task_reuse_is_scoped_to_trigger(self):
         first, created = enqueue_or_reuse(

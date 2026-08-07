@@ -6,7 +6,6 @@ import {
   Alert,
   Button,
   Collapse,
-  ConfigProvider,
   Drawer,
   Empty,
   Form,
@@ -20,7 +19,6 @@ import {
   Tabs,
   Typography,
   message,
-  theme,
 } from 'antd';
 import {
   AppstoreOutlined,
@@ -50,21 +48,21 @@ import {
 } from '../../api';
 import type { AITask, Concept, Highlight, Material, Question, Topic, Session } from '../../api';
 import UniversalReader from '../../components/UniversalReader';
-import type { ReaderTheme, TextSelectionAnchor } from '../../components/UniversalReader';
+import type { ReaderFont, TextSelectionAnchor } from '../../components/UniversalReader';
+import { useSiteTheme } from '../../appearance';
 import './styles.css';
 
 const { Text } = Typography;
-
-const readerPageBackgrounds: Record<ReaderTheme, string> = {
-  paper: '#f5f7fa',
-  sepia: '#e9e0c9',
-  green: '#dce9d6',
-  gray: '#dde1e5',
-  dark: '#000000',
-};
+const readerFonts: ReaderFont[] = ['system', 'song', 'kai', 'serif'];
 
 const MarkdownDigest: React.FC<{ content: string }> = ({ content }) => (
   <div className="reader-briefing__markdown">
+    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+  </div>
+);
+
+const MarkdownChatMessage: React.FC<{ content: string }> = ({ content }) => (
+  <div className="material-reader__chat-markdown">
     <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
   </div>
 );
@@ -85,16 +83,20 @@ const MaterialReader: React.FC = () => {
   const [loadError, setLoadError] = useState('');
   const [conceptModal, setConceptModal] = useState(false);
   const [highlightModal, setHighlightModal] = useState(false);
-  const [readerTheme, setReaderTheme] = useState<ReaderTheme>(() => {
-    const saved = window.localStorage.getItem('reader-theme') as ReaderTheme | null;
-    if (saved && ['paper', 'sepia', 'green', 'gray', 'dark'].includes(saved)) {
-      return saved;
-    }
-    return window.matchMedia('(prefers-color-scheme: dark)').matches
-      ? 'dark'
-      : 'paper';
+  const {
+    siteTheme: readerTheme,
+    setSiteTheme: setReaderTheme,
+    option: themeOption,
+  } = useSiteTheme();
+  const [readerFont, setReaderFont] = useState<ReaderFont>(() => {
+    const saved = window.localStorage.getItem('reader-font');
+    if (readerFonts.includes(saved as ReaderFont)) return saved as ReaderFont;
+    const configuredDefault = import.meta.env.VITE_DEFAULT_READER_FONT;
+    return readerFonts.includes(configuredDefault as ReaderFont)
+      ? configuredDefault as ReaderFont
+      : 'system';
   });
-  const darkMode = readerTheme === 'dark';
+  const darkMode = themeOption.dark;
   const [editingConcept, setEditingConcept] = useState<Concept | null>(null);
   const [editingHighlight, setEditingHighlight] = useState<Highlight | null>(null);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
@@ -128,8 +130,8 @@ const MaterialReader: React.FC = () => {
   }, [load]);
 
   useEffect(() => {
-    window.localStorage.setItem('reader-theme', readerTheme);
-  }, [readerTheme]);
+    window.localStorage.setItem('reader-font', readerFont);
+  }, [readerFont]);
 
   useEffect(() => {
     if (material?.status !== 'generating_audio') return;
@@ -455,10 +457,10 @@ const MaterialReader: React.FC = () => {
   };
 
   return (
-    <ConfigProvider theme={{ algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm }}>
+    <>
       <div style={{
         minHeight: '100vh',
-        background: readerPageBackgrounds[readerTheme],
+        background: themeOption.page,
         transition: 'background-color 160ms ease',
       }}>
         <div
@@ -537,6 +539,8 @@ const MaterialReader: React.FC = () => {
             questions={scoped.questions}
             readerTheme={readerTheme}
             onReaderThemeChange={setReaderTheme}
+            readerFont={readerFont}
+            onReaderFontChange={setReaderFont}
             onMarkConcept={(next) => {
               setSelection(next);
               conceptForm.setFieldsValue({ title: next.text.slice(0, 80) });
@@ -633,7 +637,7 @@ const MaterialReader: React.FC = () => {
                               textAlign: 'left',
                               border: msg.msg_from === 'ai' && darkMode ? '1px solid #303030' : 'none'
                             }}>
-                              <Text style={{ color: 'inherit' }}>{msg.msg_content}</Text>
+                              <MarkdownChatMessage content={msg.msg_content} />
                             </div>
                           </div>
                         )}
@@ -852,7 +856,7 @@ const MaterialReader: React.FC = () => {
         <Form.Item name="user_note" label="笔记内容"><Input.TextArea rows={4} /></Form.Item>
       </Form>
     </Modal>
-    </ConfigProvider>
+    </>
   );
 };
 
