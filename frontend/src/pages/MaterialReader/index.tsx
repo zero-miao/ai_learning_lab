@@ -16,6 +16,7 @@ import {
   Result,
   Skeleton,
   Space,
+  Spin,
   Tabs,
   Typography,
   message,
@@ -40,6 +41,7 @@ import {
   getAITask,
   getSession,
   getTopic,
+  listAITasks,
   retryAITask,
   triggerSupplement,
   updateConcept,
@@ -164,7 +166,7 @@ const MaterialReader: React.FC = () => {
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: 'nearest' });
-  }, [activeSession?.messages]);
+  }, [activeSession?.messages, task?.id, task?.status]);
 
   const scoped = useMemo(() => {
     if (!topic || !material) {
@@ -193,6 +195,17 @@ const MaterialReader: React.FC = () => {
     };
   }, [material, topic]);
 
+  const activeQuestion = useMemo(
+    () => scoped.questions.find((item) => item.session === activeSession?.id) ?? null,
+    [activeSession?.id, scoped.questions],
+  );
+  const activeQuestionTask =
+    task?.task_type === 'answer_question' &&
+    ['pending', 'running'].includes(task.status) &&
+    Number(task.task_data.question_id) === activeQuestion?.id
+      ? task
+      : null;
+
   const jumpToSource = (locatorId: number) => {
     navigate(`?locator=${locatorId}&t=${Date.now()}`, { replace: true });
   };
@@ -206,6 +219,20 @@ const MaterialReader: React.FC = () => {
       setChatLoading(true);
       const response = await getSession(sessionId);
       setActiveSession(response.data);
+      const latestUserMessage = [...response.data.messages]
+        .reverse()
+        .find((item) => item.msg_from === 'user');
+      if (latestUserMessage) {
+        const tasksResponse = await listAITasks({
+          trigger_type: 'SessionMessage',
+          trigger_id: latestUserMessage.id,
+          task_type: 'answer_question',
+        });
+        const activeTask = tasksResponse.data.find((item) =>
+          ['pending', 'running'].includes(item.status),
+        );
+        if (activeTask) setTask(activeTask);
+      }
     } catch (error) {
       console.error('Failed to load session:', error);
       message.error('加载对话失败，请重试');
@@ -215,7 +242,7 @@ const MaterialReader: React.FC = () => {
   }, []);
 
   const handleSendChat = async () => {
-    if (!activeSession || !chatDraft.trim()) return;
+    if (!activeSession || !chatDraft.trim() || activeQuestionTask) return;
     try {
       setChatLoading(true);
       const content = chatDraft.trim();
@@ -608,6 +635,24 @@ const MaterialReader: React.FC = () => {
                       <Typography.Title level={5} style={{ margin: 0 }}>当前对话</Typography.Title>
                       <Button type="link" size="small" onClick={() => setActiveSession(null)}>返回列表</Button>
                     </div>
+                    {activeQuestion?.locators[0]?.source_text && (
+                      <Alert
+                        type="info"
+                        showIcon
+                        className="material-reader__question-context"
+                        message="本次问答引用的原文"
+                        description={`“${activeQuestion.locators[0].source_text}”`}
+                        action={
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={() => jumpToSource(activeQuestion.locators[0].id)}
+                          >
+                            回原文
+                          </Button>
+                        }
+                      />
+                    )}
                     <div className="material-reader__chat-messages" style={{
                       flex: 1,
                       overflowY: 'auto',
@@ -642,6 +687,20 @@ const MaterialReader: React.FC = () => {
                           </div>
                         )}
                       />
+                      {activeQuestionTask && (
+                        <div
+                          role="status"
+                          aria-live="polite"
+                          className="material-reader__chat-replying"
+                        >
+                          <Spin size="small" />
+                          <Text type="secondary">
+                            {activeQuestionTask.status === 'pending'
+                              ? 'AI 回复正在排队...'
+                              : `AI 正在使用 ${activeQuestionTask.model || '当前模型'} 回复...`}
+                          </Text>
+                        </div>
+                      )}
                       <div ref={chatEndRef} />
                     </div>
                     <Space.Compact style={{ width: '100%' }}>
@@ -650,14 +709,14 @@ const MaterialReader: React.FC = () => {
                         value={chatDraft}
                         onChange={(e) => setChatDraft(e.target.value)}
                         onPressEnter={handleSendChat}
-                        disabled={chatLoading}
+                        disabled={chatLoading || Boolean(activeQuestionTask)}
                       />
                       <Button
                         type="primary"
                         icon={<SendOutlined />}
                         onClick={handleSendChat}
                         loading={chatLoading}
-                        disabled={!chatDraft.trim()}
+                        disabled={!chatDraft.trim() || Boolean(activeQuestionTask)}
                       />
                     </Space.Compact>
                   </>
@@ -720,6 +779,13 @@ const MaterialReader: React.FC = () => {
                           <Text type="secondary" style={{ fontSize: '13px' }} ellipsis>
                             {item.conclusion || '点击开始对话'}
                           </Text>
+                          {item.locators[0]?.source_text && (
+                            <div className="material-reader__question-source">
+                              <Text type="secondary" ellipsis>
+                                引用：“{item.locators[0].source_text}”
+                              </Text>
+                            </div>
+                          )}
                         </List.Item>
                       )}
                     />
