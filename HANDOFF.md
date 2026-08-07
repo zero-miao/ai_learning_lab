@@ -17,6 +17,7 @@ V2 不是独立新产品，也不是 V1 的缩减版重写，而是同一产品�
 - [docs/V1-ALPHA.md](docs/V1-ALPHA.md)、[docs/PRD.md](docs/PRD.md)：V1 能力与产品历史
 - [docs/product_design_v2_alpha.md](docs/product_design_v2_alpha.md)：V2-alpha 产品范围
 - [docs/development_design_v2_alpha.md](docs/development_design_v2_alpha.md)：V2-alpha 工程设计
+- [docs/frontend_interaction_design.md](docs/frontend_interaction_design.md)：当前前端关键行为与“简洁高效”的设计标准
 - [docs/local_service_integration.md](docs/local_service_integration.md)：本地服务联调
 - [DEV.md](DEV.md)：开发与启动说明
 
