@@ -37,7 +37,7 @@ V2 实现行为以模型、迁移、测试和本文为准。V1 文档可用于�
 - Node.js v20.20.2，npm 10.8.2
 - 可选本地 Ollama；视频与补料联调额外依赖 ffmpeg、faster-whisper、Docker、SearxNG、Crawl4AI
 
-根目录 `.env` 是实际运行配置，`backend/api/ai_gateway.py` 从项目根目录加载。不要提交 `.env`；模板见 [.env.example](.env.example)。
+根目录 `.env` 保存启动配置和系统配置首次初始化值。不要提交 `.env`；模板见 [.env.example](.env.example)。
 启动基础设施参数始终读取 `.env`；模型路由、本地服务、补料阈值和界面默认值在首次运行时由 `.env` 初始化到 `SystemConfiguration`，之后通过 `/settings` 持久化管理。
 
 ```dotenv
@@ -54,11 +54,11 @@ CRAWL4AI_BASE_URL=http://127.0.0.1:11235
 SUPPLEMENT_RELEVANCE_THRESHOLD=0.8
 ```
 
-`LLM_MODEL_<TASK_TYPE>` 可覆盖特定任务的模型；未配置时回退 `LLM_MODEL`。任务入队时会持久化实际模型，重试继续使用该模型。
+首次初始化时，`LLM_MODEL_<TASK_TYPE>` 可指定各任务模型，未配置时回退 `LLM_MODEL`；初始化后统一在 `/settings` 修改。任务入队时会持久化实际模型，重试继续使用该模型。
 
 ## 4. 当前基线
 
-项目已完成 V2 ER 硬切换和核心前端迁移，仍处于未提交工作区状态。V2 的原则是：
+项目已完成 V2 ER 硬切换和核心前端迁移，当前开发基线已提交到 `feat/unified-learning-settings` 分支。V2 的原则是：
 
 > 只移除 V1 数据兼容层，不移除既有产品功能。任何恢复或新增 UI 必须直接使用 V2 模型和 API。
 
@@ -77,17 +77,7 @@ SUPPLEMENT_RELEVANCE_THRESHOLD=0.8
 
 切换前的 SQLite 备份为 `backend/db.sqlite3.v2-er-pre-cutover-20260805-001132`，该文件已忽略且不应提交。
 
-## 5. 技术边界
-
-- 后端：Python 3.12、Django 4.2、DRF、SQLite、APScheduler 单 worker。
-- 前端：React、TypeScript、Vite、Ant Design、Vidstack。
-- 本地 AI：Ollama，经 OpenAI-compatible 接口调用。
-- 不引入 Celery、Redis、消息队列、外部数据库、多用户、鉴权、云同步或公网部署。
-- 长耗时操作统一经持久化 `AITask` 调度，前端轮询任务状态。
-
-根目录 `.env` 是运行时配置，不得提交；模板见 `.env.example`。
-
-## 6. V2 数据契约
+## 5. V2 数据契约
 
 已删除的 V1 表：
 
@@ -114,7 +104,7 @@ V2 核心模型：
 
 禁止重新增加 V1 兼容字段、旧表或 AITask 的业务外键。前端也不得消费旧字段，例如 `materials`、`anchors`、`ai_responses`、`import_status`、`source_type`。
 
-## 7. 已完成能力
+## 6. 已完成能力
 
 ### Topic 与材料
 
@@ -142,7 +132,7 @@ V2 核心模型：
     - 视频区在宽屏双栏下保持 sticky，转录稿滚动时播放器持续可见；窄屏自动恢复普通文档流。
     - 媒体类型统一展示本地化文本；选区菜单自动避让视口边缘；文中标注支持键盘聚焦与回车打开。
     - 取消选区、滚动正文或按下 `Escape` 时，划词操作框会立即收起，不再残留失效菜单。
-    - 文本与网页材料在 `briefing` 后自动进入 `edge_tts` AITask，按 `TTS_VOICES` 配置为每个音色生成并缓存 `materials/tts/{material_id}/{voice}.mp3`。正文指纹未变化时复用缓存；至少一个音色成功即可将材料标记为 `ready`，全部失败才重试并最终失败。
+    - 文本与网页材料在 `briefing` 后自动进入 `edge_tts` AITask，按系统设置中的 TTS 音色生成并缓存 `materials/tts/{material_id}/{voice}.mp3`；首次初始化值来自 `TTS_VOICES`。正文指纹未变化时复用缓存；至少一个音色成功即可将材料标记为 `ready`，全部失败才重试并最终失败。
     - 前端不再使用 Web Speech API，直接加载 Material API 返回的 `tts_assets`。播放键作为独立主按钮，背景、音色、倍速组成下方设置组；支持播放、暂停、双击停止、音色切换及 `0.5x`～`3x` 九档倍速，并按播放进度同步高亮当前段落。
     - 全站背景支持纯白、暖黄、护眼绿、柔灰、深黑、夜蓝、炭灰、暖黑八种主题并持久化；阅读页与站点共享当前主题，暗色主题同步启用 Ant Design 深色算法。
     - 阅读正文支持系统字体、宋体、楷体、衬线字体四种选择并独立持久化；朗读音色由后端配置并显示简短标签。历史材料可通过 `python backend/manage.py backfill_tts [--force]` 批量排队生成。
@@ -156,7 +146,7 @@ V2 核心模型：
 
 - 话题详情页提供右侧“学习讨论”抽屉，可随时围绕话题目标、范围、已有材料摘要和最近对话继续交流。
 - 学习讨论中的用户和 AI 消息均通过 `react-markdown + remark-gfm` 渲染，支持标题、列表、引用、代码、链接及 GFM 表格。
-- 话题对话使用 `qwen3:30b-a3b`，材料评估等分析任务使用 `qwen3.6:35b-a3b`；不再暴露探索/定义问题/决策阶段。
+- 话题对话默认使用 `qwen3:30b-a3b`，材料评估等分析任务默认使用 `qwen3.6:35b-a3b`，均可在 `/settings` 调整；不再暴露探索/定义问题/决策阶段。
 - AI 识别材料缺口后异步生成结构化候选卡片；用户必须点击“采纳”后才会关联材料并启动处理流水线。
 - 概念与高亮：支持草稿生成、确认、**在线编辑**与删除。
 - 问答系统升级：
@@ -227,7 +217,7 @@ V2 核心模型：
 - **数据流转修正**：网页导入优先生成 `raw_text` (原文)，再由 AI 清洗生成 `clean_text`；`MaterialChunk` 仅基于清洗后的正文生成。
 - **视频数据例外**：视频 `raw_text` 同样是原始转录存档，最终 `MaterialChunk` 基于 `clean_text` 生成，但时间坐标必须从 `media_meta.segments` 对齐恢复。
 
-## 8. 当前 API 与任务触发
+## 7. 当前 API 与任务触发
 
 | 能力 | API | V2 trigger |
 | --- | --- | --- |
@@ -248,7 +238,7 @@ V2 核心模型：
 | 系统配置 | `GET/PUT /api/system-configuration/` | 单例 `SystemConfiguration` |
 | Provider 模型发现 | `POST /api/system-configuration/models/` | 按当前 Provider 连接参数返回模型 ID |
 
-## 9. 验证基线
+## 8. 验证基线
 
 标准回归命令：
 
@@ -285,7 +275,7 @@ V2 核心模型：
 - `git diff --check` 通过。
 - Vite 仍报告主 bundle 超过 500 kB，尚未做代码分割。
 
-## 10. 外部服务联调
+## 9. 外部服务联调
 
 已验证的本机服务状态：
 
@@ -308,14 +298,14 @@ V2 核心模型：
 2. 思维导图拖拽与关系编辑。
 3. 历史考试结果、评估草稿和复习任务进度。
 
-## 11. 接手优先级
+## 10. 接手优先级
 
 1. 完成外挂字幕、思维导图、历史考试结果、评估草稿和复习进度的浏览器验收。
 2. 继续补齐此前简化页面恢复中的细节，尤其是评估草稿状态、复习任务进度和 Topic 学习产出治理。
 3. 为关键 V2 用户路径补端到端测试，至少覆盖视频导入 -> ASR -> 清洗 -> 字幕 seek -> 划词 Locator。
-4. 之后再处理前端代码分割和 bundle 体积告警（当前主 bundle 约 1.75 MB，gzip 约 549 kB）。
+4. 之后再处理前端代码分割和 bundle 体积告警（当前主 bundle 约 1.79 MB，gzip 约 558 kB）。
 
-## 12. 接手规则
+## 11. 接手规则
 
 1. 不覆盖当前工作区未提交变更。
 2. 先读本文件、`docs/development_design_v2_alpha.md` 和 `docs/local_service_integration.md`。
