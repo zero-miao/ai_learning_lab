@@ -27,6 +27,19 @@ const antdLayout = new Set([
 export default defineConfig({
   envDir: '..',
   plugins: [react()],
+  server: {
+    host: '0.0.0.0',
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: false,
+      },
+      '/media': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: false,
+      },
+    },
+  },
   build: {
     rollupOptions: {
       output: {

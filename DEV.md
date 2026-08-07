@@ -92,7 +92,7 @@ ai-learning-lab/
 | --- | --- | --- |
 | `DJANGO_SECRET_KEY` | Django 加密签名密钥，本机运行必需 | 使用当前项目生成的本地密钥 |
 | `DJANGO_DEBUG` | 是否启用 Django Debug 模式 | `True` |
-| `DJANGO_ALLOWED_HOSTS` | Django 允许访问的 Host，逗号分隔 | `127.0.0.1,localhost` |
+| `DJANGO_ALLOWED_HOSTS` | Django 允许访问的 Host；本地局域网部署允许动态 IP | `*` |
 | `DJANGO_DATABASE_PATH` | SQLite 数据库文件路径 | `backend/db.sqlite3` |
 | `LLM_PROVIDER_TYPE` | LLM Provider 类型 | `ollama` |
 | `LLM_BASE_URL` | Ollama OpenAI 兼容接口地址 | `http://localhost:11434/v1` |
@@ -105,6 +105,7 @@ ai-learning-lab/
 | `OLLAMA_KEEP_ALIVE` | Ollama 模型空闲保留时间 | `2m` |
 | `VITE_DEFAULT_SITE_THEME` | 首次初始化的全局背景 | `paper` |
 | `VITE_DEFAULT_READER_FONT` | 首次初始化的学习页字体 | `system` |
+| `VITE_API_BASE_URL` | 前端 API 地址；同源路径可支持局域网访问 | `/api/` |
 | `VITE_API_TIMEOUT_MS` | 首次初始化的前端请求超时 | `10000` |
 
 如需重新生成本机环境配置，可复制模板后按需修改：
@@ -121,12 +122,28 @@ cp .env.example .env
 
 ## 本地启动步骤
 
+### 局域网统一启动
+
+确认访问设备与本机连接到同一可信局域网，然后在项目根目录执行：
+
+```bash
+./scripts/start-lan.sh
+```
+
+脚本会同时启动后端和前端，并输出类似
+`LAN URL: http://192.168.1.10:5173/` 的访问地址。其他设备直接在浏览器中打开该地址即可。
+若 macOS 提示网络访问权限，请允许 Python 和 Node 接收入站连接。局域网 IP 变化后重新运行
+脚本并使用新地址。
+
+当前系统没有账号和权限隔离。启动局域网访问后，同一网络内能够连接该端口的设备可以查看和
+修改全部学习数据，因此只能在可信网络中使用，不应通过路由器端口映射或公网隧道暴露服务。
+
 ### 1. 启动后端
 
 ```bash
 cd backend
 source ../.venv/bin/activate
-python manage.py runserver 127.0.0.1:8000
+python manage.py runserver 0.0.0.0:8000
 ```
 
 后端健康检查接口：`http://127.0.0.1:8000/api/health/`
@@ -138,7 +155,8 @@ cd frontend
 npm run dev
 ```
 
-前端访问地址：`http://localhost:5173/`
+前端本机访问地址：`http://localhost:5173/`。Vite 同时监听局域网地址，并把同源
+`/api/` 和 `/media/` 请求代理到后端。
 
 ### 3. LLM 配置
 
