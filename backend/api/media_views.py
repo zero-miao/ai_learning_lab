@@ -8,7 +8,6 @@ from django.http import FileResponse, Http404, StreamingHttpResponse
 from django.utils._os import safe_join
 from django.utils.http import content_disposition_header
 
-
 RANGE_PATTERN = re.compile(r"^bytes=(\d*)-(\d*)$")
 CHUNK_SIZE = 64 * 1024
 

@@ -4,54 +4,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from .ai_gateway import AIGateway
-from .models import (
-    AITask,
-    Concept,
-    Exam,
-    ExamQuestion,
-    Highlight,
-    Material,
-    MaterialChunk,
-    MaterialTextLocator,
-    Question,
-    ReviewRecord,
-    SessionMessage,
-    Topic,
-    TopicMaterial,
-)
+from .models import AITask
 
 RETRY_DELAYS_SECONDS = (5, 15, 45)
 INTERACTIVE_TASK_PRIORITY = 100
-
-
-def _resolve_trigger(
-    *,
-    trigger_type=None,
-    trigger_id=None,
-    topic=None,
-    material=None,
-    question=None,
-    concept=None,
-    discussion_message=None,
-    exam=None,
-    review=None,
-):
-    if trigger_type and trigger_id is not None:
-        return trigger_type, trigger_id
-
-    candidates = (
-        ("SessionMessage", discussion_message),
-        ("Question", question),
-        ("Concept", concept),
-        ("Material", material),
-        ("Topic", topic),
-        ("Exam", exam),
-        ("ReviewRecord", review),
-    )
-    for resolved_type, instance in candidates:
-        if instance is not None:
-            return resolved_type, instance.pk
-    return "", None
 
 
 def enqueue_or_reuse(
@@ -59,29 +15,11 @@ def enqueue_or_reuse(
     *,
     trigger_type=None,
     trigger_id=None,
-    topic=None,
-    material=None,
-    question=None,
-    concept=None,
-    discussion_message=None,
-    exam=None,
-    review=None,
     task_data=None,
     priority=0,
     model=None,
 ):
     filters = {"task_type": task_type, "status__in": ("pending", "running")}
-    trigger_type, trigger_id = _resolve_trigger(
-        trigger_type=trigger_type,
-        trigger_id=trigger_id,
-        topic=topic,
-        material=material,
-        question=question,
-        concept=concept,
-        discussion_message=discussion_message,
-        exam=exam,
-        review=review,
-    )
     if trigger_type:
         filters["trigger_type"] = trigger_type
         filters["trigger_id"] = trigger_id
@@ -175,6 +113,7 @@ def _handle_failure(task_id, error):
     task.save()
     if task.task_type in {"asr", "edge_tts"} and task.trigger_type == "Material":
         from .models import Material
+
         material = Material.objects.filter(pk=task.trigger_id).first()
         if material and task.attempt_count >= task.max_attempts:
             prefix = "视频处理失败" if task.task_type == "asr" else "朗读音频生成失败"
@@ -185,7 +124,7 @@ def _handle_failure(task_id, error):
 
 def execute_task(task_id):
     from .tasks import TaskRegistry
-    
+
     task = AITask.objects.get(pk=task_id)
     try:
         task_cls = TaskRegistry.get_task_class(task.task_type)
@@ -194,7 +133,7 @@ def execute_task(task_id):
             task_data=task.task_data,
             trigger_type=task.trigger_type,
             trigger_id=task.trigger_id,
-            model=task.model
+            model=task.model,
         )
         result = task_obj.run()
     except Exception as error:

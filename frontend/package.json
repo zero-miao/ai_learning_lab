@@ -10,7 +10,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@uzen/kokoro-js": "^1.2.4",
     "@vidstack/react": "^1.15.5",
     "antd": "^6.5.3",
     "axios": "^1.19.0",
