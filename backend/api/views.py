@@ -1,7 +1,8 @@
-import os
+import shutil
 from pathlib import Path
 from uuid import uuid4
 
+from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db import transaction
 from django.utils import timezone
@@ -17,11 +18,13 @@ from .models import (
     Highlight,
     Material,
     MaterialChunk,
+    MaterialRecommendation,
     MaterialTextLocator,
     Question,
     ReviewRecord,
     Session,
     SessionMessage,
+    SystemConfiguration,
     Topic,
     TopicMaterial,
 )
@@ -31,22 +34,67 @@ from .serializers import (
     ConceptSerializer,
     ExamSerializer,
     HighlightSerializer,
+    MaterialRecommendationSerializer,
     MaterialSerializer,
     MaterialTextLocatorSerializer,
+    ModelDiscoverySerializer,
     QuestionSerializer,
     ReviewRecordSerializer,
     SessionMessageSerializer,
     SessionSerializer,
+    SystemConfigurationSerializer,
     TopicMaterialSerializer,
     TopicSerializer,
 )
-from .services import MaterialService
+from .system_config import get_config_value
 from .task_service import INTERACTIVE_TASK_PRIORITY, enqueue_or_reuse, retry_task
 
 
 @api_view(["GET"])
 def health_check(request):
     return Response({"status": "ok"})
+
+
+@api_view(["GET", "PUT"])
+def system_configuration_detail(request):
+    configuration = SystemConfiguration.load()
+    if request.method == "GET":
+        return Response(SystemConfigurationSerializer(configuration).data)
+
+    serializer = SystemConfigurationSerializer(configuration, data=request.data)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+
+    from .ai_gateway import AIGateway
+
+    AIGateway.reset_providers()
+    return Response(serializer.data)
+
+
+@api_view(["POST"])
+def discover_llm_models(request):
+    serializer = ModelDiscoverySerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    from .ai_gateway import AIGateway
+
+    try:
+        models = AIGateway.discover_models(
+            serializer.validated_data["llm_provider_type"],
+            serializer.validated_data["llm_base_url"],
+            serializer.validated_data["llm_api_key"],
+        )
+    except ValueError as error:
+        return Response(
+            {"detail": str(error)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as error:
+        return Response(
+            {"detail": f"读取模型列表失败：{error}"},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+    return Response({"models": models})
 
 
 def _topic_material(topic, material_id):
@@ -71,7 +119,9 @@ def _locator_data(topic, data):
     return material, chunk, material.clean_text[start:end], start, end
 
 
-def _create_locator(entity_type, entity_id, topic, material, chunk, text, start, end, source_text=None):
+def _create_locator(
+    entity_type, entity_id, topic, material, chunk, text, start, end, source_text=None
+):
     return MaterialTextLocator.objects.get_or_create(
         entity_type=entity_type,
         entity_id=entity_id,
@@ -123,6 +173,33 @@ def _build_review_context(review):
         for section in (material_context, concept_context, question_context)
         if section
     )[:12000]
+
+
+def _delete_material_files(material, material_id):
+    relative_paths = set()
+    if (
+        material.media_type in {"video", "audio"}
+        and material.media_uri
+        and "://" not in material.media_uri
+    ):
+        relative_paths.add(material.media_uri)
+
+    media_meta = material.media_meta if isinstance(material.media_meta, dict) else {}
+    subtitle_uri = media_meta.get("subtitle_uri")
+    if subtitle_uri:
+        relative_paths.add(str(subtitle_uri))
+    for voice_data in media_meta.get("tts", {}).get("voices", {}).values():
+        path = voice_data.get("path") if isinstance(voice_data, dict) else None
+        if path:
+            relative_paths.add(str(path))
+
+    for relative_path in relative_paths:
+        default_storage.delete(relative_path)
+
+    media_root = Path(settings.MEDIA_ROOT).resolve()
+    tts_directory = (media_root / "materials" / "tts" / str(material_id)).resolve()
+    if tts_directory.is_relative_to(media_root):
+        shutil.rmtree(tts_directory, ignore_errors=True)
 
 
 class TopicViewSet(viewsets.ModelViewSet):
@@ -223,10 +300,10 @@ class TopicViewSet(viewsets.ModelViewSet):
             trigger_id=trigger_id,
             task_data={
                 "topic_id": topic.id,
-                "relevance_threshold": float(
-                    os.getenv("SUPPLEMENT_RELEVANCE_THRESHOLD", "0.8")
+                "relevance_threshold": get_config_value(
+                    "supplement_relevance_threshold"
                 ),
-                "max_imports": 5,
+                "max_recommendations": 5,
             },
         )
         return Response(
@@ -238,15 +315,27 @@ class TopicViewSet(viewsets.ModelViewSet):
     def discussion(self, request, pk=None):
         topic = self.get_object()
         if topic.session_id is None:
-            topic.session = Session.objects.create(session_scene="discussion")
+            topic.session = Session.objects.create(session_scene="topic_discussion")
             topic.save(update_fields=["session", "updated_at"])
         if request.method == "GET":
+            active_tasks = AITask.objects.filter(
+                status__in=("pending", "running"),
+                task_type__in=("discussion_reply", "supplement_search"),
+                task_data__topic_id=topic.id,
+            ).order_by("-priority", "-created_at")
             return Response(
                 {
                     "topic": TopicSerializer(topic).data,
                     "messages": SessionMessageSerializer(
                         topic.session.messages.all(), many=True
                     ).data,
+                    "recommendations": MaterialRecommendationSerializer(
+                        topic.material_recommendations.select_related(
+                            "message", "material"
+                        )[:50],
+                        many=True,
+                    ).data,
+                    "active_tasks": AITaskSerializer(active_tasks, many=True).data,
                 }
             )
         content = str(request.data.get("content", "")).strip()
@@ -262,7 +351,7 @@ class TopicViewSet(viewsets.ModelViewSet):
             trigger_type="SessionMessage",
             trigger_id=message.id,
             priority=INTERACTIVE_TASK_PRIORITY,
-            task_data={"stage": topic.discussion_stage},
+            task_data={"topic_id": topic.id},
         )
         return Response(
             {
@@ -273,9 +362,114 @@ class TopicViewSet(viewsets.ModelViewSet):
         )
 
 
+class MaterialRecommendationViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = MaterialRecommendation.objects.select_related(
+        "topic", "message", "source_task", "material"
+    )
+    serializer_class = MaterialRecommendationSerializer
+
+    @action(detail=True, methods=["post"])
+    def adopt(self, request, pk=None):
+        recommendation = self.get_object()
+        if recommendation.status != "pending":
+            return Response(
+                {"detail": "该推荐已经处理。"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        with transaction.atomic():
+            material = (
+                Material.objects.filter(
+                    media_meta__md5=recommendation.content_md5
+                ).first()
+                or Material.objects.filter(media_uri=recommendation.url).first()
+            )
+            if material is None:
+                material = Material.objects.create(
+                    title=recommendation.title or recommendation.url,
+                    media_type="web_page",
+                    media_uri=recommendation.url,
+                    media_meta={"md5": recommendation.content_md5},
+                    raw_text=recommendation.content_snapshot,
+                    status="pending",
+                    created_by="ai_recommended",
+                )
+
+            relation, _ = TopicMaterial.objects.get_or_create(
+                topic=recommendation.topic,
+                material=material,
+                defaults={
+                    "import_by": "ai_recommended",
+                    "category": recommendation.category,
+                    "relevance_score": recommendation.relevance_score,
+                    "import_reason": recommendation.reason,
+                },
+            )
+            relation.import_by = "ai_recommended"
+            relation.category = recommendation.category
+            relation.relevance_score = recommendation.relevance_score
+            relation.import_reason = recommendation.reason
+            relation.removed_at = None
+            relation.save(
+                update_fields=[
+                    "import_by",
+                    "category",
+                    "relevance_score",
+                    "import_reason",
+                    "removed_at",
+                ]
+            )
+
+            recommendation.status = "adopted"
+            recommendation.material = material
+            recommendation.decided_at = timezone.now()
+            recommendation.save(update_fields=["status", "material", "decided_at"])
+
+        task = None
+        if material.status != "ready":
+            task, _ = enqueue_or_reuse(
+                "clean_text", trigger_type="Material", trigger_id=material.id
+            )
+        return Response(
+            {
+                "recommendation": MaterialRecommendationSerializer(recommendation).data,
+                "topic_material": TopicMaterialSerializer(
+                    relation, context={"request": request}
+                ).data,
+                "task": AITaskSerializer(task).data if task else None,
+            }
+        )
+
+    @action(detail=True, methods=["post"])
+    def dismiss(self, request, pk=None):
+        recommendation = self.get_object()
+        if recommendation.status != "pending":
+            return Response(
+                {"detail": "该推荐已经处理。"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        recommendation.status = "dismissed"
+        recommendation.decided_at = timezone.now()
+        recommendation.save(update_fields=["status", "decided_at"])
+        return Response(MaterialRecommendationSerializer(recommendation).data)
+
+
 class MaterialViewSet(viewsets.ModelViewSet):
     queryset = Material.objects.prefetch_related("topic_materials__topic", "chunks")
     serializer_class = MaterialSerializer
+
+    def perform_destroy(self, instance):
+        material_id = instance.id
+        with transaction.atomic():
+            AITask.objects.filter(
+                trigger_type="Material",
+                trigger_id=instance.id,
+                status__in=("pending", "running"),
+            ).update(
+                status="cancelled",
+                error_message="材料已删除",
+                finished_at=timezone.now(),
+            )
+            instance.delete()
+        _delete_material_files(instance, material_id)
 
     def create(self, request, *args, **kwargs):
         topic = Topic.objects.filter(pk=request.data.get("topic")).first()
@@ -297,7 +491,7 @@ class MaterialViewSet(viewsets.ModelViewSet):
             TopicMaterial.objects.update_or_create(
                 topic=topic,
                 material=material,
-                defaults={"removed_at": None, "import_by": "manual"}
+                defaults={"removed_at": None, "import_by": "manual"},
             )
             return Response(
                 self.get_serializer(material).data, status=status.HTTP_201_CREATED
@@ -341,13 +535,13 @@ class MaterialViewSet(viewsets.ModelViewSet):
                     "asr",
                     trigger_type="Material",
                     trigger_id=material.id,
-                    model=os.getenv("ASR_MODEL", "small"),
+                    model=get_config_value("asr_model"),
                 )
             else:
                 task, _ = enqueue_or_reuse(
                     "process", trigger_type="Material", trigger_id=material.id
                 )
-        
+
         return Response(
             {
                 "material": MaterialSerializer(material).data,
@@ -397,7 +591,7 @@ class MaterialViewSet(viewsets.ModelViewSet):
             "asr",
             trigger_type="Material",
             trigger_id=material.id,
-            model=os.getenv("ASR_MODEL", "small"),
+            model=get_config_value("asr_model"),
         )
         return Response(
             {
@@ -438,15 +632,15 @@ class QuestionViewSet(viewsets.ModelViewSet):
             session=session, question_text=str(request.data.get("question_text", ""))
         )
         _create_locator(
-            "question", 
-            question.id, 
-            topic, 
-            material, 
-            chunk, 
-            text, 
-            start, 
+            "question",
+            question.id,
+            topic,
+            material,
+            chunk,
+            text,
+            start,
             end,
-            source_text=request.data.get("source_text")
+            source_text=request.data.get("source_text"),
         )
         task, _ = enqueue_or_reuse(
             "answer_question",
@@ -489,13 +683,34 @@ class HighlightViewSet(viewsets.ModelViewSet):
 class TopicMaterialViewSet(viewsets.ModelViewSet):
     queryset = TopicMaterial.objects.select_related("topic", "material")
     serializer_class = TopicMaterialSerializer
-    http_method_names = ["get", "patch", "delete", "head", "options"]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
         queryset = super().get_queryset()
         if self.request.query_params.get("topic"):
             queryset = queryset.filter(topic_id=self.request.query_params["topic"])
         return queryset.filter(removed_at__isnull=True)
+
+    def create(self, request, *args, **kwargs):
+        topic = Topic.objects.filter(pk=request.data.get("topic")).first()
+        material = Material.objects.filter(pk=request.data.get("material")).first()
+        if topic is None or material is None:
+            return Response(
+                {"detail": "话题或材料不存在。"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        relation, created = TopicMaterial.objects.update_or_create(
+            topic=topic,
+            material=material,
+            defaults={
+                "removed_at": None,
+                "import_by": "manual",
+                "import_reason": "从全局材料管理关联",
+            },
+        )
+        return Response(
+            self.get_serializer(relation).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
     def destroy(self, request, *args, **kwargs):
         relation = self.get_object()
@@ -676,22 +891,22 @@ class SessionViewSet(viewsets.ReadOnlyModelViewSet):
             return Response(
                 {"detail": "请输入消息内容。"}, status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         message = SessionMessage.objects.create(
             session=session, msg_from="user", msg_content=content
         )
-        
+
         # Determine task type based on session scene
         task_type = None
         trigger_type = "SessionMessage"
         trigger_id = message.id
         task_data = {}
 
-        if session.session_scene == "discussion":
+        if session.session_scene == "topic_discussion":
             task_type = "discussion_reply"
             topic = Topic.objects.filter(session=session).first()
             if topic:
-                task_data = {"stage": topic.discussion_stage}
+                task_data = {"topic_id": topic.id}
         elif session.session_scene == "reading_question":
             task_type = "answer_question"
             # For reading questions, the trigger is actually the Question entity
@@ -699,8 +914,12 @@ class SessionViewSet(viewsets.ReadOnlyModelViewSet):
             if question:
                 trigger_type = "Question"
                 trigger_id = question.id
-                task_data = {"context": session.context_material.clean_text if session.context_material else ""}
-        
+                task_data = {
+                    "context": session.context_material.clean_text
+                    if session.context_material
+                    else ""
+                }
+
         if task_type:
             task, _ = enqueue_or_reuse(
                 task_type,
@@ -716,7 +935,7 @@ class SessionViewSet(viewsets.ReadOnlyModelViewSet):
                 },
                 status=status.HTTP_202_ACCEPTED,
             )
-        
+
         return Response(
             {"message": SessionMessageSerializer(message).data},
             status=status.HTTP_201_CREATED,

@@ -1,0 +1,100 @@
+.topic-discussion__markdown {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.topic-discussion__markdown > :first-child {
+  margin-top: 0;
+}
+
+.topic-discussion__markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.topic-discussion__markdown h1,
+.topic-discussion__markdown h2,
+.topic-discussion__markdown h3,
+.topic-discussion__markdown h4,
+.topic-discussion__markdown h5,
+.topic-discussion__markdown h6 {
+  margin: 0.65em 0 0.3em;
+  line-height: 1.35;
+}
+
+.topic-discussion__markdown h1 {
+  font-size: 1.35em;
+}
+
+.topic-discussion__markdown h2 {
+  font-size: 1.22em;
+}
+
+.topic-discussion__markdown h3,
+.topic-discussion__markdown h4,
+.topic-discussion__markdown h5,
+.topic-discussion__markdown h6 {
+  font-size: 1.08em;
+}
+
+.topic-discussion__markdown p,
+.topic-discussion__markdown ul,
+.topic-discussion__markdown ol,
+.topic-discussion__markdown blockquote,
+.topic-discussion__markdown pre,
+.topic-discussion__markdown table {
+  margin: 0.35em 0;
+}
+
+.topic-discussion__markdown ul,
+.topic-discussion__markdown ol {
+  padding-left: 1.5em;
+}
+
+.topic-discussion__markdown li + li {
+  margin-top: 0.12em;
+}
+
+.topic-discussion__markdown li > p {
+  margin: 0.15em 0;
+}
+
+.topic-discussion__markdown blockquote {
+  padding-left: 0.8em;
+  border-left: 3px solid currentColor;
+  opacity: 0.78;
+}
+
+.topic-discussion__markdown code {
+  padding: 0.12em 0.3em;
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.16);
+}
+
+.topic-discussion__markdown pre {
+  padding: 10px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.topic-discussion__markdown pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.topic-discussion__markdown table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.topic-discussion__markdown th,
+.topic-discussion__markdown td {
+  padding: 5px 7px;
+  border: 1px solid rgba(127, 127, 127, 0.35);
+  text-align: left;
+}
+
+.topic-discussion__markdown a {
+  color: inherit;
+  text-decoration: underline;
+}

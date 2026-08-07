@@ -1,5 +1,4 @@
 import hashlib
-import os
 import re
 from html.parser import HTMLParser
 from pathlib import Path
@@ -7,6 +6,8 @@ from pathlib import Path
 import edge_tts
 from django.conf import settings
 from markdown_it import MarkdownIt
+
+from .system_config import get_config_value
 
 DEFAULT_VOICES = (
     ("zh-CN-XiaoxiaoNeural", "晓晓"),
@@ -56,7 +57,7 @@ class _TextExtractor(HTMLParser):
 
 
 def configured_voices():
-    raw = os.getenv("TTS_VOICES", "").strip()
+    raw = get_config_value("tts_voices").strip()
     if not raw:
         return DEFAULT_VOICES
 

@@ -24,6 +24,10 @@ import {
 } from '@ant-design/icons';
 import { Button, Divider, Popover, Space, Tag, Tooltip, Typography, message } from 'antd';
 import type { Concept, Highlight, Material, Question } from '../../api';
+import {
+  siteThemeOptions,
+  type SiteTheme,
+} from '../../appearance';
 import './styles.css';
 
 const { Title, Text } = Typography;
@@ -34,7 +38,8 @@ export interface TextSelectionAnchor {
   endOffset: number;
 }
 
-export type ReaderTheme = 'paper' | 'sepia' | 'green' | 'gray' | 'dark';
+export type ReaderTheme = SiteTheme;
+export type ReaderFont = 'system' | 'song' | 'kai' | 'serif';
 
 interface UniversalReaderProps {
   material: Material;
@@ -43,6 +48,8 @@ interface UniversalReaderProps {
   questions: Question[];
   readerTheme: ReaderTheme;
   onReaderThemeChange: (theme: ReaderTheme) => void;
+  readerFont: ReaderFont;
+  onReaderFontChange: (font: ReaderFont) => void;
   onMarkConcept: (selection: TextSelectionAnchor) => void;
   onAskQuestion: (selection: TextSelectionAnchor) => void;
   onHighlight: (selection: TextSelectionAnchor) => void;
@@ -88,16 +95,15 @@ const mediaTypeLabels: Record<Material['media_type'], string> = {
   audio: '音频',
 };
 
-const readerThemeOptions: Array<{
-  value: ReaderTheme;
+const readerFontOptions: Array<{
+  value: ReaderFont;
   label: string;
-  color: string;
+  shortLabel: string;
 }> = [
-  { value: 'paper', label: '纯白', color: '#ffffff' },
-  { value: 'sepia', label: '暖黄', color: '#f7f1df' },
-  { value: 'green', label: '护眼绿', color: '#eaf4e2' },
-  { value: 'gray', label: '柔灰', color: '#edf0f2' },
-  { value: 'dark', label: '深色', color: '#171717' },
+  { value: 'system', label: '系统字体', shortLabel: '默认' },
+  { value: 'song', label: '宋体', shortLabel: '宋' },
+  { value: 'kai', label: '楷体', shortLabel: '楷' },
+  { value: 'serif', label: '衬线字体', shortLabel: '衬' },
 ];
 
 function getReaderChunks(material: Material): ReaderChunk[] {
@@ -484,6 +490,8 @@ export default function UniversalReader({
   questions,
   readerTheme,
   onReaderThemeChange,
+  readerFont,
+  onReaderFontChange,
   onMarkConcept,
   onAskQuestion,
   onHighlight,
@@ -518,7 +526,7 @@ export default function UniversalReader({
   const [speechVoiceURI, setSpeechVoiceURI] = React.useState('');
   const [spokenChunkId, setSpokenChunkId] = React.useState<number | null>(null);
   const [openToolPanel, setOpenToolPanel] = React.useState<
-    'theme' | 'voice' | 'rate' | null
+    'theme' | 'font' | 'voice' | 'rate' | null
   >(null);
   const [speechControlsTarget, setSpeechControlsTarget] =
     React.useState<HTMLElement | null>(null);
@@ -526,7 +534,8 @@ export default function UniversalReader({
   const selectedVoice =
     speechVoices.find((voice) => voice.voice === speechVoiceURI) ??
     speechVoices[0];
-  const darkMode = readerTheme === 'dark';
+  const darkMode =
+    siteThemeOptions.find((option) => option.value === readerTheme)?.dark ?? false;
   const activeChunkId = isVideo
     ? chunks.find(
         (chunk) =>
@@ -788,9 +797,10 @@ export default function UniversalReader({
   };
 
   const speechDisabled = isVideo || !selectedVoice;
-  const selectedTheme = readerThemeOptions.find(
+  const selectedTheme = siteThemeOptions.find(
     (item) => item.value === readerTheme,
   );
+  const selectedFont = readerFontOptions.find((item) => item.value === readerFont);
   const voiceLabel = selectedVoice?.label.slice(0, 4) || '音色';
   const readerControls = (
     <div className="universal-reader__reader-controls">
@@ -835,7 +845,7 @@ export default function UniversalReader({
         onOpenChange={(open) => setOpenToolPanel(open ? 'theme' : null)}
         content={
           <div className="universal-reader__tool-panel">
-            {readerThemeOptions.map((option) => (
+            {siteThemeOptions.map((option) => (
               <Button
                 key={option.value}
                 type={readerTheme === option.value ? 'primary' : 'text'}
@@ -864,6 +874,40 @@ export default function UniversalReader({
             className="universal-reader__current-theme"
             style={{ background: selectedTheme?.color }}
           />
+        </Button>
+        </Popover>
+        <Popover
+        trigger="click"
+        placement="leftTop"
+        arrow
+        open={openToolPanel === 'font'}
+        onOpenChange={(open) => setOpenToolPanel(open ? 'font' : null)}
+        content={
+          <div className="universal-reader__tool-panel">
+            {readerFontOptions.map((option) => (
+              <Button
+                key={option.value}
+                type={readerFont === option.value ? 'primary' : 'text'}
+                onClick={() => {
+                  onReaderFontChange(option.value);
+                  setOpenToolPanel(null);
+                }}
+              >
+                {option.label}
+              </Button>
+            ))}
+          </div>
+        }
+      >
+        <Button
+          type="text"
+          className="universal-reader__setting-button"
+          title={`正文字体：${selectedFont?.label}`}
+          aria-label="选择正文字体"
+        >
+          <span className="universal-reader__setting-label">
+            {selectedFont?.shortLabel}
+          </span>
         </Button>
         </Popover>
         <Popover
@@ -964,6 +1008,7 @@ export default function UniversalReader({
           'universal-reader',
           darkMode ? 'universal-reader--dark' : '',
           `universal-reader--${readerTheme}`,
+          `universal-reader--font-${readerFont}`,
           isVideo ? 'universal-reader--video' : '',
         ].filter(Boolean).join(' ')}
       >

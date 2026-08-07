@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { Button, Layout, Typography } from 'antd';
+import { BgColorsOutlined, SettingOutlined } from '@ant-design/icons';
+import { Button, ConfigProvider, Layout, Popover, Space, Typography, theme } from 'antd';
 import TopicList from './pages/TopicList';
 import TopicDetail from './pages/TopicDetail';
 import MaterialReader from './pages/MaterialReader';
@@ -9,13 +10,21 @@ import TaskManagement from './pages/TaskManagement';
 import MaterialManagement from './pages/MaterialManagement';
 import ExamPage from './pages/Exam';
 import ReviewPage from './pages/Review';
-import DiscussionTopic from './pages/DiscussionTopic';
+import SystemSettings from './pages/SystemSettings';
+import {
+  applySiteTheme,
+  hasStoredSiteTheme,
+  siteThemeOptions,
+  useSiteTheme,
+} from './appearance';
+import { getSystemConfiguration, setApiTimeout } from './api';
 
 const { Header, Content, Footer } = Layout;
 const { Title } = Typography;
 
 function App() {
   const navigate = useNavigate();
+  const { option, setSiteTheme, siteTheme } = useSiteTheme();
 
   useEffect(() => {
     const handleSelectAll = (event: KeyboardEvent) => {
@@ -35,13 +44,34 @@ function App() {
     return () => document.removeEventListener('keydown', handleSelectAll);
   }, []);
 
+  useEffect(() => {
+    void getSystemConfiguration()
+      .then((response) => {
+        setApiTimeout(response.data.api_timeout_ms);
+        if (!hasStoredSiteTheme()) {
+          applySiteTheme(response.data.default_site_theme);
+        }
+        if (!window.localStorage.getItem('reader-font')) {
+          window.localStorage.setItem(
+            'reader-font',
+            response.data.default_reader_font,
+          );
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <ConfigProvider theme={{ algorithm: option.dark ? theme.darkAlgorithm : theme.defaultAlgorithm }}>
+    <Layout
+      className={`site-theme site-theme--${siteTheme}`}
+      style={{ minHeight: '100vh', background: option.page }}
+    >
       <Header style={{
         display: 'flex',
         alignItems: 'center',
-        background: '#fff',
-        borderBottom: '1px solid #f0f0f0',
+        background: option.dark ? 'rgba(24, 24, 24, 0.96)' : 'rgba(255, 255, 255, 0.94)',
+        borderBottom: `1px solid ${option.dark ? '#3a3a3a' : '#f0f0f0'}`,
         position: 'sticky',
         top: 0,
         zIndex: 1,
@@ -53,25 +83,65 @@ function App() {
         <Button style={{ marginLeft: 'auto' }} onClick={() => navigate('/materials')}>材料管理</Button>
         <Button onClick={() => navigate('/tasks')}>任务管理</Button>
         <Button onClick={() => navigate('/reviews')}>复习计划</Button>
+        <Button
+          icon={<SettingOutlined />}
+          aria-label="系统设置"
+          title="系统设置"
+          onClick={() => navigate('/settings')}
+        />
+        <Popover
+          trigger="click"
+          placement="bottomRight"
+          content={
+            <Space direction="vertical" size={4}>
+              {siteThemeOptions.map((item) => (
+                <Button
+                  key={item.value}
+                  type={siteTheme === item.value ? 'primary' : 'text'}
+                  block
+                  onClick={() => setSiteTheme(item.value)}
+                >
+                  <span
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: '50%',
+                      background: item.color,
+                      border: '1px solid rgba(127,127,127,.45)',
+                    }}
+                  />
+                  {item.label}
+                </Button>
+              ))}
+            </Space>
+          }
+        >
+          <Button
+            icon={<BgColorsOutlined />}
+            aria-label="选择全站背景"
+            title={`全站背景：${option.label}`}
+          />
+        </Popover>
       </Header>
-      <Content style={{ background: '#f5f7fa' }}>
+      <Content style={{ background: option.page, transition: 'background-color 160ms ease' }}>
         <Routes>
           <Route path="/" element={<Navigate to="/topics" replace />} />
           <Route path="/topics" element={<TopicList />} />
           <Route path="/topics/:id" element={<TopicDetail />} />
-          <Route path="/topics/:id/discussion" element={<DiscussionTopic />} />
           <Route path="/topics/:id/map" element={<TopicMap />} />
           <Route path="/topics/:topicId/materials/:materialId" element={<MaterialReader />} />
           <Route path="/topics/:topicId/exam" element={<ExamPage />} />
           <Route path="/materials" element={<MaterialManagement />} />
           <Route path="/tasks" element={<TaskManagement />} />
           <Route path="/reviews" element={<ReviewPage />} />
+          <Route path="/settings" element={<SystemSettings />} />
         </Routes>
       </Content>
       <Footer style={{ textAlign: 'center' }}>
         AI Learning Lab ©{new Date().getFullYear()} Created for Personal Learning
       </Footer>
     </Layout>
+    </ConfigProvider>
   );
 }
 

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Button,
   Card,
@@ -18,6 +18,7 @@ import {
   Typography,
   Upload,
   message,
+  theme,
 } from 'antd';
 import {
   ApartmentOutlined,
@@ -28,6 +29,7 @@ import {
   EyeOutlined,
   FileSearchOutlined,
   LinkOutlined,
+  MessageOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import {
@@ -42,10 +44,12 @@ import {
   triggerSupplement,
   updateConcept,
   updateHighlight,
+  updateTopic,
   updateTopicMaterial,
   uploadVideo,
 } from '../../api';
 import type { AITask, Concept, Highlight, Material, Topic, TopicMaterial } from '../../api';
+import TopicDiscussionDrawer from './TopicDiscussionDrawer';
 
 const { Title, Text } = Typography;
 const OUTPUT_PAGE_SIZE = 5;
@@ -58,6 +62,12 @@ interface MaterialFormValues {
   raw_text?: string;
   video_file?: File;
   existing_material_id?: number;
+}
+
+interface TopicFormValues {
+  title: string;
+  goal: string;
+  scope: string;
 }
 
 const TopicDetail: React.FC = () => {
@@ -75,8 +85,24 @@ const TopicDetail: React.FC = () => {
   const [editingHighlight, setEditingHighlight] = useState<Highlight | null>(null);
   const [conceptModal, setConceptModal] = useState(false);
   const [highlightModal, setHighlightModal] = useState(false);
+  const [topicModal, setTopicModal] = useState(false);
+  const [discussionOpen, setDiscussionOpen] = useState(false);
+  const [topicForm] = Form.useForm<TopicFormValues>();
   const [conceptForm] = Form.useForm<Partial<Concept>>();
   const [highlightForm] = Form.useForm<{ user_note: string }>();
+  const { token } = theme.useToken();
+  const outputTextStyle: React.CSSProperties = {
+    color: token.colorText,
+    fontSize: 14,
+  };
+  const outputQuoteStyle: React.CSSProperties = {
+    color: token.colorTextSecondary,
+    fontSize: 13,
+    fontStyle: 'italic',
+    borderLeft: `3px solid ${token.colorBorderSecondary}`,
+    backgroundColor: token.colorFillQuaternary,
+    padding: '8px 12px',
+  };
 
   const loadTopic = useCallback(async () => {
     if (!id) return;
@@ -108,11 +134,11 @@ const TopicDetail: React.FC = () => {
       setSupplementTask(response.data);
       if (['succeeded', 'failed'].includes(response.data.status)) {
         if (response.data.status === 'succeeded') {
-          const count = Number(response.data.result_json.imported_count ?? 0);
-          message.success(count ? `已导入 ${count} 篇补充资料。` : '未找到达标资料。');
+          const count = Number(response.data.result_json.recommended_count ?? 0);
+          message.success(count ? `找到 ${count} 篇候选材料，请人工采纳。` : '未找到达标资料。');
           await loadTopic();
         } else {
-          message.error(response.data.error_message || '自动补料失败');
+          message.error(response.data.error_message || '材料检索失败');
         }
       }
     }, 2000);
@@ -123,6 +149,7 @@ const TopicDetail: React.FC = () => {
     if (!topic) return;
     const response = await triggerSupplement(topic.id);
     setSupplementTask(response.data.task);
+    setDiscussionOpen(true);
     message.info(response.data.created ? '正在检索补充资料。' : '已有补料任务正在执行。');
   };
 
@@ -147,9 +174,10 @@ const TopicDetail: React.FC = () => {
   const runSupplement = async (type: 'Concept' | 'Question' | 'Highlight', id: number) => {
     if (!topic) return;
     try {
-      await triggerSupplement(topic.id, type, id);
+      const response = await triggerSupplement(topic.id, type, id);
+      setSupplementTask(response.data.task);
+      setDiscussionOpen(true);
       message.info('正在检索补充资料。');
-      // Here we might want to poll for task status if needed, but for now just show info
     } catch {
       message.error('触发补料失败');
     }
@@ -203,6 +231,28 @@ const TopicDetail: React.FC = () => {
     }
   };
 
+  const openTopicEditor = () => {
+    if (!topic) return;
+    topicForm.setFieldsValue({
+      title: topic.title,
+      goal: topic.goal,
+      scope: topic.scope,
+    });
+    setTopicModal(true);
+  };
+
+  const submitTopic = async (values: TopicFormValues) => {
+    if (!topic) return;
+    try {
+      const response = await updateTopic(topic.id, values);
+      setTopic(response.data);
+      setTopicModal(false);
+      message.success('话题信息已更新');
+    } catch {
+      message.error('保存话题信息失败');
+    }
+  };
+
   const importMaterial = async (values: MaterialFormValues) => {
     if (!topic) return;
     try {
@@ -246,10 +296,6 @@ const TopicDetail: React.FC = () => {
 
   if (loading && !topic) return <div style={{ padding: 24 }}>加载中...</div>;
   if (!topic) return <div style={{ padding: 24 }}>未找到主题</div>;
-  if (topic.type === 'discussion') {
-    return <Navigate to={`/topics/${topic.id}/discussion`} replace />;
-  }
-
   return (
     <div style={{ maxWidth: 1080, margin: '0 auto', padding: 24 }}>
       <Space direction="vertical" size="large" style={{ display: 'flex' }}>
@@ -260,6 +306,12 @@ const TopicDetail: React.FC = () => {
           <Space direction="vertical" size="middle" style={{ display: 'flex' }}>
             <Space wrap>
               <Title level={2} style={{ margin: 0 }}>{topic.title}</Title>
+              <Button
+                type="text"
+                icon={<EditOutlined />}
+                aria-label="编辑话题信息"
+                onClick={openTopicEditor}
+              />
               <Tag color="blue">{topic.status_display}</Tag>
               <Tag color="green">掌握度：{topic.mastery_level_display}</Tag>
             </Space>
@@ -272,10 +324,16 @@ const TopicDetail: React.FC = () => {
             <Space wrap>
               <Button
                 type="primary"
+                icon={<MessageOutlined />}
+                onClick={() => setDiscussionOpen(true)}
+              >
+                学习讨论
+              </Button>
+              <Button
                 loading={supplementTask?.status === 'pending' || supplementTask?.status === 'running'}
                 onClick={() => void triggerTopicSupplement()}
               >
-                自动补料
+                查找材料
               </Button>
               <Button icon={<ApartmentOutlined />} onClick={() => navigate(`/topics/${topic.id}/map`)}>
                 概念图
@@ -315,19 +373,11 @@ const TopicDetail: React.FC = () => {
                             title={<span style={{ fontWeight: 'bold', fontSize: '16px' }}>{item.title}</span>}
                             description={
                               <Space direction="vertical" size={8} style={{ display: 'flex', marginTop: 4 }}>
-                                <div style={{ color: 'rgba(0,0,0,0.85)', fontSize: '14px' }}>
+                                <div style={outputTextStyle}>
                                   {item.definition || '等待 AI 生成内容'}
                                 </div>
                                 {item.locators[0]?.source_text && (
-                                  <div style={{
-                                    fontSize: '13px',
-                                    color: 'rgba(0,0,0,0.45)',
-                                    fontStyle: 'italic',
-                                    borderLeft: '3px solid #f0f0f0',
-                                    paddingLeft: '12px',
-                                    backgroundColor: '#fafafa',
-                                    padding: '8px 12px'
-                                  }}>
+                                  <div style={outputQuoteStyle}>
                                     “{item.locators[0].source_text}” —— 来自《{item.locators[0].material_title}》
                                   </div>
                                 )}
@@ -363,19 +413,11 @@ const TopicDetail: React.FC = () => {
                             description={
                               <Space direction="vertical" size={8} style={{ display: 'flex', marginTop: 4 }}>
                                 {item.locators[0]?.source_text && (
-                                  <div style={{
-                                    fontSize: '13px',
-                                    color: 'rgba(0,0,0,0.45)',
-                                    fontStyle: 'italic',
-                                    borderLeft: '3px solid #f0f0f0',
-                                    paddingLeft: '12px',
-                                    backgroundColor: '#fafafa',
-                                    padding: '8px 12px'
-                                  }}>
+                                  <div style={outputQuoteStyle}>
                                     “{item.locators[0].source_text}” —— 来自《{item.locators[0].material_title}》
                                   </div>
                                 )}
-                                <div style={{ color: 'rgba(0,0,0,0.85)', fontSize: '14px' }}>
+                                <div style={outputTextStyle}>
                                   {item.conclusion || '等待 AI 生成内容'}
                                 </div>
                               </Space>
@@ -410,18 +452,10 @@ const TopicDetail: React.FC = () => {
                             title={<span style={{ fontWeight: 'bold', fontSize: '15px' }}>{item.locators[0]?.source_text || '高亮'}</span>}
                             description={
                               <Space direction="vertical" size={8} style={{ display: 'flex', marginTop: 4 }}>
-                                <div style={{
-                                  fontSize: '13px',
-                                  color: 'rgba(0,0,0,0.45)',
-                                  fontStyle: 'italic',
-                                  borderLeft: '3px solid #f0f0f0',
-                                  paddingLeft: '12px',
-                                  backgroundColor: '#fafafa',
-                                  padding: '8px 12px'
-                                }}>
+                                <div style={outputQuoteStyle}>
                                   “{item.locators[0]?.source_text}” —— 来自《{item.locators[0]?.material_title}》
                                 </div>
-                                <div style={{ color: 'rgba(0,0,0,0.85)', fontSize: '14px' }}>
+                                <div style={outputTextStyle}>
                                   {item.user_note || <Text type="secondary" italic>暂无备注</Text>}
                                 </div>
                               </Space>
@@ -444,7 +478,7 @@ const TopicDetail: React.FC = () => {
         >
           <List
             dataSource={topic.topic_materials}
-            locale={{ emptyText: '暂无材料。可导入视频、文本或启动自动补料。' }}
+            locale={{ emptyText: '暂无材料。可导入视频、文本或查找候选材料。' }}
             renderItem={(relation) => {
               const material = relation.material;
               return (
@@ -594,11 +628,40 @@ const TopicDetail: React.FC = () => {
           <Form.Item name="applications" label="应用"><Input.TextArea rows={3} /></Form.Item>
         </Form>
       </Modal>
+      <Modal
+        title="编辑话题信息"
+        open={topicModal}
+        onCancel={() => setTopicModal(false)}
+        onOk={() => topicForm.submit()}
+        okText="保存"
+      >
+        <Form form={topicForm} layout="vertical" onFinish={submitTopic}>
+          <Form.Item
+            name="title"
+            label="标题"
+            rules={[{ required: true, whitespace: true, message: '请输入话题标题' }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item name="goal" label="学习目标">
+            <Input.TextArea rows={3} placeholder="希望通过这个话题解决什么问题？" />
+          </Form.Item>
+          <Form.Item name="scope" label="学习范围">
+            <Input.TextArea rows={3} placeholder="明确包含内容、边界或暂不涉及的方向" />
+          </Form.Item>
+        </Form>
+      </Modal>
       <Modal title={editingHighlight ? "编辑高亮" : "添加高亮"} open={highlightModal} onCancel={() => { setHighlightModal(false); setEditingHighlight(null); }} onOk={() => highlightForm.submit()}>
         <Form form={highlightForm} layout="vertical" onFinish={submitHighlight}>
           <Form.Item name="user_note" label="笔记内容"><Input.TextArea rows={4} /></Form.Item>
         </Form>
       </Modal>
+      <TopicDiscussionDrawer
+        topicId={topic.id}
+        open={discussionOpen}
+        onClose={() => setDiscussionOpen(false)}
+        onMaterialsChanged={loadTopic}
+      />
     </div>
   );
 };

@@ -9,7 +9,6 @@ import {
   Modal,
   Popconfirm,
   Radio,
-  Segmented,
   Space,
   Tag,
   Tooltip,
@@ -23,12 +22,10 @@ import type { Topic } from '../../api';
 
 const { Title, Paragraph } = Typography;
 
-type TopicFilter = 'all' | Topic['type'];
 type InitialMaterialType = 'url' | 'text';
 
 interface CreateTopicValues {
   title: string;
-  type: Topic['type'];
   goal?: string;
   addInitialMaterial?: boolean;
   initialMaterialType?: InitialMaterialType;
@@ -40,7 +37,6 @@ const TopicList: React.FC = () => {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
-  const [filter, setFilter] = useState<TopicFilter>('all');
   const [keyword, setKeyword] = useState('');
   const [deletingTopicId, setDeletingTopicId] = useState<number | null>(null);
   const [form] = Form.useForm<CreateTopicValues>();
@@ -68,7 +64,6 @@ const TopicList: React.FC = () => {
       setLoading(true);
       const topicResponse = await createTopic({
         title: values.title,
-        type: values.type,
         goal: values.goal,
       });
       const topic = topicResponse.data;
@@ -102,19 +97,18 @@ const TopicList: React.FC = () => {
     const normalizedKeyword = keyword.trim().toLowerCase();
     return topics
       .filter((topic) => {
-        const matchesType = filter === 'all' || topic.type === filter;
-        const matchesKeyword =
+        return (
           !normalizedKeyword ||
           topic.title.toLowerCase().includes(normalizedKeyword) ||
-          topic.goal.toLowerCase().includes(normalizedKeyword);
-        return matchesType && matchesKeyword;
+          topic.goal.toLowerCase().includes(normalizedKeyword)
+        );
       })
       .sort(
         (left, right) =>
           new Date(right.created_at).getTime() -
           new Date(left.created_at).getTime(),
       );
-  }, [filter, keyword, topics]);
+  }, [keyword, topics]);
 
   const closeModal = () => {
     setIsModalVisible(false);
@@ -165,15 +159,6 @@ const TopicList: React.FC = () => {
 
       <Card styles={{ body: { padding: 16 } }} style={{ marginBottom: 24 }}>
         <Space wrap size="middle">
-          <Segmented<TopicFilter>
-            value={filter}
-            onChange={setFilter}
-            options={[
-              { label: '全部', value: 'all' },
-              { label: '学习', value: 'learning' },
-              { label: '讨论', value: 'discussion' },
-            ]}
-          />
           <Input.Search
             allowClear
             placeholder="搜索话题或学习目标"
@@ -191,10 +176,10 @@ const TopicList: React.FC = () => {
           emptyText: (
             <Empty
               description={
-                keyword || filter !== 'all' ? '没有匹配的话题' : '还没有话题'
+                keyword ? '没有匹配的话题' : '还没有话题'
               }
             >
-              {!keyword && filter === 'all' && (
+              {!keyword && (
                 <Button type="primary" onClick={() => setIsModalVisible(true)}>
                   新建话题
                 </Button>
@@ -231,9 +216,6 @@ const TopicList: React.FC = () => {
               }
               extra={
                 <Space size={4} onClick={(event) => event.stopPropagation()} style={{ lineHeight: '56px' }}>
-                  <Tag color={item.type === 'learning' ? 'blue' : 'purple'} style={{ margin: 0 }}>
-                    {item.type_display}
-                  </Tag>
                   <Popconfirm
                     title={`删除“${item.title}”？`}
                     description="相关材料、讨论记录、概念和任务都会一并删除，此操作不可恢复。"
@@ -252,13 +234,7 @@ const TopicList: React.FC = () => {
                   </Popconfirm>
                 </Space>
               }
-              onClick={() =>
-                navigate(
-                  item.type === 'discussion'
-                    ? `/topics/${item.id}/discussion`
-                    : `/topics/${item.id}`,
-                )
-              }
+              onClick={() => navigate(`/topics/${item.id}`)}
             >
               <Tooltip title={item.goal || '还没有学习目标'}>
                 <Paragraph
@@ -272,9 +248,7 @@ const TopicList: React.FC = () => {
               <div style={{ marginTop: 'auto', flex: '0 0 auto' }}>
                 <Space wrap size={[8, 8]}>
                   <Tag color="default" style={{ margin: 0 }}>{item.topic_materials.length} 份材料</Tag>
-                  {item.type === 'learning' && (
-                    <Tag color="processing" style={{ margin: 0 }}>掌握度: {item.mastery_level_display}</Tag>
-                  )}
+                  <Tag color="processing" style={{ margin: 0 }}>掌握度: {item.mastery_level_display}</Tag>
                 </Space>
               </div>
             </Card>
@@ -294,7 +268,6 @@ const TopicList: React.FC = () => {
           layout="vertical"
           onFinish={handleCreate}
           initialValues={{
-            type: 'learning',
             addInitialMaterial: false,
             initialMaterialType: 'url',
           }}
@@ -306,16 +279,10 @@ const TopicList: React.FC = () => {
           >
             <Input placeholder="例如：深入理解 Django ORM" autoFocus />
           </Form.Item>
-          <Form.Item name="type" label="话题类型" rules={[{ required: true }]}>
-            <Radio.Group>
-              <Radio value="learning">学习</Radio>
-              <Radio value="discussion">讨论</Radio>
-            </Radio.Group>
-          </Form.Item>
           <Form.Item name="goal" label="学习目标">
             <Input.TextArea
               rows={3}
-              placeholder="你希望通过学习或讨论得到什么？"
+              placeholder="你希望通过学习得到什么？"
             />
           </Form.Item>
           <Form.Item name="addInitialMaterial">

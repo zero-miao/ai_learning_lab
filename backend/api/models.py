@@ -1,11 +1,104 @@
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
-class Topic(models.Model):
-    TYPE_CHOICES = [
-        ("learning", "学习"),
-        ("discussion", "讨论"),
+class SystemConfiguration(models.Model):
+    PROVIDER_CHOICES = [
+        ("ollama", "Ollama"),
+        ("openai", "OpenAI 兼容服务"),
     ]
+    SITE_THEME_CHOICES = [
+        ("paper", "纯白"),
+        ("sepia", "暖黄"),
+        ("green", "护眼绿"),
+        ("gray", "柔灰"),
+        ("dark", "深黑"),
+        ("midnight", "夜蓝"),
+        ("charcoal", "炭灰"),
+        ("coffee", "暖黑"),
+    ]
+    READER_FONT_CHOICES = [
+        ("system", "系统字体"),
+        ("song", "宋体"),
+        ("kai", "楷体"),
+        ("serif", "衬线字体"),
+    ]
+
+    singleton_id = models.PositiveSmallIntegerField(
+        primary_key=True, default=1, editable=False
+    )
+    llm_provider_type = models.CharField(
+        max_length=20, choices=PROVIDER_CHOICES, default="ollama"
+    )
+    llm_base_url = models.URLField(default="http://localhost:11434/v1")
+    llm_api_key = models.CharField(max_length=500, blank=True, default="ollama")
+    llm_model = models.CharField(max_length=100, default="qwen3.6:35b-a3b")
+    llm_model_topic_chat = models.CharField(max_length=100, default="qwen3:30b-a3b")
+    llm_model_supplement_query = models.CharField(
+        max_length=100, default="qwen3:30b-a3b"
+    )
+    llm_model_supplement_evaluate = models.CharField(
+        max_length=100, default="qwen3.6:35b-a3b"
+    )
+    llm_model_briefing = models.CharField(max_length=100, default="qwen3:30b-a3b")
+    llm_model_clean_text = models.CharField(max_length=100, default="qwen3.6:35b-a3b")
+    llm_model_answer_question = models.CharField(
+        max_length=100, default="qwen3.6:35b-a3b"
+    )
+    llm_model_concept_draft = models.CharField(
+        max_length=100, default="qwen3.6:35b-a3b"
+    )
+    llm_model_generate_exam = models.CharField(
+        max_length=100, default="qwen3.6:35b-a3b"
+    )
+    llm_model_grade_exam = models.CharField(max_length=100, default="qwen3.6:35b-a3b")
+    llm_model_review_prompt = models.CharField(max_length=100, default="qwen3:30b-a3b")
+    llm_model_grade_review = models.CharField(max_length=100, default="qwen3.6:35b-a3b")
+    ollama_keep_alive = models.CharField(max_length=30, blank=True, default="2m")
+    asr_model = models.CharField(max_length=100, default="small")
+    tts_voices = models.TextField(
+        default=("zh-CN-XiaoxiaoNeural|晓晓,zh-CN-YunxiNeural|云希")
+    )
+    searxng_base_url = models.URLField(default="http://127.0.0.1:8080")
+    crawl4ai_base_url = models.URLField(default="http://127.0.0.1:11235")
+    supplement_relevance_threshold = models.FloatField(
+        default=0.8,
+        validators=[MinValueValidator(0), MaxValueValidator(1)],
+    )
+    default_site_theme = models.CharField(
+        max_length=20, choices=SITE_THEME_CHOICES, default="paper"
+    )
+    default_reader_font = models.CharField(
+        max_length=20, choices=READER_FONT_CHOICES, default="system"
+    )
+    api_timeout_ms = models.PositiveIntegerField(
+        default=10000, validators=[MinValueValidator(1000)]
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def load(cls):
+        from .system_config import default_configuration_values
+
+        configuration, _ = cls.objects.get_or_create(
+            singleton_id=1,
+            defaults=default_configuration_values(),
+        )
+        return configuration
+
+    def save(self, *args, **kwargs):
+        self.singleton_id = 1
+        super().save(*args, **kwargs)
+
+    class Meta:
+        verbose_name = "系统配置"
+        verbose_name_plural = "系统配置"
+
+    def __str__(self):
+        return "系统配置"
+
+
+class Topic(models.Model):
     STATUS_CHOICES = [
         ("draft", "草稿"),
         ("learning", "学习中"),
@@ -20,25 +113,7 @@ class Topic(models.Model):
         ("pass", "掌握"),
         ("strong", "熟练"),
     ]
-    DISCUSSION_OUTCOME_CHOICES = [
-        ("pending", "待定"),
-        ("learn", "学习"),
-        ("not_learn", "暂不学习"),
-    ]
-    DISCUSSION_STAGE_CHOICES = [
-        ("explore", "探索"),
-        ("frame", "定义问题"),
-        ("decide", "形成决策"),
-    ]
-
     title = models.CharField(max_length=255, verbose_name="标题")
-    type = models.CharField(
-        max_length=20,
-        choices=TYPE_CHOICES,
-        default="learning",
-        db_index=True,
-        verbose_name="话题类型",
-    )
     goal = models.TextField(blank=True, verbose_name="学习目标")
     scope = models.TextField(blank=True, verbose_name="学习范围")
     status = models.CharField(
@@ -49,22 +124,6 @@ class Topic(models.Model):
         choices=MASTERY_CHOICES,
         default="unknown",
         verbose_name="掌握程度",
-    )
-    discussion_outcome = models.CharField(
-        max_length=20,
-        choices=DISCUSSION_OUTCOME_CHOICES,
-        default="pending",
-        verbose_name="讨论结论",
-    )
-    discussion_rationale = models.TextField(blank=True, verbose_name="判断依据")
-    discussion_stage = models.CharField(
-        max_length=20,
-        choices=DISCUSSION_STAGE_CHOICES,
-        default="explore",
-        verbose_name="讨论阶段",
-    )
-    discussion_context = models.JSONField(
-        default=dict, blank=True, verbose_name="讨论工作记忆"
     )
     session = models.ForeignKey(
         "Session",
@@ -267,6 +326,76 @@ class SessionMessage(models.Model):
         verbose_name = "会话消息"
         verbose_name_plural = "会话消息"
         ordering = ["msg_at", "id"]
+
+
+class MaterialRecommendation(models.Model):
+    STATUS_CHOICES = [
+        ("pending", "待采纳"),
+        ("adopted", "已采纳"),
+        ("dismissed", "已忽略"),
+    ]
+
+    topic = models.ForeignKey(
+        Topic,
+        related_name="material_recommendations",
+        on_delete=models.CASCADE,
+        verbose_name="所属主题",
+    )
+    message = models.ForeignKey(
+        SessionMessage,
+        related_name="material_recommendations",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="关联回复",
+    )
+    source_task = models.ForeignKey(
+        "AITask",
+        related_name="material_recommendations",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="来源任务",
+    )
+    material = models.ForeignKey(
+        Material,
+        related_name="recommendations",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="采纳材料",
+    )
+    title = models.CharField(max_length=255, verbose_name="标题")
+    url = models.URLField(max_length=1000, verbose_name="来源链接")
+    content_snapshot = models.TextField(blank=True, verbose_name="正文快照")
+    content_md5 = models.CharField(max_length=32, blank=True, db_index=True)
+    category = models.CharField(
+        max_length=30,
+        choices=TopicMaterial.CATEGORY_CHOICES,
+        default="recommended_reading",
+        verbose_name="材料分类",
+    )
+    relevance_score = models.FloatField(verbose_name="主题相关度")
+    reason = models.TextField(blank=True, verbose_name="推荐理由")
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="pending",
+        db_index=True,
+        verbose_name="采纳状态",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="推荐时间")
+    decided_at = models.DateTimeField(null=True, blank=True, verbose_name="处理时间")
+
+    class Meta:
+        verbose_name = "材料推荐"
+        verbose_name_plural = "材料推荐"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["topic", "url"], name="unique_topic_recommendation_url"
+            )
+        ]
 
 
 class MaterialTextLocator(models.Model):
@@ -575,9 +704,7 @@ class ReviewRecord(models.Model):
 
 class AITask(models.Model):
     # 任务类型由 backend/api/tasks.py 中的 TaskRegistry 自动注册和维护
-    task_type = models.CharField(
-        max_length=50, db_index=True, verbose_name="任务类型"
-    )
+    task_type = models.CharField(max_length=50, db_index=True, verbose_name="任务类型")
     STATUS_CHOICES = [
         ("pending", "等待执行"),
         ("running", "执行中"),
