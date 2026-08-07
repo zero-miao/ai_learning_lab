@@ -419,7 +419,31 @@ class ConceptRelationSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class TopicSerializer(serializers.ModelSerializer):
+class TopicListSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    mastery_level_display = serializers.CharField(
+        source="get_mastery_level_display", read_only=True
+    )
+    material_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Topic
+        fields = [
+            "id",
+            "title",
+            "goal",
+            "status",
+            "status_display",
+            "mastery_level",
+            "mastery_level_display",
+            "material_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class TopicDetailSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     mastery_level_display = serializers.CharField(
         source="get_mastery_level_display", read_only=True

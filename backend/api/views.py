@@ -5,7 +5,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view
@@ -44,8 +44,9 @@ from .serializers import (
     SessionMessageSerializer,
     SessionSerializer,
     SystemConfigurationSerializer,
+    TopicDetailSerializer,
+    TopicListSerializer,
     TopicMaterialSerializer,
-    TopicSerializer,
 )
 from .system_config import get_config_value
 from .task_service import INTERACTIVE_TASK_PRIORITY, enqueue_or_reuse, retry_task
@@ -205,7 +206,22 @@ def _delete_material_files(material, material_id):
 
 class TopicViewSet(viewsets.ModelViewSet):
     queryset = Topic.objects.all()
-    serializer_class = TopicSerializer
+    serializer_class = TopicDetailSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.action == "list":
+            return queryset.annotate(
+                material_count=Count(
+                    "topic_materials",
+                    filter=Q(topic_materials__removed_at__isnull=True),
+                    distinct=True,
+                )
+            )
+        return queryset
+
+    def get_serializer_class(self):
+        return TopicListSerializer if self.action == "list" else TopicDetailSerializer
 
     @transaction.atomic
     def perform_destroy(self, instance):
@@ -394,7 +410,6 @@ class TopicViewSet(viewsets.ModelViewSet):
             ).order_by("-priority", "-created_at")
             return Response(
                 {
-                    "topic": TopicSerializer(topic).data,
                     "messages": SessionMessageSerializer(
                         topic.session.messages.all(), many=True
                     ).data,

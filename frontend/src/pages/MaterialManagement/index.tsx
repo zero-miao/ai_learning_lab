@@ -31,7 +31,7 @@ import {
   linkMaterialToTopic,
   reImportMaterial,
 } from '../../api';
-import type { Material, MaterialStatus, Topic } from '../../api';
+import type { Material, MaterialStatus, TopicSummary } from '../../api';
 import { message } from 'antd';
 
 const { Paragraph, Text } = Typography;
@@ -76,7 +76,7 @@ const MaterialManagement: React.FC = () => {
   const [keyword, setKeyword] = useState('');
   const [status, setStatus] = useState<MaterialStatus | 'all'>('all');
   const [topicFilter, setTopicFilter] = useState<string>('all');
-  const [topics, setTopics] = useState<Topic[]>([]);
+  const [topics, setTopics] = useState<TopicSummary[]>([]);
   const [linkingMaterial, setLinkingMaterial] = useState<Material | null>(null);
   const [linkingTopicId, setLinkingTopicId] = useState<number | null>(null);
   const [linking, setLinking] = useState(false);

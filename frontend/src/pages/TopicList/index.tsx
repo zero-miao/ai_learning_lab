@@ -18,7 +18,7 @@ import {
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { createMaterial, createTopic, deleteTopic, getTopics } from '../../api';
-import type { Topic } from '../../api';
+import type { TopicSummary } from '../../api';
 
 const { Title, Paragraph } = Typography;
 
@@ -34,7 +34,7 @@ interface CreateTopicValues {
 }
 
 const TopicList: React.FC = () => {
-  const [topics, setTopics] = useState<Topic[]>([]);
+  const [topics, setTopics] = useState<TopicSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [keyword, setKeyword] = useState('');
@@ -115,7 +115,7 @@ const TopicList: React.FC = () => {
     form.resetFields();
   };
 
-  const handleDelete = async (topic: Topic) => {
+  const handleDelete = async (topic: TopicSummary) => {
     try {
       setDeletingTopicId(topic.id);
       await deleteTopic(topic.id);
@@ -247,7 +247,7 @@ const TopicList: React.FC = () => {
               </Tooltip>
               <div style={{ marginTop: 'auto', flex: '0 0 auto' }}>
                 <Space wrap size={[8, 8]}>
-                  <Tag color="default" style={{ margin: 0 }}>{item.topic_materials.length} 份材料</Tag>
+                  <Tag color="default" style={{ margin: 0 }}>{item.material_count} 份材料</Tag>
                   <Tag color="processing" style={{ margin: 0 }}>掌握度: {item.mastery_level_display}</Tag>
                 </Space>
               </div>

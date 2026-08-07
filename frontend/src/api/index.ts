@@ -191,18 +191,22 @@ export interface Session {
   messages: SessionMessage[];
 }
 
-export interface Topic {
+export interface TopicSummary {
   id: number;
   title: string;
   goal: string;
-  scope: string;
-  session: number | null;
   status: 'draft' | 'learning' | 'exam_ready' | 'reviewing' | 'archived';
   status_display: string;
   mastery_level: 'unknown' | 'weak' | 'pass' | 'strong';
   mastery_level_display: string;
   created_at: string;
   updated_at: string;
+  material_count: number;
+}
+
+export interface Topic extends Omit<TopicSummary, 'material_count'> {
+  scope: string;
+  session: number | null;
   topic_materials: TopicMaterial[];
   concepts: Concept[];
   questions: Question[];
@@ -347,10 +351,14 @@ export const createSessionMessage = (sessionId: number, content: string) =>
     { content },
   );
 
-export const getTopics = () => api.get<Topic[]>('topics/');
+export const getTopics = () => api.get<TopicSummary[]>('topics/');
 export const getTopic = (id: number) => api.get<Topic>(`topics/${id}/`);
-export const createTopic = (data: Partial<Topic>) => api.post<Topic>('topics/', data);
-export const updateTopic = (id: number, data: Partial<Topic>) =>
+export const createTopic = (data: Pick<Topic, 'title'> & Partial<Pick<Topic, 'goal' | 'scope'>>) =>
+  api.post<Topic>('topics/', data);
+export const updateTopic = (
+  id: number,
+  data: Partial<Pick<Topic, 'title' | 'goal' | 'scope' | 'status' | 'mastery_level'>>,
+) =>
   api.patch<Topic>(`topics/${id}/`, data);
 export const deleteTopic = (id: number) => api.delete(`topics/${id}/`);
 export const createMaterial = (data: {
@@ -393,7 +401,6 @@ export const removeTopicMaterial = (id: number) =>
   api.delete(`topic-materials/${id}/`);
 export const getDiscussion = (topicId: number) =>
   api.get<{
-    topic: Topic;
     messages: SessionMessage[];
     recommendations: MaterialRecommendation[];
     active_tasks: AITask[];

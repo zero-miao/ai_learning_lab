@@ -91,6 +91,31 @@ class V2ErApiTests(TestCase):
 
         self.assertEqual(update_response.status_code, 400)
 
+    def test_topic_list_returns_summary_without_nested_business_data(self):
+        Topic.objects.create(title="Python")
+
+        with self.assertNumQueries(1):
+            response = self.client.get("/api/topics/")
+
+        self.assertEqual(response.status_code, 200)
+        serialized = next(item for item in response.data if item["id"] == self.topic.id)
+        self.assertEqual(
+            set(serialized),
+            {
+                "id",
+                "title",
+                "goal",
+                "status",
+                "status_display",
+                "mastery_level",
+                "mastery_level_display",
+                "material_count",
+                "created_at",
+                "updated_at",
+            },
+        )
+        self.assertEqual(serialized["material_count"], 1)
+
     @patch("api.ai_gateway.OpenAI")
     def test_system_configuration_discovers_provider_models(self, openai):
         openai.return_value.models.list.return_value.data = [
@@ -290,7 +315,9 @@ class V2ErApiTests(TestCase):
 
     def test_delete_topic_removes_discussion_session_and_related_tasks(self):
         discussion = self.client.get(f"/api/topics/{self.topic.id}/discussion/")
-        session_id = discussion.data["topic"]["session"]
+        self.assertNotIn("topic", discussion.data)
+        self.topic.refresh_from_db()
+        session_id = self.topic.session_id
         discussion_response = self.client.post(
             f"/api/topics/{self.topic.id}/discussion/",
             {"content": "还缺什么材料？"},
