@@ -10,6 +10,7 @@ import {
   Popconfirm,
   Select,
   Space,
+  Spin,
   Table,
   Tag,
   Tooltip,
@@ -26,12 +27,13 @@ import {
 } from '@ant-design/icons';
 import {
   deleteMaterial,
+  getMaterial,
   getMaterials,
   getTopics,
   linkMaterialToTopic,
   reImportMaterial,
 } from '../../api';
-import type { Material, MaterialStatus, TopicSummary } from '../../api';
+import type { Material, MaterialStatus, MaterialSummary, TopicSummary } from '../../api';
 import { message } from 'antd';
 
 const { Paragraph, Text } = Typography;
@@ -72,23 +74,27 @@ function JsonBlock({ value }: { value: Record<string, unknown> }) {
 }
 
 const MaterialManagement: React.FC = () => {
-  const [materials, setMaterials] = useState<Material[]>([]);
+  const [materials, setMaterials] = useState<MaterialSummary[]>([]);
+  const [materialDetails, setMaterialDetails] = useState<Record<number, Material>>({});
+  const [loadingDetailIds, setLoadingDetailIds] = useState<Set<number>>(new Set());
   const [keyword, setKeyword] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [status, setStatus] = useState<MaterialStatus | 'all'>('all');
   const [topicFilter, setTopicFilter] = useState<string>('all');
   const [topics, setTopics] = useState<TopicSummary[]>([]);
-  const [linkingMaterial, setLinkingMaterial] = useState<Material | null>(null);
+  const [linkingMaterial, setLinkingMaterial] = useState<MaterialSummary | null>(null);
   const [linkingTopicId, setLinkingTopicId] = useState<number | null>(null);
   const [linking, setLinking] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
-  const load = async () => {
+  const load = async (query = searchQuery) => {
     const [materialsResponse, topicsResponse] = await Promise.all([
-      getMaterials(),
+      getMaterials(query ? { q: query } : undefined),
       getTopics(),
     ]);
     setMaterials(materialsResponse.data);
     setTopics(topicsResponse.data);
+    setMaterialDetails({});
   };
   useEffect(() => { void load(); }, []);
   const handleReImport = async (id: number) => {
@@ -101,7 +107,7 @@ const MaterialManagement: React.FC = () => {
       message.error('触发重新导入失败');
     }
   };
-  const handleDelete = async (material: Material) => {
+  const handleDelete = async (material: MaterialSummary) => {
     setDeletingId(material.id);
     try {
       await deleteMaterial(material.id);
@@ -112,6 +118,22 @@ const MaterialManagement: React.FC = () => {
       message.error('删除材料失败');
     } finally {
       setDeletingId(null);
+    }
+  };
+  const loadDetail = async (materialId: number) => {
+    if (materialDetails[materialId] || loadingDetailIds.has(materialId)) return;
+    setLoadingDetailIds((current) => new Set(current).add(materialId));
+    try {
+      const response = await getMaterial(materialId);
+      setMaterialDetails((current) => ({ ...current, [materialId]: response.data }));
+    } catch {
+      message.error('加载材料详情失败');
+    } finally {
+      setLoadingDetailIds((current) => {
+        const next = new Set(current);
+        next.delete(materialId);
+        return next;
+      });
     }
   };
   const handleLinkTopic = async () => {
@@ -137,13 +159,12 @@ const MaterialManagement: React.FC = () => {
         topicFilter === 'all' ||
         (topicFilter === 'unlinked' && item.topic_links.length === 0) ||
         item.topic_links.some((link) => String(link.topic) === topicFilter)
-      ) &&
-      (!keyword || [item.title, item.media_uri, item.digest].join(' ').toLowerCase().includes(keyword.toLowerCase())),
+      ),
     ),
-    [keyword, materials, status, topicFilter],
+    [materials, status, topicFilter],
   );
 
-  const columns: TableColumnsType<Material> = [
+  const columns: TableColumnsType<MaterialSummary> = [
     { title: 'ID', dataIndex: 'id', width: 70, responsive: ['md'] },
     {
       title: '材料信息',
@@ -202,9 +223,9 @@ const MaterialManagement: React.FC = () => {
       width: 150,
       render: (_, material) => {
         const items = [
-          { label: '原', value: !!material.raw_text, tooltip: '原文' },
-          { label: '清', value: !!material.clean_text, tooltip: '清洗文本' },
-          { label: '摘', value: !!material.digest, tooltip: '摘要' },
+          { label: '原', value: material.raw_text_length > 0, tooltip: '原文' },
+          { label: '清', value: material.clean_text_length > 0, tooltip: '清洗文本' },
+          { label: '摘', value: material.digest_length > 0, tooltip: '摘要' },
         ];
         return (
           <Space size={8}>
@@ -319,7 +340,25 @@ const MaterialManagement: React.FC = () => {
     <div style={{ maxWidth: 1480, margin: '0 auto', padding: 24 }}>
       <Card title={`全局材料管理 (${visible.length})`} extra={<Button onClick={() => void load()}>刷新</Button>}>
         <Space style={{ marginBottom: 16 }} wrap>
-          <Input.Search style={{ width: 320 }} placeholder="搜索标题、媒体引用或摘要" value={keyword} onChange={(event) => setKeyword(event.target.value)} allowClear />
+          <Input.Search
+            style={{ width: 320 }}
+            placeholder="搜索标题、媒体引用或摘要"
+            value={keyword}
+            onChange={(event) => {
+              const value = event.target.value;
+              setKeyword(value);
+              if (!value && searchQuery) {
+                setSearchQuery('');
+                void load('');
+              }
+            }}
+            onSearch={(value) => {
+              const query = value.trim();
+              setSearchQuery(query);
+              void load(query);
+            }}
+            allowClear
+          />
           <Select value={status} onChange={setStatus} style={{ width: 150 }} options={[
             { value: 'all', label: '全部状态' },
             { value: 'pending', label: '待处理' },
@@ -351,7 +390,15 @@ const MaterialManagement: React.FC = () => {
           pagination={{ pageSize: 20, showSizeChanger: true }}
           locale={{ emptyText: <Empty description="没有符合条件的全局材料" /> }}
           expandable={{
-            expandedRowRender: (material) => (
+            onExpand: (expanded, material) => {
+              if (expanded) void loadDetail(material.id);
+            },
+            expandedRowRender: (summary) => {
+              const material = materialDetails[summary.id];
+              if (!material) {
+                return <Spin size="small" tip="正在加载材料详情" />;
+              }
+              return (
               <div style={{ padding: '8px 24px' }}>
                 <Descriptions column={{ xs: 1, sm: 2, lg: 3 }} size="small" bordered>
                   <Descriptions.Item label="媒体引用" span={2}>
@@ -405,7 +452,8 @@ const MaterialManagement: React.FC = () => {
                   </Descriptions.Item>
                 </Descriptions>
               </div>
-            ),
+              );
+            },
           }}
         />
       </Card>

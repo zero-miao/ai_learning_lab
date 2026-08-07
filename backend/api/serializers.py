@@ -199,6 +199,34 @@ class MaterialSerializer(serializers.ModelSerializer):
         ]
 
 
+class MaterialListSerializer(MaterialSerializer):
+    raw_text_length = serializers.IntegerField(read_only=True)
+    clean_text_length = serializers.IntegerField(read_only=True)
+    digest_length = serializers.IntegerField(read_only=True)
+    chunk_count = serializers.IntegerField(read_only=True)
+
+    class Meta(MaterialSerializer.Meta):
+        fields = [
+            "id",
+            "title",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "error",
+            "media_type",
+            "media_uri",
+            "tts_assets",
+            "topic_links",
+            "raw_text_length",
+            "clean_text_length",
+            "digest_length",
+            "chunk_count",
+            "status",
+            "status_display",
+        ]
+        read_only_fields = fields
+
+
 class TopicMaterialSerializer(serializers.ModelSerializer):
     material = MaterialSerializer(read_only=True)
     material_id = serializers.IntegerField(source="material.id", read_only=True)
@@ -617,6 +645,30 @@ class AITaskSerializer(serializers.ModelSerializer):
             "task_data",
             "full_context",
             "result_json",
+            "error_message",
+            "attempt_count",
+            "max_attempts",
+            "next_run_at",
+            "started_at",
+            "finished_at",
+            "model",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class AITaskListSerializer(AITaskSerializer):
+    class Meta(AITaskSerializer.Meta):
+        fields = [
+            "id",
+            "task_type",
+            "task_type_display",
+            "status",
+            "status_display",
+            "priority",
+            "trigger_type",
+            "trigger_id",
             "error_message",
             "attempt_count",
             "max_attempts",

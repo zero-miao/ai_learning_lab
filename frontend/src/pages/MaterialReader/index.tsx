@@ -256,7 +256,7 @@ const MaterialReader: React.FC = () => {
         const activeTask = tasksResponse.data.find((item) =>
           ['pending', 'running'].includes(item.status),
         );
-        if (activeTask) setTask(activeTask);
+        if (activeTask) setTask((await getAITask(activeTask.id)).data);
       }
     } catch (error) {
       console.error('Failed to load session:', error);

@@ -13,7 +13,7 @@ import {
   saveExamAnswers,
   submitExam,
 } from '../../api';
-import type { AITask, Exam, Topic } from '../../api';
+import type { AITaskSummary, Exam, Topic } from '../../api';
 
 const activeTaskStatuses = ['pending', 'running'];
 const visibleTaskStatuses = ['pending', 'running', 'failed', 'cancelled'];
@@ -23,7 +23,7 @@ const ExamPage: React.FC = () => {
   const navigate = useNavigate();
   const [topic, setTopic] = useState<Topic | null>(null);
   const [exam, setExam] = useState<Exam | null>(null);
-  const [task, setTask] = useState<AITask | null>(null);
+  const [task, setTask] = useState<AITaskSummary | null>(null);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [history, setHistory] = useState<Exam[]>([]);
   const [dirty, setDirty] = useState(false);

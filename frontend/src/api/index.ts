@@ -41,7 +41,7 @@ export interface MaterialChunk {
   end_time: number | null;
 }
 
-export interface Material {
+export interface MaterialSummary {
   id: number;
   title: string;
   created_by: 'manual' | 'ai_recommended';
@@ -50,7 +50,6 @@ export interface Material {
   error: string;
   media_type: 'text' | 'web_page' | 'video' | 'audio';
   media_uri: string;
-  media_url: string;
   tts_assets: Array<{
     voice: string;
     label: string;
@@ -58,13 +57,8 @@ export interface Material {
     url: string;
     error: string;
   }>;
-  raw_text: string;
-  clean_text: string;
-  media_meta: Record<string, unknown>;
-  digest: string;
   status: MaterialStatus;
   status_display: string;
-  chunks: MaterialChunk[];
   topic_links: Array<{
     topic: number;
     topic_title: string;
@@ -73,6 +67,23 @@ export interface Material {
     import_at: string;
     relevance_score: number | null;
   }>;
+  raw_text_length: number;
+  clean_text_length: number;
+  digest_length: number;
+  chunk_count: number;
+}
+
+export interface Material
+  extends Omit<
+    MaterialSummary,
+    'raw_text_length' | 'clean_text_length' | 'digest_length' | 'chunk_count'
+  > {
+  media_url: string;
+  raw_text: string;
+  clean_text: string;
+  media_meta: Record<string, unknown>;
+  digest: string;
+  chunks: MaterialChunk[];
 }
 
 export interface TopicMaterial {
@@ -225,7 +236,7 @@ export interface MaterialAnnotations {
   highlights: Highlight[];
 }
 
-export interface AITask {
+export interface AITaskSummary {
   id: number;
   task_type: string;
   task_type_display: string;
@@ -234,9 +245,6 @@ export interface AITask {
   priority: number;
   trigger_type: string;
   trigger_id: number | null;
-  task_data: Record<string, any>;
-  full_context: string;
-  result_json: Record<string, any>;
   error_message: string;
   attempt_count: number;
   max_attempts: number;
@@ -246,6 +254,12 @@ export interface AITask {
   model: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface AITask extends AITaskSummary {
+  task_data: Record<string, any>;
+  full_context: string;
+  result_json: Record<string, any>;
 }
 
 export interface ExamQuestion {
@@ -370,7 +384,8 @@ export const createMaterial = (data: {
   existing_material_id?: number;
 }) => api.post<Material>('materials/', data);
 export const getMaterials = (params?: Record<string, string | number>) =>
-  api.get<Material[]>('materials/', { params });
+  api.get<MaterialSummary[]>('materials/', { params });
+export const getMaterial = (id: number) => api.get<Material>(`materials/${id}/`);
 export const getMaterialAnnotations = (id: number, topic?: number) =>
   api.get<MaterialAnnotations>(`materials/${id}/annotations/`, {
     params: topic ? { topic } : undefined,
@@ -474,7 +489,7 @@ export const submitReview = (id: number, responseText: string) =>
   });
 export const getAITask = (id: number) => api.get<AITask>(`ai-tasks/${id}/`);
 export const listAITasks = (params?: Record<string, string | number>) =>
-  api.get<AITask[]>('ai-tasks/', { params });
+  api.get<AITaskSummary[]>('ai-tasks/', { params });
 export const retryAITask = (id: number) =>
   api.post<AITask>(`ai-tasks/${id}/retry/`);
 

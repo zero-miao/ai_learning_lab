@@ -7,6 +7,7 @@ from unittest.mock import patch
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from .ai_gateway import AIGateway
@@ -115,6 +116,56 @@ class V2ErApiTests(TestCase):
             },
         )
         self.assertEqual(serialized["material_count"], 1)
+
+    def test_material_list_returns_summary_and_searches_server_side(self):
+        self.material.digest = "QuerySet 查询摘要"
+        self.material.media_meta = {"tts": {"voices": {}}}
+        self.material.save(update_fields=["digest", "media_meta"])
+        Material.objects.create(title="无关材料", raw_text="other")
+
+        with self.assertNumQueries(2):
+            response = self.client.get("/api/materials/", {"q": "查询摘要"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        serialized = response.data[0]
+        self.assertEqual(serialized["id"], self.material.id)
+        self.assertEqual(serialized["raw_text_length"], len(self.material.raw_text))
+        self.assertEqual(serialized["clean_text_length"], len(self.material.clean_text))
+        self.assertEqual(serialized["digest_length"], len(self.material.digest))
+        self.assertEqual(serialized["chunk_count"], 1)
+        for field in ("raw_text", "clean_text", "digest", "media_meta", "chunks"):
+            self.assertNotIn(field, serialized)
+
+        detail = self.client.get(f"/api/materials/{self.material.id}/")
+        self.assertEqual(detail.status_code, 200)
+        for field in ("raw_text", "clean_text", "digest", "media_meta", "chunks"):
+            self.assertIn(field, detail.data)
+
+    def test_ai_task_list_omits_payload_but_detail_keeps_it(self):
+        task = AITask.objects.create(
+            task_type="process",
+            trigger_type="Material",
+            trigger_id=self.material.id,
+            task_data={"context": "x" * 1000},
+            full_context="y" * 1000,
+            result_json={"content": "z" * 1000},
+            next_run_at=timezone.now(),
+        )
+
+        with self.assertNumQueries(1):
+            response = self.client.get("/api/ai-tasks/")
+
+        self.assertEqual(response.status_code, 200)
+        serialized = next(item for item in response.data if item["id"] == task.id)
+        for field in ("task_data", "full_context", "result_json"):
+            self.assertNotIn(field, serialized)
+
+        detail = self.client.get(f"/api/ai-tasks/{task.id}/")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.data["task_data"], task.task_data)
+        self.assertEqual(detail.data["full_context"], task.full_context)
+        self.assertEqual(detail.data["result_json"], task.result_json)
 
     @patch("api.ai_gateway.OpenAI")
     def test_system_configuration_discovers_provider_models(self, openai):

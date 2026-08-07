@@ -12,19 +12,19 @@ import {
   retryAITask,
   submitReview,
 } from '../../api';
-import type { AITask, ReviewRecord } from '../../api';
+import type { AITaskSummary, ReviewRecord } from '../../api';
 import './styles.css';
 
 const activeTaskStatuses = ['pending', 'running'];
 
-function taskKey(task: Pick<AITask, 'trigger_id' | 'task_type'>) {
+function taskKey(task: Pick<AITaskSummary, 'trigger_id' | 'task_type'>) {
   return `${task.trigger_id}:${task.task_type}`;
 }
 
 const ReviewPage: React.FC = () => {
   const [reviews, setReviews] = useState<ReviewRecord[]>([]);
   const [active, setActive] = useState<ReviewRecord | null>(null);
-  const [tasks, setTasks] = useState<Record<string, AITask>>({});
+  const [tasks, setTasks] = useState<Record<string, AITaskSummary>>({});
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm<{ response_text: string }>();
   const navigate = useNavigate();
@@ -37,7 +37,7 @@ const ReviewPage: React.FC = () => {
         listAITasks({ trigger_type: 'ReviewRecord' }),
       ]);
       setReviews(reviewsResponse.data);
-      const latestTasks: Record<string, AITask> = {};
+      const latestTasks: Record<string, AITaskSummary> = {};
       tasksResponse.data.forEach((task) => {
         if (
           ['review_prompt', 'grade_review'].includes(task.task_type)
@@ -89,7 +89,7 @@ const ReviewPage: React.FC = () => {
     return () => window.clearInterval(timer);
   }, [activeTasks, load]);
 
-  const setTask = (task: AITask) => {
+  const setTask = (task: AITaskSummary) => {
     setTasks((current) => ({ ...current, [taskKey(task)]: task }));
   };
 
@@ -114,7 +114,7 @@ const ReviewPage: React.FC = () => {
     }
   };
 
-  const retry = async (task: AITask) => {
+  const retry = async (task: AITaskSummary) => {
     try {
       setTask((await retryAITask(task.id)).data);
       message.info('复习任务已重新进入队列');
@@ -123,7 +123,7 @@ const ReviewPage: React.FC = () => {
     }
   };
 
-  const renderTaskState = (task: AITask | undefined) => {
+  const renderTaskState = (task: AITaskSummary | undefined) => {
     if (!task || task.status === 'succeeded') return null;
     if (activeTaskStatuses.includes(task.status)) {
       return (

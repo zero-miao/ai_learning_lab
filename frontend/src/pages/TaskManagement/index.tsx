@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Descriptions, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { Button, Card, Descriptions, Select, Space, Spin, Table, Tag, Typography, message } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
-import { listAITasks, retryAITask } from '../../api';
-import type { AITask, AITaskStatus } from '../../api';
+import { getAITask, listAITasks, retryAITask } from '../../api';
+import type { AITask, AITaskStatus, AITaskSummary } from '../../api';
 
 const statusColor: Record<AITaskStatus, string> = {
   pending: 'processing',
@@ -37,7 +37,8 @@ function JsonBlock({ value }: { value: Record<string, unknown> }) {
 }
 
 const TaskManagement: React.FC = () => {
-  const [tasks, setTasks] = useState<AITask[]>([]);
+  const [tasks, setTasks] = useState<AITaskSummary[]>([]);
+  const [taskDetails, setTaskDetails] = useState<Record<number, AITask>>({});
   const [status, setStatus] = useState<AITaskStatus | 'all'>('all');
   const [taskType, setTaskType] = useState('all');
   const [loading, setLoading] = useState(false);
@@ -46,6 +47,7 @@ const TaskManagement: React.FC = () => {
     setLoading(true);
     try {
       setTasks((await listAITasks()).data);
+      setTaskDetails({});
     } finally {
       setLoading(false);
     }
@@ -64,12 +66,21 @@ const TaskManagement: React.FC = () => {
     () => tasks.filter((task) => (status === 'all' || task.status === status) && (taskType === 'all' || task.task_type === taskType)),
     [status, taskType, tasks],
   );
-  const retry = async (task: AITask) => {
+  const retry = async (task: AITaskSummary) => {
     await retryAITask(task.id);
     message.success('任务已重新进入队列');
     await load();
   };
-  const columns: TableColumnsType<AITask> = [
+  const loadDetail = async (taskId: number) => {
+    if (taskDetails[taskId]) return;
+    try {
+      const response = await getAITask(taskId);
+      setTaskDetails((current) => ({ ...current, [taskId]: response.data }));
+    } catch {
+      message.error('加载任务详情失败');
+    }
+  };
+  const columns: TableColumnsType<AITaskSummary> = [
     { title: 'ID', dataIndex: 'id', width: 72 },
     { title: '任务', key: 'task', render: (_, task) => <Space direction="vertical" size={0}><Typography.Text strong>{task.task_type_display}</Typography.Text><Typography.Text type="secondary" style={{ fontSize: '12px' }}>{task.task_type}</Typography.Text></Space> },
     { title: '状态', key: 'status', width: 110, render: (_, task) => <Tag color={statusColor[task.status]}>{task.status_display}</Tag> },
@@ -102,8 +113,13 @@ const TaskManagement: React.FC = () => {
           scroll={{ x: 1050 }}
           pagination={{ pageSize: 20, showSizeChanger: true }}
           expandable={{
-            rowExpandable: (task) => Boolean(task.error_message || Object.keys(task.result_json).length || task.full_context),
-            expandedRowRender: (task) => (
+            onExpand: (expanded, task) => {
+              if (expanded) void loadDetail(task.id);
+            },
+            expandedRowRender: (summary) => {
+              const task = taskDetails[summary.id];
+              if (!task) return <Spin size="small" tip="正在加载任务详情" />;
+              return (
               <Descriptions size="small" column={1} bordered>
                 <Descriptions.Item label="开始时间">{formatDate(task.started_at)}</Descriptions.Item>
                 <Descriptions.Item label="完成时间">{formatDate(task.finished_at)}</Descriptions.Item>
@@ -135,7 +151,8 @@ const TaskManagement: React.FC = () => {
                   <JsonBlock value={task.result_json} />
                 </Descriptions.Item>
               </Descriptions>
-            ),
+              );
+            },
           }}
         />
       </Card>

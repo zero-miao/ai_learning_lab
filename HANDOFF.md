@@ -107,6 +107,7 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 - 视频概念、问答和高亮使用真实 Locator 时间坐标绘制到播放器进度条，并保留下方标记列表。
 - 视频上传表单支持可选 `.srt/.vtt` 外挂字幕，提供字幕时优先使用字幕时间轴。
 - 前端页面按路由懒加载，Ant Design、Markdown 和 Vidstack 按领域分包。
+- Topic、Material 和 AITask 集合接口使用摘要响应；材料与任务详情在页面展开时通过现有详情接口按需加载。
 
 ### 尚未完成
 
@@ -128,7 +129,7 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 
 当前自动化基线：
 
-- 后端 `manage.py test api` 共 28 项通过，覆盖系统配置、Provider 模型发现、多轮问答、Topic 删除、补料人工采纳、TTS、跨 Topic 标注和视频学习全链路等关键契约。
+- 后端 `manage.py test api` 共 31 项通过，覆盖系统配置、Provider 模型发现、多轮问答、Topic 删除、集合摘要响应、补料人工采纳、TTS、跨 Topic 标注和视频学习全链路等关键契约。
 - `ruff check backend`、`manage.py check`、`makemigrations --check --dry-run`、前端 build/lint 均通过。
 - `ruff format --check backend` 仍会报告两份历史迁移文件需要格式化，不属于当前业务代码问题。
 - Vite 主入口约 10 kB；路由与依赖完成分包，最大 chunk 约 483 kB，不再报告 500 kB 体积告警。

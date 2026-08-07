@@ -47,7 +47,14 @@ import {
   updateTopicMaterial,
   uploadVideo,
 } from '../../api';
-import type { AITask, Concept, Highlight, Material, Topic, TopicMaterial } from '../../api';
+import type {
+  AITask,
+  Concept,
+  Highlight,
+  MaterialSummary,
+  Topic,
+  TopicMaterial,
+} from '../../api';
 import TopicDiscussionDrawer from './TopicDiscussionDrawer';
 
 const { Title, Text } = Typography;
@@ -77,7 +84,7 @@ const TopicDetail: React.FC = () => {
   const [importOpen, setImportOpen] = useState(false);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
-  const [allMaterials, setAllMaterials] = useState<Material[]>([]);
+  const [allMaterials, setAllMaterials] = useState<MaterialSummary[]>([]);
   const [materialForm] = Form.useForm<MaterialFormValues>();
   const [outputTab, setOutputTab] = useState<OutputTab>('concepts');
   const [outputPage, setOutputPage] = useState(1);

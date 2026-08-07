@@ -5,7 +5,8 @@ from uuid import uuid4
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
+from django.db.models.functions import Length
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view
@@ -30,11 +31,13 @@ from .models import (
     TopicMaterial,
 )
 from .serializers import (
+    AITaskListSerializer,
     AITaskSerializer,
     ConceptRelationSerializer,
     ConceptSerializer,
     ExamSerializer,
     HighlightSerializer,
+    MaterialListSerializer,
     MaterialRecommendationSerializer,
     MaterialSerializer,
     MaterialTextLocatorSerializer,
@@ -537,8 +540,38 @@ class MaterialRecommendationViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class MaterialViewSet(viewsets.ModelViewSet):
-    queryset = Material.objects.prefetch_related("topic_materials__topic", "chunks")
+    queryset = Material.objects.all()
     serializer_class = MaterialSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.action == "list":
+            query = self.request.query_params.get("q", "").strip()
+            if query:
+                queryset = queryset.filter(
+                    Q(title__icontains=query)
+                    | Q(media_uri__icontains=query)
+                    | Q(digest__icontains=query)
+                )
+            return (
+                queryset.annotate(
+                    raw_text_length=Length("raw_text"),
+                    clean_text_length=Length("clean_text"),
+                    digest_length=Length("digest"),
+                    chunk_count=Count("chunks", distinct=True),
+                )
+                .defer("raw_text", "clean_text", "digest")
+                .prefetch_related(
+                    Prefetch(
+                        "topic_materials",
+                        queryset=TopicMaterial.objects.select_related("topic"),
+                    )
+                )
+            )
+        return queryset.prefetch_related("topic_materials__topic", "chunks")
+
+    def get_serializer_class(self):
+        return MaterialListSerializer if self.action == "list" else MaterialSerializer
 
     def perform_destroy(self, instance):
         material_id = instance.id
@@ -1086,8 +1119,13 @@ class AITaskViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AITask.objects.all()
     serializer_class = AITaskSerializer
 
+    def get_serializer_class(self):
+        return AITaskListSerializer if self.action == "list" else AITaskSerializer
+
     def get_queryset(self):
         queryset = super().get_queryset()
+        if self.action == "list":
+            queryset = queryset.defer("task_data", "full_context", "result_json")
         for field in ("trigger_type", "trigger_id", "status", "task_type"):
             if self.request.query_params.get(field):
                 queryset = queryset.filter(**{field: self.request.query_params[field]})
