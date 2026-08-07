@@ -588,35 +588,74 @@ class AnswerQuestionTask(BaseTask):
     verbose_name = "回答问题"
 
     def run(self) -> Dict[str, Any]:
-        question = self._get_trigger()
-        context = self.task_data.get("context", "")
+        from .models import MaterialTextLocator, Question, SessionMessage
+
+        trigger = self._get_trigger()
+        if self.trigger_type == "SessionMessage":
+            user_message = trigger
+            if user_message is None or user_message.msg_from != "user":
+                raise ValueError("问答消息不存在。")
+            question = Question.objects.filter(
+                pk=self.task_data.get("question_id"),
+                session=user_message.session,
+            ).first()
+        else:
+            # 兼容升级前已入队、以 Question 为触发方的任务。
+            question = trigger
+            user_message = None
+        if question is None:
+            raise ValueError("问题不存在。")
+
+        session = question.session
+        context = (
+            session.context_material.clean_text if session.context_material else ""
+        ) or self.task_data.get("context", "")
         if not context:
             raise ValueError("问题缺少材料上下文。")
+
+        locator = MaterialTextLocator.objects.filter(
+            entity_type="question", entity_id=question.id
+        ).first()
+        source_text = (
+            locator.source_text
+            if locator
+            else self.task_data.get("source_text")
+            or self.task_data.get("selected_text")
+            or "未选择特定片段"
+        )
+        history = list(session.messages.order_by("-id")[:20])
+        history.reverse()
 
         messages = [
             {
                 "role": "system",
-                "content": "你是一个专业的学习助手。请基于提供的材料回答用户的问题。如果材料中没有相关信息，请明确说明。",
-            },
-            {
-                "role": "user",
                 "content": (
+                    "你是一个专业的学习助手。请基于提供的材料和对话历史回答"
+                    "用户最新的问题。如果材料中没有相关信息，请明确说明，不要编造。\n\n"
                     f"学习材料：\n{context}\n\n"
-                    f"用户选中的原文：{self.task_data.get('selected_text', '未选择特定片段')}\n\n"
-                    f"问题：{question.question_text}"
+                    f"用户最初选中的原文：\n{source_text}"
                 ),
             },
         ]
+        messages.extend(
+            {
+                "role": "user" if item.msg_from == "user" else "assistant",
+                "content": item.msg_content,
+            }
+            for item in history
+        )
+        if not history:
+            messages.append({"role": "user", "content": question.question_text})
 
         content = self._call_llm(messages)
 
-        from .models import SessionMessage
-
         SessionMessage.objects.create(
-            session=question.session,
+            session=session,
             msg_from="ai",
             msg_content=content,
         )
+        session.model = self.model
+        session.save(update_fields=["model", "updated_at"])
         question.conclusion = content
         question.save(update_fields=["conclusion"])
         return {"question_id": question.id, "content": content}

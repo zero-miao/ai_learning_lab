@@ -5,6 +5,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view
@@ -205,6 +206,74 @@ def _delete_material_files(material, material_id):
 class TopicViewSet(viewsets.ModelViewSet):
     queryset = Topic.objects.all()
     serializer_class = TopicSerializer
+
+    @transaction.atomic
+    def perform_destroy(self, instance):
+        topic_id = instance.id
+        session_id = instance.session_id
+        session_is_exclusive = (
+            session_id is not None
+            and not Topic.objects.exclude(pk=topic_id)
+            .filter(session_id=session_id)
+            .exists()
+        )
+
+        task_scope = Q(
+            task_data__topic_id=topic_id,
+        ) | Q(trigger_type="Topic", trigger_id=topic_id)
+        related_triggers = [
+            ("Concept", list(instance.concepts.values_list("id", flat=True))),
+            ("Exam", list(instance.exams.values_list("id", flat=True))),
+            (
+                "ReviewRecord",
+                list(instance.review_records.values_list("id", flat=True)),
+            ),
+        ]
+        locator_entities = list(
+            instance.text_locators.values_list("entity_type", "entity_id")
+        )
+        question_ids = [
+            entity_id
+            for entity_type, entity_id in locator_entities
+            if entity_type == "question"
+        ]
+        highlight_ids = [
+            entity_id
+            for entity_type, entity_id in locator_entities
+            if entity_type == "highlight"
+        ]
+        related_triggers.extend(
+            [
+                ("Question", question_ids),
+                ("Highlight", highlight_ids),
+            ]
+        )
+        reading_session_ids = Question.objects.filter(id__in=question_ids).values_list(
+            "session_id", flat=True
+        )
+        session_message_ids = list(
+            SessionMessage.objects.filter(
+                session_id__in=reading_session_ids
+            ).values_list("id", flat=True)
+        )
+        if session_is_exclusive:
+            session_message_ids.extend(
+                SessionMessage.objects.filter(session_id=session_id).values_list(
+                    "id", flat=True
+                )
+            )
+        related_triggers.append(("SessionMessage", session_message_ids))
+        for trigger_type, trigger_ids in related_triggers:
+            if trigger_ids:
+                task_scope |= Q(
+                    trigger_type=trigger_type,
+                    trigger_id__in=trigger_ids,
+                )
+
+        AITask.objects.filter(task_scope).delete()
+        instance.delete()
+        if session_is_exclusive:
+            Session.objects.filter(pk=session_id).delete()
 
     @action(detail=True, methods=["post"], url_path="concepts")
     def create_concept(self, request, pk=None):
@@ -615,6 +684,7 @@ class QuestionViewSet(viewsets.ModelViewSet):
     queryset = Question.objects.all()
     serializer_class = QuestionSerializer
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         topic = Topic.objects.filter(pk=request.data.get("topic")).first()
         if topic is None:
@@ -642,11 +712,16 @@ class QuestionViewSet(viewsets.ModelViewSet):
             end,
             source_text=request.data.get("source_text"),
         )
+        message = SessionMessage.objects.create(
+            session=session,
+            msg_from="user",
+            msg_content=question.question_text,
+        )
         task, _ = enqueue_or_reuse(
             "answer_question",
-            trigger_type="Question",
-            trigger_id=question.id,
-            task_data={"context": material.clean_text, "source_text": text},
+            trigger_type="SessionMessage",
+            trigger_id=message.id,
+            task_data={"question_id": question.id},
         )
         return Response(
             {
@@ -884,6 +959,7 @@ class SessionViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = SessionSerializer
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def messages(self, request, pk=None):
         session = self.get_object()
         content = str(request.data.get("content", "")).strip()
@@ -892,39 +968,36 @@ class SessionViewSet(viewsets.ReadOnlyModelViewSet):
                 {"detail": "请输入消息内容。"}, status=status.HTTP_400_BAD_REQUEST
             )
 
+        task_type = None
+        task_data = {}
+        if session.session_scene == "topic_discussion":
+            topic = Topic.objects.filter(session=session).first()
+            if topic is None:
+                return Response(
+                    {"detail": "讨论会话不属于学习主题。"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            task_type = "discussion_reply"
+            task_data = {"topic_id": topic.id}
+        elif session.session_scene == "reading_question":
+            question = Question.objects.filter(session=session).first()
+            if question is None:
+                return Response(
+                    {"detail": "阅读会话缺少关联问题。"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            task_type = "answer_question"
+            task_data = {"question_id": question.id}
+
         message = SessionMessage.objects.create(
             session=session, msg_from="user", msg_content=content
         )
 
-        # Determine task type based on session scene
-        task_type = None
-        trigger_type = "SessionMessage"
-        trigger_id = message.id
-        task_data = {}
-
-        if session.session_scene == "topic_discussion":
-            task_type = "discussion_reply"
-            topic = Topic.objects.filter(session=session).first()
-            if topic:
-                task_data = {"topic_id": topic.id}
-        elif session.session_scene == "reading_question":
-            task_type = "answer_question"
-            # For reading questions, the trigger is actually the Question entity
-            question = Question.objects.filter(session=session).first()
-            if question:
-                trigger_type = "Question"
-                trigger_id = question.id
-                task_data = {
-                    "context": session.context_material.clean_text
-                    if session.context_material
-                    else ""
-                }
-
         if task_type:
             task, _ = enqueue_or_reuse(
                 task_type,
-                trigger_type=trigger_type,
-                trigger_id=trigger_id,
+                trigger_type="SessionMessage",
+                trigger_id=message.id,
                 priority=INTERACTIVE_TASK_PRIORITY,
                 task_data=task_data,
             )

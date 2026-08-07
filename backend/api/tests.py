@@ -21,6 +21,7 @@ from .models import (
     Question,
     ReviewRecord,
     Session,
+    SessionMessage,
     SystemConfiguration,
     Topic,
     TopicMaterial,
@@ -176,6 +177,124 @@ class V2ErApiTests(TestCase):
                 entity_type="question", entity_id=question.id
             ).exists()
         )
+        message = question.session.messages.get(msg_from="user")
+        self.assertEqual(message.msg_content, question.question_text)
+        task = AITask.objects.get(pk=response.data["task"]["id"])
+        self.assertEqual(task.trigger_type, "SessionMessage")
+        self.assertEqual(task.trigger_id, message.id)
+        self.assertEqual(task.task_data, {"question_id": question.id})
+
+    @patch("api.tasks.BaseTask._call_llm")
+    def test_reading_question_uses_selection_and_session_history(self, call_llm):
+        call_llm.side_effect = ["QuerySet 支持链式组合。", "因为查询在求值前不会执行。"]
+        response = self.client.post(
+            "/api/questions/",
+            {
+                "topic": self.topic.id,
+                "material": self.material.id,
+                "start_offset": 14,
+                "end_offset": 22,
+                "question_text": "为什么可以组合？",
+            },
+            format="json",
+        )
+        question = Question.objects.get(pk=response.data["question"]["id"])
+        first_task = AITask.objects.get(pk=response.data["task"]["id"])
+        TaskRegistry.get_task_class(first_task.task_type)(
+            task_id=first_task.id,
+            task_data=first_task.task_data,
+            trigger_type=first_task.trigger_type,
+            trigger_id=first_task.trigger_id,
+            model=first_task.model,
+        ).run()
+
+        follow_up = self.client.post(
+            f"/api/sessions/{question.session_id}/messages/",
+            {"content": "为什么要等到求值时？"},
+            format="json",
+        )
+        self.assertEqual(follow_up.status_code, 202)
+        follow_up_task = AITask.objects.get(pk=follow_up.data["task"]["id"])
+        self.assertEqual(follow_up_task.trigger_type, "SessionMessage")
+        self.assertNotEqual(follow_up_task.trigger_id, first_task.trigger_id)
+        TaskRegistry.get_task_class(follow_up_task.task_type)(
+            task_id=follow_up_task.id,
+            task_data=follow_up_task.task_data,
+            trigger_type=follow_up_task.trigger_type,
+            trigger_id=follow_up_task.trigger_id,
+            model=follow_up_task.model,
+        ).run()
+
+        messages = call_llm.call_args.args[0]
+        self.assertIn("QuerySet", messages[0]["content"])
+        self.assertEqual(
+            [message["content"] for message in messages[1:]],
+            [
+                "为什么可以组合？",
+                "QuerySet 支持链式组合。",
+                "为什么要等到求值时？",
+            ],
+        )
+        question.refresh_from_db()
+        self.assertEqual(question.conclusion, "因为查询在求值前不会执行。")
+        self.assertEqual(
+            list(question.session.messages.values_list("msg_from", "msg_content")),
+            [
+                ("user", "为什么可以组合？"),
+                ("ai", "QuerySet 支持链式组合。"),
+                ("user", "为什么要等到求值时？"),
+                ("ai", "因为查询在求值前不会执行。"),
+            ],
+        )
+
+    def test_delete_topic_removes_discussion_session_and_related_tasks(self):
+        discussion = self.client.get(f"/api/topics/{self.topic.id}/discussion/")
+        session_id = discussion.data["topic"]["session"]
+        discussion_response = self.client.post(
+            f"/api/topics/{self.topic.id}/discussion/",
+            {"content": "还缺什么材料？"},
+            format="json",
+        )
+        discussion_task_id = discussion_response.data["task"]["id"]
+        supplement_task, _ = enqueue_or_reuse(
+            "supplement_search",
+            trigger_type="Topic",
+            trigger_id=self.topic.id,
+            task_data={"topic_id": self.topic.id},
+        )
+
+        question_response = self.client.post(
+            "/api/questions/",
+            {
+                "topic": self.topic.id,
+                "material": self.material.id,
+                "start_offset": 0,
+                "end_offset": 10,
+                "question_text": "什么是 ORM？",
+            },
+            format="json",
+        )
+        question_task_id = question_response.data["task"]["id"]
+        other_topic = Topic.objects.create(title="保留的话题")
+        other_task, _ = enqueue_or_reuse(
+            "supplement_search",
+            trigger_type="Topic",
+            trigger_id=other_topic.id,
+            task_data={"topic_id": other_topic.id},
+        )
+
+        response = self.client.delete(f"/api/topics/{self.topic.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Session.objects.filter(pk=session_id).exists())
+        self.assertFalse(SessionMessage.objects.filter(session_id=session_id).exists())
+        self.assertFalse(
+            AITask.objects.filter(
+                id__in=[discussion_task_id, supplement_task.id, question_task_id]
+            ).exists()
+        )
+        self.assertTrue(AITask.objects.filter(pk=other_task.id).exists())
+        self.assertTrue(Material.objects.filter(pk=self.material.id).exists())
 
     def test_highlight_and_topic_material_soft_removal(self):
         response = self.client.post(
