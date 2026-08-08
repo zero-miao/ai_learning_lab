@@ -55,11 +55,167 @@ from .serializers import (
 )
 from .system_config import get_config_value
 from .task_service import INTERACTIVE_TASK_PRIORITY, enqueue_or_reuse, retry_task
+from .tasks import TaskRegistry
 
 
 @api_view(["GET"])
 def health_check(request):
     return Response({"status": "ok"})
+
+
+def _management_assistant_session():
+    session = (
+        Session.objects.filter(session_scene="management_assistant")
+        .order_by("id")
+        .first()
+    )
+    if session is None:
+        session = Session.objects.create(
+            session_scene="management_assistant",
+            system_prompt="全站管理助手",
+        )
+    return session
+
+
+def _assistant_task_data(task):
+    return {
+        "id": task.id,
+        "task_type": task.task_type,
+        "task_type_display": dict(TaskRegistry.get_choices()).get(
+            task.task_type, task.task_type
+        ),
+        "status": task.status,
+        "status_display": task.get_status_display(),
+        "error_message": task.error_message,
+        "model": task.model,
+        "result_json": task.result_json,
+    }
+
+
+@api_view(["GET"])
+def management_assistant_detail(request):
+    session = _management_assistant_session()
+    tasks = AITask.objects.filter(
+        task_type="management_assistant",
+        task_data__session_id=session.id,
+    ).order_by("-created_at")[:20]
+    return Response(
+        {
+            "session": SessionSerializer(session).data,
+            "tasks": [_assistant_task_data(task) for task in tasks],
+        }
+    )
+
+
+@api_view(["POST"])
+@transaction.atomic
+def management_assistant_message(request):
+    content = str(request.data.get("content", "")).strip()
+    if not content:
+        return Response(
+            {"detail": "请输入消息内容。"}, status=status.HTTP_400_BAD_REQUEST
+        )
+
+    session = _management_assistant_session()
+    active_task = AITask.objects.filter(
+        task_type="management_assistant",
+        task_data__session_id=session.id,
+        status__in=("pending", "running"),
+    ).first()
+    if active_task:
+        return Response(
+            {"detail": "管理助手正在处理上一条消息，请稍候。"},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    message = SessionMessage.objects.create(
+        session=session,
+        msg_from="user",
+        msg_content=content,
+    )
+    task, _ = enqueue_or_reuse(
+        "management_assistant",
+        trigger_type="SessionMessage",
+        trigger_id=message.id,
+        priority=INTERACTIVE_TASK_PRIORITY,
+        task_data={"session_id": session.id},
+    )
+    return Response(
+        {
+            "message": SessionMessageSerializer(message).data,
+            "task": AITaskSerializer(task).data,
+        },
+        status=status.HTTP_202_ACCEPTED,
+    )
+
+
+@api_view(["POST"])
+@transaction.atomic
+def management_assistant_confirm_topic(request):
+    try:
+        task_id = int(request.data.get("task_id"))
+    except (TypeError, ValueError):
+        return Response(
+            {"detail": "缺少有效的助手任务。"}, status=status.HTTP_400_BAD_REQUEST
+        )
+
+    task = (
+        AITask.objects.select_for_update()
+        .filter(pk=task_id, task_type="management_assistant", status="succeeded")
+        .first()
+    )
+    if task is None:
+        return Response(
+            {"detail": "助手草稿不存在或尚未生成完成。"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    result = task.result_json if isinstance(task.result_json, dict) else {}
+    existing_topic_id = result.get("created_topic_id")
+    if existing_topic_id:
+        topic = Topic.objects.filter(pk=existing_topic_id).first()
+        if topic:
+            return Response({"topic": TopicDetailSerializer(topic).data})
+
+    draft = result.get("draft")
+    if result.get("action") != "draft_topic" or not isinstance(draft, dict):
+        return Response(
+            {"detail": "该任务不包含可创建的话题草稿。"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    normalized_draft = {
+        "title": str(draft.get("title", "")).strip(),
+        "goal": str(draft.get("goal", "")).strip(),
+        "scope": str(draft.get("scope", "")).strip(),
+    }
+    if not all(normalized_draft.values()):
+        return Response(
+            {"detail": "话题名称、学习目标和学习范围均不能为空。"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    serializer = TopicDetailSerializer(data=normalized_draft)
+    serializer.is_valid(raise_exception=True)
+    topic = serializer.save()
+    session = _management_assistant_session()
+    confirmation = SessionMessage.objects.create(
+        session=session,
+        msg_from="ai",
+        msg_content=f"已创建话题 **{topic.title}**，可以直接进入话题继续添加材料。",
+    )
+    result.update(
+        {
+            "created_topic_id": topic.id,
+            "confirmation_message_id": confirmation.id,
+        }
+    )
+    task.result_json = result
+    task.save(update_fields=["result_json", "updated_at"])
+    return Response(
+        {
+            "topic": TopicDetailSerializer(topic).data,
+            "message": SessionMessageSerializer(confirmation).data,
+        },
+        status=status.HTTP_201_CREATED,
+    )
 
 
 @api_view(["GET", "PUT"])

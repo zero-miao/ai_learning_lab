@@ -17,6 +17,9 @@ from .views import (
     UserFeedbackViewSet,
     discover_llm_models,
     health_check,
+    management_assistant_confirm_topic,
+    management_assistant_detail,
+    management_assistant_message,
     system_configuration_detail,
 )
 
@@ -37,6 +40,21 @@ router.register(r"feedback", UserFeedbackViewSet)
 
 urlpatterns = [
     path("health/", health_check, name="health_check"),
+    path(
+        "assistant/",
+        management_assistant_detail,
+        name="management_assistant_detail",
+    ),
+    path(
+        "assistant/messages/",
+        management_assistant_message,
+        name="management_assistant_message",
+    ),
+    path(
+        "assistant/topics/confirm/",
+        management_assistant_confirm_topic,
+        name="management_assistant_confirm_topic",
+    ),
     path(
         "system-configuration/",
         system_configuration_detail,

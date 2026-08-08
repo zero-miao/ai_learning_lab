@@ -7,6 +7,10 @@ FIELD_ENV_DEFAULTS = {
     "llm_base_url": ("LLM_BASE_URL", "http://localhost:11434/v1"),
     "llm_api_key": ("LLM_API_KEY", "ollama"),
     "llm_model": ("LLM_MODEL", "qwen3.6:35b-a3b"),
+    "llm_model_management_assistant": (
+        "LLM_MODEL_MANAGEMENT_ASSISTANT",
+        "qwen3:30b-a3b",
+    ),
     "llm_model_topic_chat": ("LLM_MODEL_TOPIC_CHAT", "qwen3:30b-a3b"),
     "llm_model_supplement_query": (
         "LLM_MODEL_SUPPLEMENT_QUERY",

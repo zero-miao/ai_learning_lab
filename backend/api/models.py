@@ -33,6 +33,9 @@ class SystemConfiguration(models.Model):
     llm_base_url = models.URLField(default="http://localhost:11434/v1")
     llm_api_key = models.CharField(max_length=500, blank=True, default="ollama")
     llm_model = models.CharField(max_length=100, default="qwen3.6:35b-a3b")
+    llm_model_management_assistant = models.CharField(
+        max_length=100, default="qwen3:30b-a3b"
+    )
     llm_model_topic_chat = models.CharField(max_length=100, default="qwen3:30b-a3b")
     llm_model_supplement_query = models.CharField(
         max_length=100, default="qwen3:30b-a3b"

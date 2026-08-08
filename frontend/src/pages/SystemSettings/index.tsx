@@ -30,6 +30,7 @@ const taskModelFields: Array<{
   name: keyof ConfigurationForm;
   label: string;
 }> = [
+  { name: 'llm_model_management_assistant', label: '全站管理助手' },
   { name: 'llm_model_topic_chat', label: '学习讨论' },
   { name: 'llm_model_supplement_query', label: '补料检索词' },
   { name: 'llm_model_supplement_evaluate', label: '补料相关度评估' },

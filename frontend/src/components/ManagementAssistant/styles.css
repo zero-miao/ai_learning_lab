@@ -1,0 +1,104 @@
+.global-management-assistant-button {
+  position: fixed;
+  right: 32px;
+  bottom: 32px;
+  z-index: 30;
+  box-shadow: 0 8px 22px rgba(22, 119, 255, 0.35);
+}
+
+.management-assistant__messages {
+  min-height: 320px;
+  max-height: calc(100vh - 230px);
+  padding-right: 4px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.management-assistant__message {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  margin-bottom: 14px;
+}
+
+.management-assistant__message--user {
+  align-items: flex-end;
+}
+
+.management-assistant__bubble {
+  max-width: 100%;
+  padding: 10px 12px;
+  overflow-wrap: anywhere;
+  border-radius: 10px;
+  line-height: 1.6;
+}
+
+.management-assistant__message--user .management-assistant__bubble {
+  max-width: 85%;
+}
+
+.management-assistant__bubble > :first-child {
+  margin-top: 0;
+}
+
+.management-assistant__bubble > :last-child {
+  margin-bottom: 0;
+}
+
+.management-assistant__bubble p,
+.management-assistant__bubble ul,
+.management-assistant__bubble ol,
+.management-assistant__bubble blockquote,
+.management-assistant__bubble pre,
+.management-assistant__bubble table {
+  margin: 0.35em 0;
+}
+
+.management-assistant__bubble ul,
+.management-assistant__bubble ol {
+  padding-left: 1.5em;
+}
+
+.management-assistant__bubble table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.management-assistant__bubble th,
+.management-assistant__bubble td {
+  padding: 5px 7px;
+  border: 1px solid rgba(127, 127, 127, 0.35);
+  text-align: left;
+}
+
+.management-assistant__action-card {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.management-assistant__composer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid;
+}
+
+.management-assistant__composer .ant-input-textarea {
+  width: 100%;
+}
+
+@media (max-width: 720px) {
+  .global-management-assistant-button {
+    right: 20px;
+    bottom: 20px;
+  }
+
+  .management-assistant__messages {
+    max-height: calc(100vh - 210px);
+  }
+}

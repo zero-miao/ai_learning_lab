@@ -119,6 +119,7 @@ ai-learning-lab/
 | `LLM_BASE_URL` | Ollama OpenAI 兼容接口地址 | `http://localhost:11434/v1` |
 | `LLM_API_KEY` | OpenAI SDK 兼容要求使用的 API Key，本地 Ollama 可填固定值 | `ollama` |
 | `LLM_MODEL` | 当前后端默认调用模型 | `qwen3.6:35b-a3b` |
+| `LLM_MODEL_MANAGEMENT_ASSISTANT` | 全站管理助手模型 | `qwen3:30b-a3b` |
 | `LLM_MODEL_<TASK_TYPE>` | 指定 AI 任务类型的模型，未设置时回退 `LLM_MODEL` | `LLM_MODEL_CONCEPT_DRAFT=qwen3.6:35b-a3b` |
 | `LLM_MODEL_TOPIC_CHAT` | 话题内高频中文对话模型 | `qwen3:30b-a3b` |
 | `LLM_MODEL_SUPPLEMENT_QUERY` | 补料检索词生成模型 | `qwen3:30b-a3b` |
