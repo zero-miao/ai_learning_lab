@@ -181,3 +181,4 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 4. 修改异步功能时，同时补齐状态恢复、失败反馈和重试路径。
 5. 修改材料或 Topic 删除逻辑时，检查共享 Material、文件和关联任务的清理边界。
 6. 交付前执行标准回归；涉及视频、Locator、TTS 或浏览器交互时补做对应真实验收。
+7. 新分支功能必须先由用户明确验收通过；验收前禁止执行 `commit`、`push`、创建 PR 或合并，不得自动完成 Git 交付流程。
