@@ -23,6 +23,7 @@ import {
   LinkOutlined,
   PauseCircleOutlined,
   PlayCircleOutlined,
+  SoundOutlined,
 } from '@ant-design/icons';
 import { Button, Divider, Popover, Space, Tag, Tooltip, Typography, message } from 'antd';
 import type { Concept, Highlight, Material, Question } from '../../api';
@@ -64,6 +65,7 @@ interface UniversalReaderProps {
     type: 'concept' | 'question' | 'highlight';
     id: number | null;
   }>;
+  showHighlightNotes?: boolean;
   seekTime?: { time: number | null; nonce: string };
   speechControlsTargetId?: string;
 }
@@ -273,6 +275,7 @@ interface AnnotationRange {
   start: number;
   end: number;
   sourceStart: number;
+  userNote?: string;
 }
 
 interface MarkdownNode {
@@ -308,6 +311,7 @@ function getAnnotationRanges(
         start: locator.start_offset,
         end: locator.end_offset,
         sourceStart: locator.start_offset,
+        userNote: highlight.user_note.trim() || undefined,
       })),
     ),
     ...concepts.flatMap((concept) =>
@@ -423,6 +427,12 @@ function readerMarkdownPlugin(options: ReaderMarkdownPluginOptions) {
             properties.tabIndex = 0;
           }
 
+          const highlightNotes = activeRanges.filter(
+            (range) =>
+              range.type === 'highlight' &&
+              range.sourceStart === start &&
+              range.userNote,
+          );
           return {
             type: 'element',
             tagName: 'span',
@@ -435,6 +445,16 @@ function readerMarkdownPlugin(options: ReaderMarkdownPluginOptions) {
                   Math.max(0, end - sourceStart),
                 ),
               },
+              ...highlightNotes.map((range) => ({
+                type: 'element',
+                tagName: 'span',
+                properties: {
+                  className: ['universal-reader__highlight-note'],
+                  'data-reader-ignore-offset': true,
+                  title: '高亮备注',
+                },
+                children: [{ type: 'text', value: range.userNote }],
+              })),
             ],
           };
         });
@@ -532,6 +552,23 @@ function renderChunk(
         }}
       >
         {content}
+        {activeRanges
+          .filter(
+            (range) =>
+              range.type === 'highlight' &&
+              range.sourceStart === absoluteStart &&
+              range.userNote,
+          )
+          .map((range) => (
+            <span
+              key={`highlight-note-${range.id}`}
+              className="universal-reader__highlight-note"
+              data-reader-ignore-offset
+              title="高亮备注"
+            >
+              {range.userNote}
+            </span>
+          ))}
       </span>
     );
   });
@@ -552,6 +589,7 @@ export default function UniversalReader({
   onClearAnnotationSelection,
   onAnnotationClick,
   selectedAnnotations,
+  showHighlightNotes = false,
   seekTime,
   speechControlsTargetId,
 }: UniversalReaderProps) {
@@ -563,11 +601,16 @@ export default function UniversalReader({
     [material.tts_assets],
   );
   const annotationRanges = React.useMemo(
-    () => getAnnotationRanges(highlights, concepts, questions),
-    [concepts, highlights, questions],
+    () =>
+      getAnnotationRanges(highlights, concepts, questions).map((range) => ({
+        ...range,
+        userNote: showHighlightNotes ? range.userNote : undefined,
+      })),
+    [concepts, highlights, questions, showHighlightNotes],
   );
   const playerRef = React.useRef<MediaPlayerInstance | null>(null);
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const pendingSpeechOffsetRef = React.useRef<number | null>(null);
   const transcriptRef = React.useRef<HTMLDivElement | null>(null);
   const [selectionMenu, setSelectionMenu] = React.useState<SelectionMenu | null>(
     null,
@@ -762,7 +805,7 @@ export default function UniversalReader({
     if (!text.trim() || endOffset <= startOffset) return;
 
     const rect = range.getBoundingClientRect();
-    const menuWidth = 280;
+    const menuWidth = isVideo ? 280 : 390;
     const menuHeight = 42;
     const preferredTop = rect.bottom + 8;
     setSelectionMenu({
@@ -814,6 +857,36 @@ export default function UniversalReader({
       setSpeechState('idle');
       message.error('朗读音频加载失败，请稍后重试');
     });
+  };
+
+  const playSpeechFromOffset = (sourceOffset: number) => {
+    const audio = audioRef.current;
+    if (!audio || !selectedVoice?.url) {
+      message.warning(
+        material.status === 'generating_audio'
+          ? '朗读音频正在生成，请稍后再试'
+          : '当前材料没有可用的朗读音频',
+      );
+      return;
+    }
+    if (!Number.isFinite(audio.duration) || audio.duration <= 0) {
+      pendingSpeechOffsetRef.current = sourceOffset;
+      audio.load();
+      return;
+    }
+    const ratio = Math.min(
+      1,
+      Math.max(0, sourceOffset / Math.max(1, material.clean_text.length)),
+    );
+    audio.currentTime = ratio * audio.duration;
+    audio.playbackRate = speechRate;
+    void audio
+      .play()
+      .then(() => setSpeechState('speaking'))
+      .catch(() => {
+        setSpeechState('idle');
+        message.error('朗读音频加载失败，请稍后重试');
+      });
   };
 
   const changeSpeechRate = (rate: number) => {
@@ -1061,6 +1134,11 @@ export default function UniversalReader({
         }}
         onLoadedMetadata={() => {
           if (audioRef.current) audioRef.current.playbackRate = speechRate;
+          if (pendingSpeechOffsetRef.current !== null) {
+            const sourceOffset = pendingSpeechOffsetRef.current;
+            pendingSpeechOffsetRef.current = null;
+            playSpeechFromOffset(sourceOffset);
+          }
         }}
         onTimeUpdate={syncSpokenChunk}
       />
@@ -1186,7 +1264,12 @@ export default function UniversalReader({
                 </span>
                 {renderChunk(
                   chunk,
-                  highlights,
+                  showHighlightNotes
+                    ? highlights
+                    : highlights.map((highlight) => ({
+                        ...highlight,
+                        user_note: '',
+                      })),
                   concepts,
                   questions,
                   onAnnotationClick,
@@ -1245,6 +1328,20 @@ export default function UniversalReader({
           >
             高亮
           </Button>
+          {!isVideo && (
+            <Button
+              type="text"
+              size="small"
+              icon={<SoundOutlined />}
+              onClick={() =>
+                handleAction((selected) =>
+                  playSpeechFromOffset(selected.startOffset),
+                )
+              }
+            >
+              从此朗读
+            </Button>
+          )}
         </div>
       )}
       </article>

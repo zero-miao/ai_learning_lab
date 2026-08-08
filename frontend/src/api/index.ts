@@ -366,10 +366,25 @@ export type FeedbackCategory =
   | 'suggestion'
   | 'other';
 
+export type FeedbackFeature =
+  | 'management_assistant'
+  | 'topic_management'
+  | 'topic_detail'
+  | 'material_reader'
+  | 'material_management'
+  | 'exam'
+  | 'review'
+  | 'task_management'
+  | 'system_settings'
+  | 'feedback'
+  | 'other';
+
 export interface UserFeedback {
   id: number;
   category: FeedbackCategory;
   category_display: string;
+  feature: FeedbackFeature;
+  feature_display: string;
   description: string;
   page_url: string;
   page_title: string;
@@ -569,7 +584,7 @@ export const listAITasks = (params?: Record<string, string | number>) =>
 export const retryAITask = (id: number) =>
   api.post<AITask>(`ai-tasks/${id}/retry/`);
 export const createUserFeedback = (
-  data: Pick<UserFeedback, 'category' | 'description' | 'page_url' | 'page_title' | 'user_agent' | 'context'>,
+  data: Pick<UserFeedback, 'category' | 'feature' | 'description' | 'page_url' | 'page_title' | 'user_agent' | 'context'>,
 ) => api.post<UserFeedback>('feedback/', data);
 
 export default api;

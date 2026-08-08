@@ -828,6 +828,19 @@ class UserFeedback(models.Model):
         ("suggestion", "功能建议"),
         ("other", "其他"),
     ]
+    FEATURE_CHOICES = [
+        ("management_assistant", "全站管理助手"),
+        ("topic_management", "话题管理"),
+        ("topic_detail", "话题详情"),
+        ("material_reader", "学习阅读"),
+        ("material_management", "材料管理"),
+        ("exam", "掌握度评估"),
+        ("review", "复习计划"),
+        ("task_management", "任务管理"),
+        ("system_settings", "系统设置"),
+        ("feedback", "反馈功能"),
+        ("other", "其他"),
+    ]
     STATUS_CHOICES = [
         ("new", "待处理"),
         ("reviewing", "处理中"),
@@ -840,6 +853,13 @@ class UserFeedback(models.Model):
         default="usability",
         db_index=True,
         verbose_name="反馈类型",
+    )
+    feature = models.CharField(
+        max_length=30,
+        choices=FEATURE_CHOICES,
+        default="other",
+        db_index=True,
+        verbose_name="所属功能",
     )
     description = models.TextField(verbose_name="反馈内容")
     page_url = models.CharField(max_length=2000, blank=True, verbose_name="页面地址")
@@ -869,6 +889,10 @@ class UserFeedback(models.Model):
             models.Index(
                 fields=["category", "-created_at"],
                 name="feedback_category_created_idx",
+            ),
+            models.Index(
+                fields=["feature", "-created_at"],
+                name="feedback_feature_created_idx",
             ),
         ]
 

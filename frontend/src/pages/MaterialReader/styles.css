@@ -48,7 +48,7 @@
 .material-reader__reader-tools {
   position: fixed;
   right: 28px;
-  bottom: 28px;
+  bottom: 102px;
   z-index: 22;
   max-width: calc(100vw - 56px);
 }
@@ -294,7 +294,7 @@
 
   .material-reader__reader-tools {
     right: 16px;
-    bottom: 16px;
+    bottom: 164px;
     max-width: calc(100vw - 32px);
   }
 }

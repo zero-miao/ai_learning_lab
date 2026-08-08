@@ -332,8 +332,16 @@ const TopicDetail: React.FC = () => {
               <Tag color="green">掌握度：{topic.mastery_level_display}</Tag>
             </Space>
             <Descriptions size="small" column={2}>
-              <Descriptions.Item label="学习目标">{topic.goal || '未设置'}</Descriptions.Item>
-              <Descriptions.Item label="学习范围">{topic.scope || '未设置'}</Descriptions.Item>
+              <Descriptions.Item label="学习目标" span={2}>
+                <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                  {topic.goal || '未设置'}
+                </div>
+              </Descriptions.Item>
+              <Descriptions.Item label="学习范围" span={2}>
+                <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                  {topic.scope || '未设置'}
+                </div>
+              </Descriptions.Item>
               <Descriptions.Item label="概念">{topic.learning_output.concept_count}</Descriptions.Item>
               <Descriptions.Item label="问题">{topic.learning_output.question_count}</Descriptions.Item>
             </Descriptions>

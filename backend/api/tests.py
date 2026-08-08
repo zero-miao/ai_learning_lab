@@ -285,6 +285,7 @@ class V2ErApiTests(TestCase):
             "/api/feedback/",
             {
                 "category": "usability",
+                "feature": "material_reader",
                 "description": " 阅读页保存高亮后发生跳动。 ",
                 "page_url": "http://192.168.1.10:5173/topics/1/materials/1",
                 "page_title": "AI Learning Lab",
@@ -297,10 +298,17 @@ class V2ErApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         feedback = UserFeedback.objects.get()
         self.assertEqual(feedback.description, "阅读页保存高亮后发生跳动。")
+        self.assertEqual(feedback.feature, "material_reader")
         self.assertEqual(feedback.status, "new")
+        self.assertEqual(response.data["feature_display"], "学习阅读")
         self.assertEqual(response.data["status_display"], "待处理")
         filtered = self.client.get(
-            "/api/feedback/", {"status": "new", "category": "usability"}
+            "/api/feedback/",
+            {
+                "status": "new",
+                "category": "usability",
+                "feature": "material_reader",
+            },
         )
         self.assertEqual(filtered.data["count"], 1)
         blank = self.client.post(
