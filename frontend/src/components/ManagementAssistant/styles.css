@@ -78,6 +78,23 @@
   margin-top: 8px;
 }
 
+.management-assistant__field-change {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 4px 10px;
+  margin-bottom: 12px;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.management-assistant__field-change:last-child {
+  margin-bottom: 0;
+}
+
+.management-assistant__field-change > :first-child {
+  grid-column: 1 / -1;
+}
+
 .management-assistant__composer {
   display: flex;
   flex-direction: column;

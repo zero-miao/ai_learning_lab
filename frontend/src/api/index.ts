@@ -425,7 +425,13 @@ export const createManagementAssistantMessage = (content: string) =>
     content,
   });
 export const confirmManagementAssistantTopic = (taskId: number) =>
-  api.post<{ topic: Topic; message?: SessionMessage }>(
+  api.post<{
+    topic?: Topic;
+    topics?: Topic[];
+    message?: SessionMessage;
+    updated_count?: number;
+    created_count?: number;
+  }>(
     'assistant/topics/confirm/',
     { task_id: taskId },
   );

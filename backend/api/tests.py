@@ -165,6 +165,121 @@ class V2ErApiTests(TestCase):
         self.assertEqual(created.goal, "能够设计可取消的并发任务")
         self.assertEqual(created.scope, "goroutine、channel、context")
 
+    @patch("api.tasks.AIGateway.get_provider")
+    def test_management_assistant_applies_valid_batch_changes_and_keeps_blocked_items(
+        self, get_provider
+    ):
+        get_provider.return_value.generate_response.return_value = json.dumps(
+            {
+                "reply": "已识别批量变更。",
+                "action": "manage_topics",
+                "topic_draft": None,
+                "topic_changes": [
+                    {
+                        "operation": "update",
+                        "topic_id": self.topic.id,
+                        "title": "Django 数据访问",
+                        "goal": None,
+                        "scope": "《QuerySet》；《事务》；《查询优化》",
+                    },
+                    {
+                        "operation": "create",
+                        "topic_id": None,
+                        "title": "Go 并发模型",
+                        "goal": "设计可取消的并发任务",
+                        "scope": "goroutine、channel、context",
+                    },
+                    {
+                        "operation": "create",
+                        "topic_id": None,
+                        "title": "工程生产应用",
+                        "goal": "",
+                        "scope": "TOC 与精益生产",
+                    },
+                ],
+            }
+        )
+        response = self.client.post(
+            "/api/assistant/messages/",
+            {
+                "content": (
+                    "批量更新并创建这些话题\n"
+                    "Django 数据访问\n"
+                    "《QuerySet》\n"
+                    "《事务》\n"
+                    "《查询优化》"
+                )
+            },
+            format="json",
+        )
+        task_id = response.data["task"]["id"]
+        execute_task(task_id)
+        task = AITask.objects.get(pk=task_id)
+        plan = task.result_json["plan"]
+
+        self.assertEqual(len(plan["updates"]), 1)
+        self.assertEqual(len(plan["creates"]), 1)
+        self.assertEqual(len(plan["blocked"]), 1)
+        self.assertEqual(plan["blocked"][0]["missing_fields"], ["goal"])
+
+        first = self.client.post(
+            "/api/assistant/topics/confirm/",
+            {"task_id": task_id},
+            format="json",
+        )
+        second = self.client.post(
+            "/api/assistant/topics/confirm/",
+            {"task_id": task_id},
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.data["updated_count"], 1)
+        self.assertEqual(first.data["created_count"], 1)
+        self.topic.refresh_from_db()
+        self.assertEqual(self.topic.title, "Django 数据访问")
+        self.assertEqual(self.topic.scope, "《QuerySet》\n《事务》\n《查询优化》")
+        self.assertTrue(Topic.objects.filter(title="Go 并发模型").exists())
+        self.assertFalse(Topic.objects.filter(title="工程生产应用").exists())
+
+    @patch("api.tasks.AIGateway.get_provider")
+    def test_management_assistant_rejects_stale_batch_update(self, get_provider):
+        get_provider.return_value.generate_response.return_value = json.dumps(
+            {
+                "reply": "已识别更新。",
+                "action": "manage_topics",
+                "topic_changes": [
+                    {
+                        "operation": "update",
+                        "topic_id": self.topic.id,
+                        "title": None,
+                        "goal": "新的学习目标",
+                        "scope": None,
+                    }
+                ],
+            }
+        )
+        response = self.client.post(
+            "/api/assistant/messages/",
+            {"content": "更新学习目标"},
+            format="json",
+        )
+        task_id = response.data["task"]["id"]
+        execute_task(task_id)
+        self.topic.goal = "其他页面刚刚保存的目标"
+        self.topic.save(update_fields=["goal", "updated_at"])
+
+        confirm = self.client.post(
+            "/api/assistant/topics/confirm/",
+            {"task_id": task_id},
+            format="json",
+        )
+
+        self.assertEqual(confirm.status_code, 409)
+        self.topic.refresh_from_db()
+        self.assertEqual(self.topic.goal, "其他页面刚刚保存的目标")
+
     def test_feedback_records_page_context_and_supports_filters(self):
         response = self.client.post(
             "/api/feedback/",

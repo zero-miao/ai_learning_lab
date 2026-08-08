@@ -41,6 +41,30 @@ interface TopicDraft {
   scope: string;
 }
 
+interface TopicUpdatePlan {
+  topic_id: number;
+  current_title: string;
+  before: Partial<TopicDraft>;
+  changes: Partial<TopicDraft>;
+}
+
+interface BlockedTopicChange extends Partial<TopicDraft> {
+  operation: 'create' | 'update';
+  reason: string;
+}
+
+interface TopicChangePlan {
+  updates: TopicUpdatePlan[];
+  creates: TopicDraft[];
+  blocked: BlockedTopicChange[];
+}
+
+const fieldLabels: Record<keyof TopicDraft, string> = {
+  title: '话题名称',
+  goal: '学习目标',
+  scope: '学习范围',
+};
+
 const quickPrompts = [
   '列出所有话题的学习目标和学习范围',
   '帮我创建一个新的学习话题',
@@ -111,9 +135,15 @@ export default function ManagementAssistant() {
     try {
       const response = await confirmManagementAssistantTopic(task.id);
       await load();
-      message.success(`已创建话题“${response.data.topic.title}”`);
+      if (response.data.topic) {
+        message.success(`已创建话题“${response.data.topic.title}”`);
+      } else {
+        message.success(
+          `已更新 ${response.data.updated_count ?? 0} 项，新建 ${response.data.created_count ?? 0} 项`,
+        );
+      }
     } catch {
-      message.error('话题创建失败，请检查草稿后重试');
+      message.error('话题变更失败，数据可能已变化，请重新生成计划');
     } finally {
       setConfirmingId(null);
     }
@@ -134,9 +164,101 @@ export default function ManagementAssistant() {
     const task = tasks.find(
       (item) =>
         Number(item.result_json.message_id) === messageId &&
-        item.result_json.action === 'draft_topic',
+        ['draft_topic', 'manage_topics'].includes(
+          String(item.result_json.action),
+        ),
     );
     if (!task) return null;
+    if (task.result_json.action === 'manage_topics') {
+      const plan = task.result_json.plan as TopicChangePlan | undefined;
+      if (!plan) return null;
+      const applied = Array.isArray(task.result_json.applied_topic_ids);
+      const executableCount = plan.updates.length + plan.creates.length;
+
+      return (
+        <Card
+          size="small"
+          className="management-assistant__action-card"
+          title="批量话题变更"
+          extra={
+            <Tag color={applied ? 'success' : executableCount ? 'processing' : 'warning'}>
+              {applied ? '已执行' : executableCount ? '待确认' : '待补充'}
+            </Tag>
+          }
+        >
+          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            {plan.updates.map((update) => (
+              <Card
+                key={`update-${update.topic_id}`}
+                size="small"
+                title={
+                  <Space>
+                    <Tag color="blue">更新</Tag>
+                    <span>{update.current_title}</span>
+                  </Space>
+                }
+              >
+                {Object.entries(update.changes).map(([field, value]) => (
+                  <div
+                    key={field}
+                    className="management-assistant__field-change"
+                  >
+                    <Typography.Text strong>
+                      {fieldLabels[field as keyof TopicDraft]}
+                    </Typography.Text>
+                    <Typography.Text type="secondary">原值</Typography.Text>
+                    <div>{update.before[field as keyof TopicDraft] || '未设置'}</div>
+                    <Typography.Text type="secondary">新值</Typography.Text>
+                    <div>{value || '未设置'}</div>
+                  </div>
+                ))}
+              </Card>
+            ))}
+            {plan.creates.map((create, index) => (
+              <Card
+                key={`create-${create.title}-${index}`}
+                size="small"
+                title={
+                  <Space>
+                    <Tag color="green">新建</Tag>
+                    <span>{create.title}</span>
+                  </Space>
+                }
+              >
+                <Descriptions column={1} size="small">
+                  <Descriptions.Item label="学习目标">
+                    {create.goal}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="学习范围">
+                    {create.scope}
+                  </Descriptions.Item>
+                </Descriptions>
+              </Card>
+            ))}
+            {plan.blocked.map((blocked, index) => (
+              <Alert
+                key={`blocked-${blocked.title || index}`}
+                type="warning"
+                showIcon
+                title={`${blocked.operation === 'create' ? '新建' : '更新'}“${blocked.title || '未知话题'}”暂不可执行`}
+                description={blocked.reason}
+              />
+            ))}
+            {!applied && executableCount > 0 && (
+              <Button
+                type="primary"
+                icon={<CheckOutlined />}
+                loading={confirmingId === task.id}
+                onClick={() => void confirmTopic(task)}
+              >
+                确认执行 {executableCount} 项变更
+              </Button>
+            )}
+          </Space>
+        </Card>
+      );
+    }
+
     const topicDraft = task.result_json.draft as TopicDraft | undefined;
     if (!topicDraft) return null;
     const createdTopicId = Number(task.result_json.created_topic_id || 0);
