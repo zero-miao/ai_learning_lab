@@ -97,7 +97,7 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 ### 已完成
 
 - 完成 V2 ER 硬切换，移除 V1 数据兼容层，并保留 V1 完整学习闭环。
-- Topic 统一为学习话题；支持编辑目标/范围、搜索、删除、右侧学习讨论和材料管理。
+- Topic 统一为学习话题；支持编辑目标/范围、搜索、置顶、删除、右侧学习讨论和材料管理。
 - Material 全局化；支持网页、粘贴文本、本地视频、已有材料复用、Topic 关联治理和全局彻底删除。
 - 文本与视频统一进入阅读器；支持字幕同步、点击 seek、划词创建概念/高亮/问答、双向回跳和重复定位。
 - 阅读问答支持基于 Session 的多轮对话、最近历史、Locator 选中文字和材料正文上下文；刷新后可恢复回复任务。
@@ -141,7 +141,7 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 
 当前自动化基线：
 
-- 后端 `manage.py test api` 共 38 项通过，覆盖系统配置、Provider 模型发现、管理助手查询、批量变更、幂等与并发保护、多轮问答、Topic 删除、集合摘要、统一分页与查询索引、补料人工采纳、TTS、跨 Topic 标注、反馈记录和视频学习全链路等关键契约。
+- 后端 `manage.py test api` 共 39 项通过，覆盖系统配置、Provider 模型发现、管理助手查询、批量变更、幂等与并发保护、多轮问答、Topic 置顶与删除、集合摘要、统一分页与查询索引、补料人工采纳、TTS、跨 Topic 标注、反馈记录和视频学习全链路等关键契约。
 - `ruff check backend`、`manage.py check`、`makemigrations --check --dry-run`、前端 build/lint 均通过。
 - `ruff format --check backend` 仍会报告两份历史迁移文件需要格式化，不属于当前业务代码问题。
 - Vite 主入口约 10 kB；路由与依赖完成分包，最大 chunk 约 483 kB，不再报告 500 kB 体积告警。
