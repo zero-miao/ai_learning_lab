@@ -43,6 +43,7 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
             "任务模型",
             {
                 "fields": (
+                    "llm_model_management_assistant",
                     "llm_model_topic_chat",
                     "llm_model_supplement_query",
                     "llm_model_supplement_evaluate",

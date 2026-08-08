@@ -837,6 +837,302 @@ class DiscussionReplyTask(BaseTask):
         }
 
 
+class ManagementAssistantTask(BaseTask):
+    task_type = "management_assistant"
+    verbose_name = "管理助手"
+
+    def run(self) -> Dict[str, Any]:
+        from .models import SessionMessage, Topic
+
+        user_message = self._get_trigger()
+        if (
+            user_message is None
+            or user_message.session.session_scene != "management_assistant"
+        ):
+            raise ValueError("管理助手消息不存在或会话类型无效。")
+
+        topics = list(
+            Topic.objects.order_by("-updated_at").values(
+                "id", "title", "goal", "scope", "status", "mastery_level"
+            )
+        )
+        inventory = "\n".join(
+            (
+                f"- ID {topic['id']} | 话题：{topic['title']} | "
+                f"学习目标：{topic['goal'] or '未设置'} | "
+                f"学习范围：{topic['scope'] or '未设置'} | "
+                f"状态：{topic['status']} | 掌握程度：{topic['mastery_level']}"
+            )
+            for topic in topics
+        )
+        history = list(user_message.session.messages.order_by("-id")[:20])
+        history.reverse()
+        scope_sections = self._scope_sections(history)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是 AI Learning Lab 的全站管理助手，使用简洁自然的中文。"
+                    "你可以进行简单沟通、根据系统提供的话题数据回答问题，以及批量创建或更新学习话题。"
+                    "不得声称执行未提供的能力，不得编造数据。只输出合法 JSON，不要 Markdown 代码块。"
+                    '格式为 {"reply":"回复","action":'
+                    '"chat|list_topics|draft_topic|manage_topics",'
+                    '"topic_draft":{"title":"","goal":"","scope":""}或null,'
+                    '"topic_changes":[{"operation":"update|create","topic_id":现有ID或null,'
+                    '"title":"新值或null","goal":"新值或null","scope":"新值或null"}]}。'
+                    "用户要求列出全部话题、学习目标或学习范围时使用 list_topics，"
+                    "具体列表将由系统生成。用户明确要创建话题，且标题、学习目标、学习范围"
+                    "都已经明确时使用 draft_topic；缺少任一项时用 chat 追问缺少的信息，"
+                    "一次集中询问所有缺失项。draft_topic 只生成待确认草稿，不声称已经创建。"
+                    "用户要求比较、批量管理、直接操作、修改或更新话题时使用 manage_topics。"
+                    "更新必须填写实时数据中对应的 topic_id；只输出用户明确要求改变的字段，"
+                    "其他字段用 null。创建项即使缺字段也要保留，由系统标记待补充，"
+                    "不能因为一个创建项缺字段而丢弃其他可执行更新。"
+                    "话题名称有空格、连接符差异或同义表达时，结合内容判断是否为已有话题；"
+                    "能明确对应时必须使用 update，不能重复创建。"
+                    "用户提供的标题、目标、范围原文必须原样保留，不要润色、概括或重新排序。"
+                    "始终以实时数据为准，忽略历史助手关于数据是否已修改的说法。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"当前系统共有 {len(topics)} 个话题。以下是实时数据：\n"
+                    f"{inventory or '暂无话题。'}"
+                ),
+            },
+        ]
+        messages.extend(
+            {
+                "role": "user" if item.msg_from == "user" else "assistant",
+                "content": item.msg_content,
+            }
+            for item in history
+        )
+
+        raw_response = self._call_llm(messages, response_format={"type": "json_object"})
+        response = self._parse_json(raw_response)
+        if not isinstance(response, dict):
+            raise ValueError("管理助手未生成有效响应。")
+
+        action = str(response.get("action", "chat")).strip()
+        if action not in {"chat", "list_topics", "draft_topic", "manage_topics"}:
+            action = "chat"
+        reply = str(response.get("reply", "")).strip()
+        result: Dict[str, Any] = {"action": action}
+
+        if action == "list_topics":
+            reply = self._topic_table(topics)
+            result["topic_count"] = len(topics)
+        elif action == "draft_topic":
+            raw_draft = response.get("topic_draft")
+            draft = raw_draft if isinstance(raw_draft, dict) else {}
+            normalized_draft = {
+                "title": str(draft.get("title", "")).strip()[:255],
+                "goal": str(draft.get("goal", "")).strip(),
+                "scope": str(draft.get("scope", "")).strip(),
+            }
+            if not all(normalized_draft.values()):
+                action = "chat"
+                result = {"action": action}
+                reply = "创建话题还需要明确话题名称、学习目标和学习范围。请一次告诉我这三项。"
+            else:
+                result["draft"] = normalized_draft
+                reply = reply or "我已整理好话题草稿，请确认后创建。"
+        elif action == "manage_topics":
+            plan = self._topic_change_plan(
+                response.get("topic_changes"),
+                topics,
+                scope_sections,
+            )
+            executable_count = len(plan["updates"]) + len(plan["creates"])
+            if not executable_count and not plan["blocked"]:
+                action = "chat"
+                result = {"action": action}
+                reply = reply or "没有发现需要执行的话题变更。"
+            else:
+                result["plan"] = plan
+                summary = (
+                    f"已整理出 {len(plan['updates'])} 项更新和 "
+                    f"{len(plan['creates'])} 项新建，请确认后执行。"
+                )
+                if plan["blocked"]:
+                    summary += (
+                        f"另有 {len(plan['blocked'])} 项缺少信息，不会阻塞其他变更。"
+                    )
+                reply = summary
+        if not reply:
+            reply = "我可以帮你查询现有话题，或快速创建新的学习话题。"
+
+        message = SessionMessage.objects.create(
+            session=user_message.session,
+            msg_from="ai",
+            msg_content=reply,
+        )
+        user_message.session.model = self.model
+        user_message.session.save(update_fields=["model", "updated_at"])
+        result["message_id"] = message.id
+        return result
+
+    @staticmethod
+    def _topic_change_plan(raw_changes, topics, scope_sections):
+        topic_by_id = {topic["id"]: topic for topic in topics}
+        plan = {"updates": [], "creates": [], "blocked": []}
+        if not isinstance(raw_changes, list):
+            return plan
+
+        for raw_change in raw_changes[:50]:
+            if not isinstance(raw_change, dict):
+                continue
+            operation = str(raw_change.get("operation", "")).strip()
+            if operation == "update":
+                try:
+                    topic_id = int(raw_change.get("topic_id"))
+                except (TypeError, ValueError):
+                    topic_id = 0
+                topic = topic_by_id.get(topic_id)
+                if topic is None:
+                    plan["blocked"].append(
+                        {
+                            "operation": "update",
+                            "title": str(raw_change.get("title", "")).strip()
+                            or "未知话题",
+                            "reason": "未找到对应的现有话题",
+                        }
+                    )
+                    continue
+
+                changes = {}
+                before = {}
+                for field in ("title", "goal", "scope"):
+                    value = raw_change.get(field)
+                    if value is None:
+                        continue
+                    normalized = str(value).strip()
+                    if field == "title":
+                        normalized = normalized[:255]
+                    elif field == "scope":
+                        normalized = ManagementAssistantTask._restore_scope_text(
+                            normalized,
+                            scope_sections,
+                        )
+                    if normalized != topic[field]:
+                        changes[field] = normalized
+                        before[field] = topic[field]
+                if changes:
+                    plan["updates"].append(
+                        {
+                            "topic_id": topic_id,
+                            "current_title": topic["title"],
+                            "before": before,
+                            "changes": changes,
+                        }
+                    )
+            elif operation == "create":
+                draft = {
+                    "title": str(raw_change.get("title", "") or "").strip()[:255],
+                    "goal": str(raw_change.get("goal", "") or "").strip(),
+                    "scope": ManagementAssistantTask._restore_scope_text(
+                        str(raw_change.get("scope", "") or "").strip(),
+                        scope_sections,
+                    ),
+                }
+                missing_fields = [field for field, value in draft.items() if not value]
+                if missing_fields:
+                    plan["blocked"].append(
+                        {
+                            "operation": "create",
+                            **draft,
+                            "missing_fields": missing_fields,
+                            "reason": "缺少"
+                            + "、".join(
+                                {
+                                    "title": "话题名称",
+                                    "goal": "学习目标",
+                                    "scope": "学习范围",
+                                }[field]
+                                for field in missing_fields
+                            ),
+                        }
+                    )
+                else:
+                    plan["creates"].append(draft)
+        return plan
+
+    @staticmethod
+    def _scope_sections(history):
+        sections = []
+        for message in history:
+            if message.msg_from != "user":
+                continue
+            lines = message.msg_content.splitlines()
+            index = 0
+            while index + 1 < len(lines):
+                heading = lines[index].strip()
+                next_line = lines[index + 1].strip()
+                if (
+                    heading
+                    and not heading.startswith("《")
+                    and next_line.startswith("《")
+                ):
+                    section_lines = []
+                    index += 1
+                    while index < len(lines) and lines[index].strip():
+                        section_lines.append(lines[index].strip())
+                        index += 1
+                    if section_lines:
+                        sections.append(
+                            {
+                                "heading": heading,
+                                "scope": "\n".join(section_lines),
+                            }
+                        )
+                else:
+                    index += 1
+        return sections
+
+    @staticmethod
+    def _restore_scope_text(proposed, scope_sections):
+        normalized_proposed = _normalize_alignment_text(proposed)
+        if not normalized_proposed:
+            return proposed
+        best_scope = proposed
+        best_ratio = 0.0
+        for section in scope_sections:
+            candidate = section["scope"]
+            normalized_candidate = _normalize_alignment_text(candidate)
+            if not normalized_candidate:
+                continue
+            ratio = SequenceMatcher(
+                None,
+                normalized_proposed,
+                normalized_candidate,
+                autojunk=False,
+            ).ratio()
+            if ratio > best_ratio:
+                best_scope = candidate
+                best_ratio = ratio
+        return best_scope if best_ratio >= 0.9 else proposed
+
+    @staticmethod
+    def _topic_table(topics):
+        if not topics:
+            return "当前还没有学习话题。"
+
+        def escape(value):
+            return str(value or "未设置").replace("|", "\\|").replace("\n", "；")
+
+        rows = [
+            "| 话题 | 学习目标 | 学习范围 |",
+            "| --- | --- | --- |",
+        ]
+        rows.extend(
+            f"| {escape(topic['title'])} | {escape(topic['goal'])} | {escape(topic['scope'])} |"
+            for topic in topics
+        )
+        return "\n".join(rows)
+
+
 class GenerateExamTask(BaseTask):
     task_type = "generate_exam"
     verbose_name = "生成考题"

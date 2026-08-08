@@ -10,6 +10,7 @@ import {
 } from './appearance';
 import { getSystemConfiguration, setApiTimeout } from './api';
 import FeedbackButton from './components/FeedbackButton';
+import ManagementAssistant from './components/ManagementAssistant';
 
 const { Header, Content, Footer } = Layout;
 const { Title } = Typography;
@@ -144,6 +145,7 @@ function App() {
         AI Learning Lab ©{new Date().getFullYear()} Created for Personal Learning
       </Footer>
       <FeedbackButton />
+      <ManagementAssistant />
     </Layout>
     </ConfigProvider>
   );

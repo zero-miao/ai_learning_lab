@@ -85,6 +85,7 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 - 当前局域网入口以 Vite 开发服务器作为实际运行环境，React 根节点不启用 `StrictMode`，避免挂载阶段重复执行 effect 并发送重复 HTTP 请求；如未来改为生产静态服务，可重新评估该约束。
 - 阅读页新增或更新概念、问答和高亮时，标注样式不得改变正文排版尺寸；数据刷新必须通过正文 offset 锚点保持当前阅读位置。
 - 全站提供固定反馈入口，反馈草稿保存在当前设备，提交时自动记录页面 URL、视口与浏览器信息；处理状态统一在 Django Admin 维护。
+- 全站管理助手使用固定浮层入口和独立持久化会话；可进行简单沟通、查询实时 Topic 数据，并通过差异确认批量创建或更新话题。模型只能返回受控动作，后端负责实时数据匹配、原文范围回填、缺字段隔离、并发校验和事务写入。
 
 ### 删除与可观测性
 
@@ -118,6 +119,7 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 - `start-lan.sh` 支持同一可信局域网内的其他设备直接访问，并自动处理 Node 20 环境。
 - 阅读页标注刷新已与材料全文刷新拆分，并基于正文 offset 恢复文本页窗口或视频字幕容器位置。
 - 全站支持随时提交使用反馈，反馈包含类型、描述、页面和设备上下文，并可在 Django Admin 中筛选和跟进。
+- 全站管理助手支持普通对话、以 Markdown 表格列出 Topic 学习目标/范围，以及确认后幂等执行批量创建/更新；缺字段项不会阻塞其他变更，执行过程复用 AITask 的排队、失败和重试能力。
 
 ### 尚未完成
 
@@ -139,7 +141,7 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 
 当前自动化基线：
 
-- 后端 `manage.py test api` 共 34 项通过，覆盖系统配置、Provider 模型发现、多轮问答、Topic 删除、集合摘要、统一分页与查询索引、补料人工采纳、TTS、跨 Topic 标注、反馈记录和视频学习全链路等关键契约。
+- 后端 `manage.py test api` 共 38 项通过，覆盖系统配置、Provider 模型发现、管理助手查询、批量变更、幂等与并发保护、多轮问答、Topic 删除、集合摘要、统一分页与查询索引、补料人工采纳、TTS、跨 Topic 标注、反馈记录和视频学习全链路等关键契约。
 - `ruff check backend`、`manage.py check`、`makemigrations --check --dry-run`、前端 build/lint 均通过。
 - `ruff format --check backend` 仍会报告两份历史迁移文件需要格式化，不属于当前业务代码问题。
 - Vite 主入口约 10 kB；路由与依赖完成分包，最大 chunk 约 483 kB，不再报告 500 kB 体积告警。
@@ -161,6 +163,7 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 - 真实 MP4 与外挂 `.srt` 已通过浏览器上传；后台确认使用 `transcript_source=subtitle`，完成清洗、时间轴重建和阅读页字幕点击 seek。
 - 思维导图拖拽建关系、现有关系编辑及删除二次确认已完成浏览器验收。
 - 评估历史逐题反馈、复习记录任务入口和复盘 Modal 已完成浏览器验收。
+- 全站管理助手已通过真实 Ollama 验证 Topic 学习目标/范围表格查询、完整话题草稿确认、批量更新/创建计划、用户原始范围格式保留、缺字段项隔离和创建后跳转。
 
 本机服务结论：
 

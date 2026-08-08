@@ -45,6 +45,7 @@ class SystemConfigurationSerializer(serializers.ModelSerializer):
             "llm_base_url",
             "llm_api_key",
             "llm_model",
+            "llm_model_management_assistant",
             "llm_model_topic_chat",
             "llm_model_supplement_query",
             "llm_model_supplement_evaluate",

@@ -326,6 +326,7 @@ export interface SystemConfiguration {
   llm_base_url: string;
   llm_api_key: string;
   llm_model: string;
+  llm_model_management_assistant: string;
   llm_model_topic_chat: string;
   llm_model_supplement_query: string;
   llm_model_supplement_evaluate: string;
@@ -398,6 +399,41 @@ export const createSessionMessage = (sessionId: number, content: string) =>
   api.post<{ message: SessionMessage; task: AITask }>(
     `sessions/${sessionId}/messages/`,
     { content },
+  );
+
+export type ManagementAssistantTask = Pick<
+  AITask,
+  | 'id'
+  | 'task_type'
+  | 'task_type_display'
+  | 'status'
+  | 'status_display'
+  | 'error_message'
+  | 'model'
+  | 'result_json'
+>;
+
+export interface ManagementAssistantState {
+  session: Session;
+  tasks: ManagementAssistantTask[];
+}
+
+export const getManagementAssistant = () =>
+  api.get<ManagementAssistantState>('assistant/');
+export const createManagementAssistantMessage = (content: string) =>
+  api.post<{ message: SessionMessage; task: AITask }>('assistant/messages/', {
+    content,
+  });
+export const confirmManagementAssistantTopic = (taskId: number) =>
+  api.post<{
+    topic?: Topic;
+    topics?: Topic[];
+    message?: SessionMessage;
+    updated_count?: number;
+    created_count?: number;
+  }>(
+    'assistant/topics/confirm/',
+    { task_id: taskId },
   );
 
 export const getTopics = (params?: PaginationParams & { q?: string }) =>
