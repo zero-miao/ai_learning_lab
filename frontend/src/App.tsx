@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { BgColorsOutlined, SettingOutlined } from '@ant-design/icons';
-import { Button, ConfigProvider, Layout, Popover, Space, Spin, Typography, theme } from 'antd';
+import { BgColorsOutlined, MenuOutlined, SettingOutlined } from '@ant-design/icons';
+import { Button, ConfigProvider, Dropdown, Layout, Popover, Space, Spin, Typography, theme } from 'antd';
 import {
   applySiteTheme,
   hasStoredSiteTheme,
@@ -69,63 +69,96 @@ function App() {
       className={`site-theme site-theme--${siteTheme}`}
       style={{ minHeight: '100vh', background: option.page }}
     >
-      <Header style={{
-        display: 'flex',
-        alignItems: 'center',
+      <Header className="app-header" style={{
         background: option.dark ? 'rgba(24, 24, 24, 0.96)' : 'rgba(255, 255, 255, 0.94)',
         borderBottom: `1px solid ${option.dark ? '#3a3a3a' : '#f0f0f0'}`,
-        position: 'sticky',
-        top: 0,
-        zIndex: 1,
-        width: '100%'
       }}>
-        <Title level={3} style={{ margin: 0, cursor: 'pointer' }} onClick={() => navigate('/')}>
+        <Title className="app-header__title" level={3} style={{ margin: 0, cursor: 'pointer' }} onClick={() => navigate('/')}>
           AI Learning Lab
         </Title>
-        <Button style={{ marginLeft: 'auto' }} onClick={() => navigate('/materials')}>材料管理</Button>
-        <Button onClick={() => navigate('/tasks')}>任务管理</Button>
-        <Button onClick={() => navigate('/reviews')}>复习计划</Button>
-        <Button
-          icon={<SettingOutlined />}
-          aria-label="系统设置"
-          title="系统设置"
-          onClick={() => navigate('/settings')}
-        />
-        <Popover
-          trigger="click"
+        <nav className="app-header__desktop-nav" aria-label="主导航">
+          <Button onClick={() => navigate('/materials')}>材料管理</Button>
+          <Button onClick={() => navigate('/tasks')}>任务管理</Button>
+          <Button onClick={() => navigate('/reviews')}>复习计划</Button>
+          <Button
+            icon={<SettingOutlined />}
+            aria-label="系统设置"
+            title="系统设置"
+            onClick={() => navigate('/settings')}
+          />
+          <Popover
+            trigger="click"
+            placement="bottomRight"
+            content={
+              <Space direction="vertical" size={4}>
+                {siteThemeOptions.map((item) => (
+                  <Button
+                    key={item.value}
+                    type={siteTheme === item.value ? 'primary' : 'text'}
+                    block
+                    onClick={() => setSiteTheme(item.value)}
+                  >
+                    <span
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: '50%',
+                        background: item.color,
+                        border: '1px solid rgba(127,127,127,.45)',
+                      }}
+                    />
+                    {item.label}
+                  </Button>
+                ))}
+              </Space>
+            }
+          >
+            <Button
+              icon={<BgColorsOutlined />}
+              aria-label="选择全站背景"
+              title={`全站背景：${option.label}`}
+            />
+          </Popover>
+        </nav>
+        <Dropdown
+          trigger={['click']}
           placement="bottomRight"
-          content={
-            <Space direction="vertical" size={4}>
-              {siteThemeOptions.map((item) => (
-                <Button
-                  key={item.value}
-                  type={siteTheme === item.value ? 'primary' : 'text'}
-                  block
-                  onClick={() => setSiteTheme(item.value)}
-                >
-                  <span
-                    style={{
-                      width: 14,
-                      height: 14,
-                      borderRadius: '50%',
-                      background: item.color,
-                      border: '1px solid rgba(127,127,127,.45)',
-                    }}
-                  />
-                  {item.label}
-                </Button>
-              ))}
-            </Space>
-          }
+          menu={{
+            items: [
+              { key: '/topics', label: '我的话题' },
+              { key: '/materials', label: '材料管理' },
+              { key: '/tasks', label: '任务管理' },
+              { key: '/reviews', label: '复习计划' },
+              { key: '/settings', label: '系统设置' },
+              {
+                key: 'theme',
+                label: `界面背景：${option.label}`,
+                children: siteThemeOptions.map((item) => ({
+                  key: `theme:${item.value}`,
+                  label: item.label,
+                })),
+              },
+            ],
+            onClick: ({ key }) => {
+              if (key.startsWith('theme:')) {
+                const selected = siteThemeOptions.find(
+                  (item) => item.value === key.slice(6),
+                );
+                if (selected) setSiteTheme(selected.value);
+                return;
+              }
+              navigate(key);
+            },
+          }}
         >
           <Button
-            icon={<BgColorsOutlined />}
-            aria-label="选择全站背景"
-            title={`全站背景：${option.label}`}
+            className="app-header__mobile-nav"
+            icon={<MenuOutlined />}
+            aria-label="打开主导航"
           />
-        </Popover>
+        </Dropdown>
       </Header>
-      <Content style={{ background: option.page, transition: 'background-color 160ms ease' }}>
+      <Content className="app-content" style={{ background: option.page, transition: 'background-color 160ms ease' }}>
         <Suspense fallback={<Spin size="large" style={{ display: 'block', margin: 80 }} />}>
           <Routes>
             <Route path="/" element={<Navigate to="/topics" replace />} />
@@ -141,7 +174,7 @@ function App() {
           </Routes>
         </Suspense>
       </Content>
-      <Footer style={{ textAlign: 'center' }}>
+      <Footer className="app-footer" style={{ textAlign: 'center' }}>
         AI Learning Lab ©{new Date().getFullYear()} Created for Personal Learning
       </Footer>
       <FeedbackButton />

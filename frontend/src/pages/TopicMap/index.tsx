@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button, Card, Drawer, Empty, Form, Input, List, Modal, Popconfirm, Select, Space, Tag, Typography, message } from 'antd';
 import { ArrowLeftOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
@@ -25,6 +25,7 @@ const TopicMap: React.FC = () => {
   const [relation, setRelation] = useState<ConceptRelation | null>(null);
   const [relationOpen, setRelationOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
   const [relationForm] = Form.useForm<Pick<ConceptRelation, 'from_concept' | 'to_concept' | 'relation_type' | 'description'>>();
   const [conceptForm] = Form.useForm<Partial<Concept>>();
   const load = useCallback(async () => {
@@ -34,6 +35,11 @@ const TopicMap: React.FC = () => {
     setSelected((current) => current ? response.data.concepts.find((item) => item.id === current.id) ?? null : null);
   }, [id]);
   useEffect(() => { void load().catch(() => message.error('加载概念图失败')); }, [load]);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || canvas.clientWidth >= MAP_WIDTH) return;
+    canvas.scrollLeft = Math.max(0, (MAP_WIDTH - canvas.clientWidth) / 2);
+  }, [topic?.concepts.length]);
   const nodePositions = useMemo(() => positions(topic?.concepts ?? []), [topic?.concepts]);
   const openRelation = (current: ConceptRelation | null, from?: number, to?: number) => {
     setRelation(current);
@@ -56,9 +62,12 @@ const TopicMap: React.FC = () => {
   return <div style={{ maxWidth: 1200, margin: '0 auto', padding: 24 }}>
     <Space direction="vertical" size="large" style={{ display: 'flex' }}>
       <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(`/topics/${topic.id}`)}>返回主题</Button>
-      <Card title={<Space><span>{topic.title} 的思维导图</span><Tag>{topic.concepts.length} 个概念</Tag><Tag>{topic.concept_relations.length} 条关系</Tag></Space>}>
-        <Typography.Text type="secondary">拖拽一个概念节点到另一个节点上即可建立或编辑关系。</Typography.Text>
-        {topic.concepts.length ? <div style={{ position: 'relative', height: MAP_HEIGHT, overflow: 'auto', marginTop: 16, background: '#fafcff', borderRadius: 8 }}>
+      <Card
+        title={<Space wrap><span>{topic.title} 的思维导图</span><Tag>{topic.concepts.length} 个概念</Tag><Tag>{topic.concept_relations.length} 条关系</Tag></Space>}
+        extra={topic.concepts.length > 1 ? <Button onClick={() => openRelation(null)}>建立关系</Button> : null}
+      >
+        <Typography.Text type="secondary">电脑端可拖拽节点建立关系；手机端点击“建立关系”后选择两个概念。点击已有连线可编辑关系。</Typography.Text>
+        {topic.concepts.length ? <div ref={canvasRef} className="topic-map__canvas" style={{ position: 'relative', height: MAP_HEIGHT, overflow: 'auto', marginTop: 16, background: '#fafcff', borderRadius: 8 }}>
           <svg viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`} width={MAP_WIDTH} height={MAP_HEIGHT}>
             <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" /></marker></defs>
             {topic.concept_relations.map((item) => {

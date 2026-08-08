@@ -1,0 +1,68 @@
+.material-management__mobile-list {
+  margin-bottom: 16px;
+}
+
+.material-management__mobile-item {
+  padding: 0 0 12px !important;
+}
+
+.material-management__mobile-card {
+  width: 100%;
+}
+
+.material-management__mobile-card .ant-card-head-title {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.material-management__mobile-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.material-management__mobile-tags,
+.material-management__mobile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.material-management__mobile-tags .ant-tag {
+  margin: 0;
+  white-space: normal;
+}
+
+.material-management__mobile-detail {
+  padding: 12px;
+  overflow-wrap: anywhere;
+  background: rgba(127, 127, 127, 0.08);
+  border-radius: 8px;
+}
+
+.material-management__mobile-detail .ant-typography {
+  margin-bottom: 0;
+}
+
+@media (max-width: 767px) {
+  .material-management__filters {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+
+  .material-management__filters .ant-input-search {
+    grid-column: 1 / -1;
+    width: 100% !important;
+  }
+
+  .material-management__filters .ant-select {
+    width: 100% !important;
+  }
+
+  .material-management__mobile-actions .ant-btn {
+    flex: 1 1 auto;
+  }
+}

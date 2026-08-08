@@ -8,7 +8,7 @@
 
 @media (max-width: 720px) {
   .global-feedback-button {
-    right: 20px;
-    bottom: 92px;
+    right: max(16px, env(safe-area-inset-right));
+    bottom: calc(84px + env(safe-area-inset-bottom));
   }
 }

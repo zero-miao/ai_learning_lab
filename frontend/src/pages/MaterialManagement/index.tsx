@@ -6,7 +6,9 @@ import {
   Descriptions,
   Empty,
   Input,
+  List,
   Modal,
+  Pagination,
   Popconfirm,
   Select,
   Space,
@@ -35,6 +37,8 @@ import {
 } from '../../api';
 import type { Material, MaterialStatus, MaterialSummary, TopicSummary } from '../../api';
 import { message } from 'antd';
+import { useMediaQuery } from '../../useMediaQuery';
+import './styles.css';
 
 const { Paragraph, Text } = Typography;
 
@@ -90,6 +94,8 @@ const MaterialManagement: React.FC = () => {
   const [linkingTopicId, setLinkingTopicId] = useState<number | null>(null);
   const [linking, setLinking] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [expandedMobileId, setExpandedMobileId] = useState<number | null>(null);
+  const isMobile = useMediaQuery('(max-width: 767px)');
 
   const loadMaterials = useCallback(async () => {
     setLoading(true);
@@ -347,10 +353,130 @@ const MaterialManagement: React.FC = () => {
     },
   ];
 
+  const renderMobileMaterial = (material: MaterialSummary) => {
+    const detail = materialDetails[material.id];
+    const expanded = expandedMobileId === material.id;
+    return (
+      <List.Item className="material-management__mobile-item">
+        <Card
+          size="small"
+          className="material-management__mobile-card"
+          title={<Text strong>{material.title}</Text>}
+          extra={
+            <Tag color={statusColor[material.status]} style={{ margin: 0 }}>
+              {material.status_display || material.status}
+            </Tag>
+          }
+        >
+          <Space orientation="vertical" size={12} style={{ display: 'flex' }}>
+            <Space wrap size={[6, 6]}>
+              <Tag>{material.media_type}</Tag>
+              <Tag color={material.created_by === 'ai_recommended' ? 'purple' : 'default'}>
+                {material.created_by === 'ai_recommended' ? 'AI 推荐' : '人工添加'}
+              </Tag>
+              <Text type="secondary">{formatDate(material.updated_at)}</Text>
+            </Space>
+
+            <div className="material-management__mobile-section">
+              <Text type="secondary">关联话题</Text>
+              <div className="material-management__mobile-tags">
+                {material.topic_links.map((link) => (
+                  <Link key={link.topic} to={`/topics/${link.topic}`}>
+                    <Tag color="blue" icon={<LinkOutlined />}>{link.topic_title}</Tag>
+                  </Link>
+                ))}
+                {!material.topic_links.length && <Text type="secondary">无关联</Text>}
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => setLinkingMaterial(material)}
+                >
+                  关联
+                </Button>
+              </div>
+            </div>
+
+            <Space wrap size={[8, 8]}>
+              <Text type="secondary">
+                原文 {material.raw_text_length ? '已就绪' : '未生成'}
+              </Text>
+              <Text type="secondary">
+                清洗 {material.clean_text_length ? '已就绪' : '未生成'}
+              </Text>
+              <Text type="secondary">
+                摘要 {material.digest_length ? '已就绪' : '未生成'}
+              </Text>
+              <Text type="secondary">片段 {material.chunk_count}</Text>
+            </Space>
+
+            {material.tts_assets.length > 0 && (
+              <Space wrap size={[4, 4]}>
+                <Text type="secondary">朗读：</Text>
+                {material.tts_assets.map((asset) => (
+                  <Tag
+                    key={asset.voice}
+                    color={asset.status === 'ready' ? 'success' : 'error'}
+                  >
+                    {asset.label}
+                  </Tag>
+                ))}
+              </Space>
+            )}
+
+            {expanded && (
+              <div className="material-management__mobile-detail">
+                {loadingDetailIds.has(material.id) || !detail ? (
+                  <Spin size="small" />
+                ) : (
+                  <>
+                    <Text strong>材料摘要</Text>
+                    <Paragraph ellipsis={{ rows: 6, expandable: true, symbol: '展开' }}>
+                      {detail.digest || '无摘要'}
+                    </Paragraph>
+                    {detail.error && <Text type="danger">{detail.error}</Text>}
+                  </>
+                )}
+              </div>
+            )}
+
+            <div className="material-management__mobile-actions">
+              <Button
+                onClick={() => {
+                  const next = expanded ? null : material.id;
+                  setExpandedMobileId(next);
+                  if (next) void loadDetail(next);
+                }}
+              >
+                {expanded ? '收起详情' : '查看详情'}
+              </Button>
+              <Button
+                icon={<ReloadOutlined />}
+                loading={material.status === 'pending'}
+                onClick={() => void handleReImport(material.id)}
+              >
+                重新导入
+              </Button>
+              <Popconfirm
+                title={`删除“${material.title}”？`}
+                description="将删除全局材料及相关文件，且无法恢复。"
+                okText="删除"
+                okButtonProps={{ danger: true, loading: deletingId === material.id }}
+                onConfirm={() => void handleDelete(material)}
+              >
+                <Button danger icon={<DeleteOutlined />}>删除</Button>
+              </Popconfirm>
+            </div>
+          </Space>
+        </Card>
+      </List.Item>
+    );
+  };
+
   return (
-    <div style={{ maxWidth: 1480, margin: '0 auto', padding: 24 }}>
+    <div className="material-management" style={{ maxWidth: 1480, margin: '0 auto', padding: 24 }}>
       <Card title={`全局材料管理 (${total})`} extra={<Button onClick={() => void loadMaterials()} loading={loading}>刷新</Button>}>
-        <Space style={{ marginBottom: 16 }} wrap>
+        <Space className="material-management__filters" style={{ marginBottom: 16 }} wrap>
           <Input.Search
             style={{ width: 320 }}
             placeholder="搜索标题、媒体引用或摘要"
@@ -408,6 +534,24 @@ const MaterialManagement: React.FC = () => {
           />
         </Space>
         
+        {isMobile ? (
+          <>
+            <List
+              className="material-management__mobile-list"
+              loading={loading}
+              dataSource={materials}
+              renderItem={renderMobileMaterial}
+              locale={{ emptyText: <Empty description="没有符合条件的全局材料" /> }}
+            />
+            <Pagination
+              current={page}
+              pageSize={pageSize}
+              total={total}
+              showSizeChanger={false}
+              onChange={setPage}
+            />
+          </>
+        ) : (
         <Table
           rowKey="id"
           columns={columns}
@@ -491,6 +635,7 @@ const MaterialManagement: React.FC = () => {
             },
           }}
         />
+        )}
       </Card>
       <Modal
         title={`为“${linkingMaterial?.title ?? ''}”关联话题`}

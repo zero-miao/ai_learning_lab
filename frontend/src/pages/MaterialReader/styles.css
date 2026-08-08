@@ -53,6 +53,11 @@
   max-width: calc(100vw - 56px);
 }
 
+.material-reader__exit-immersive,
+.material-reader__enter-immersive {
+  display: none;
+}
+
 .material-reader__chat-messages {
   scrollbar-gutter: stable;
 }
@@ -276,8 +281,55 @@
 }
 
 @media (max-width: 720px) {
+  .app-content > .material-reader__page {
+    padding: 0 !important;
+  }
+
+  .material-reader__container {
+    padding: 12px 8px calc(32px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .material-reader__enter-immersive {
+    display: inline-flex;
+    margin-bottom: 12px;
+  }
+
+  .material-reader__exit-immersive {
+    position: fixed;
+    top: max(8px, env(safe-area-inset-top));
+    right: max(8px, env(safe-area-inset-right));
+    z-index: 70;
+    display: inline-flex;
+    min-height: 40px;
+    color: rgba(255, 255, 255, 0.88);
+    background: rgba(0, 0, 0, 0.62);
+    border-color: rgba(255, 255, 255, 0.18);
+    backdrop-filter: blur(8px);
+  }
+
+  .material-reader__page--immersive .material-reader__container {
+    padding: 0 0 calc(24px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .material-reader__page--immersive .material-reader__toolbar,
+  .material-reader__page--immersive .material-reader__container > .ant-alert,
+  .material-reader__page--immersive .material-reader__container > .ant-collapse,
+  .material-reader__page--immersive .universal-reader__header,
+  .material-reader__page--immersive .universal-reader__divider {
+    display: none;
+  }
+
+  .material-reader__page--immersive .universal-reader {
+    padding-top: max(64px, calc(48px + env(safe-area-inset-top)));
+    border-radius: 0;
+    box-shadow: none;
+  }
+
   .material-reader__toolbar {
-    top: 64px;
+    top: 56px;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px;
   }
 
   .material-reader__toolbar-actions .ant-typography {
@@ -285,16 +337,45 @@
   }
 
   .material-reader__back-button {
-    max-width: 48%;
+    width: 100%;
+    max-width: 100%;
+    justify-content: flex-start;
   }
 
   .material-reader__toolbar-actions {
+    justify-content: space-between;
     gap: 8px;
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .material-reader__toolbar-actions .ant-segmented {
+    flex: 0 0 auto;
+  }
+
+  .material-reader__toolbar-actions .ant-btn {
+    flex: 0 0 auto;
   }
 
   .material-reader__reader-tools {
-    right: 16px;
-    bottom: 164px;
+    right: 12px;
+    bottom: calc(158px + env(safe-area-inset-bottom));
     max-width: calc(100vw - 32px);
+  }
+
+  body.mobile-reader-immersive .app-header,
+  body.mobile-reader-immersive .app-footer,
+  body.mobile-reader-immersive .material-reader__reader-tools,
+  body.mobile-reader-immersive .global-feedback-button,
+  body.mobile-reader-immersive .global-management-assistant-button {
+    display: none;
+  }
+
+  .material-reader__chat-messages {
+    min-height: 0;
+  }
+
+  .material-reader__question-context .ant-alert-action {
+    margin-inline-start: 4px;
   }
 }
