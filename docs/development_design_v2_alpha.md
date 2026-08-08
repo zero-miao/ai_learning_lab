@@ -8,7 +8,7 @@
 | --- | --- |
 | **读者对象** | AI 编程助手（实现者）、未来维护者 |
 | **技术栈** | Django + DRF + SQLite / React + TypeScript + Vite + Ant Design / Ollama 异步任务 |
-| **部署形态** | 纯本地、单用户、电脑端优先 |
+| **部署形态** | 纯本地、单用户，支持电脑与手机浏览器 |
 | **产品文档** | [AI Learning Lab V2-alpha 产品设计文档](https://bytedance.larkoffice.com/docx/P7a0dhP8CoUgw0xEGA1cnC3Infb) |
 
 ## 工程目标与约束
@@ -24,11 +24,11 @@
 
 ### 非目标
 
-以下明确不在 V2-alpha 工程范围内：多用户鉴权与权限体系、云端部署与远程访问、移动端/响应式适配（电脑端优先）、大规模性能优化（本地单用户无需高并发）、抖音视频在线解析（暂缓）。
+以下明确不在 V2-alpha 工程范围内：多用户鉴权与权限体系、云端部署与远程访问、独立移动 App 或第二套移动前端、大规模性能优化（本地单用户无需高并发）、抖音视频在线解析（暂缓）。
 
 ### 硬约束
 
-本机 SQLite 作为唯一持久化存储，不引入外部数据库。Ollama 作为本地 LLM 推理后端，所有 AI 任务通过 AITask 模型异步调度。前端 React + TypeScript + Vite + Ant Design，不引入 SSR。电脑端优先。V1-alpha 已有数据必须向前兼容，迁移通过 Django migrations 完成。
+本机 SQLite 作为唯一持久化存储，不引入外部数据库。Ollama 作为本地 LLM 推理后端，所有 AI 任务通过 AITask 模型异步调度。前端 React + TypeScript + Vite + Ant Design，不引入 SSR。电脑与手机浏览器共用组件、路由、状态和 API，通过响应式断点切换布局；不得复制业务页面形成两套实现。V1-alpha 已有数据必须向前兼容，迁移通过 Django migrations 完成。
 
 ### 产品决策→工程决策映射
 

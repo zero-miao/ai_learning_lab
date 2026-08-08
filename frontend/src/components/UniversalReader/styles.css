@@ -256,6 +256,7 @@
   width: min(320px, calc(100vw - 80px));
   max-height: 320px;
   overflow-y: auto;
+  overflow-wrap: anywhere;
   line-height: 1.6;
   white-space: pre-wrap;
 }
@@ -362,6 +363,10 @@
   font-size: 19px;
   line-height: 1.9;
   letter-spacing: 0.012em;
+  touch-action: auto;
+  user-select: text;
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
 }
 
 .universal-reader--font-system .universal-reader__content {
@@ -749,21 +754,92 @@
 }
 
 @media (max-width: 640px) {
+  .universal-reader {
+    padding: 24px 16px 36px;
+    border-radius: 10px;
+  }
+
+  .universal-reader--video {
+    padding-inline: 12px;
+  }
+
   .universal-reader__header {
     flex-direction: column;
+    gap: 12px;
+  }
+
+  .universal-reader__title {
+    margin-top: 8px !important;
+    font-size: 28px !important;
+  }
+
+  .universal-reader__divider {
+    margin: 20px 0 24px !important;
   }
 
   .universal-reader__content {
-    font-size: 18px;
-    line-height: 1.8;
+    max-width: 100%;
+    font-size: 17px;
+    line-height: 1.75;
+    letter-spacing: 0;
+  }
+
+  .universal-reader__content p,
+  .universal-reader__content ul,
+  .universal-reader__content ol,
+  .universal-reader__content blockquote,
+  .universal-reader__content pre,
+  .universal-reader__content table {
+    margin-bottom: 1.2em;
+  }
+
+  .universal-reader__content pre {
+    padding: 12px;
+    font-size: 0.84em;
+  }
+
+  .universal-reader__transcript {
+    max-height: none;
+    padding: 14px;
   }
 
   .universal-reader__selection-menu {
+    top: auto !important;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    left: 12px !important;
+    z-index: 60;
+    justify-content: space-around;
+    width: auto;
     max-width: calc(100vw - 24px);
     overflow-x: auto;
   }
 
+  .universal-reader__selection-menu .ant-btn {
+    min-height: 40px;
+  }
+
   .universal-reader__tool-dock {
     width: 58px;
+  }
+
+  .universal-reader__comment-marker {
+    right: -8px;
+    width: 40px;
+    height: 40px;
+  }
+
+  .universal-reader__comment-popover {
+    width: auto;
+    max-width: calc(100vw - 48px);
+    max-height: min(50dvh, 320px);
+  }
+
+  .universal-reader__comment-drawer .ant-drawer-content-wrapper {
+    max-height: min(60dvh, 420px);
+  }
+
+  .universal-reader__comment-drawer .universal-reader__comment-popover {
+    max-width: 100%;
   }
 }

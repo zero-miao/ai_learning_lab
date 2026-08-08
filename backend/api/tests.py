@@ -29,7 +29,7 @@ from .models import (
     TopicMaterial,
     UserFeedback,
 )
-from .task_service import enqueue_or_reuse, execute_task
+from .task_service import claim_due_task, enqueue_or_reuse, execute_task
 from .tasks import TaskRegistry, _create_material_chunks
 
 
@@ -422,6 +422,29 @@ class V2ErApiTests(TestCase):
         self.assertEqual(detail.data["task_data"], task.task_data)
         self.assertEqual(detail.data["full_context"], task.full_context)
         self.assertEqual(detail.data["result_json"], task.result_json)
+
+    def test_task_claims_keep_tts_in_an_independent_lane(self):
+        llm_task = AITask.objects.create(
+            task_type="briefing",
+            trigger_type="Material",
+            trigger_id=self.material.id,
+            next_run_at=timezone.now(),
+        )
+        tts_task = AITask.objects.create(
+            task_type="edge_tts",
+            trigger_type="Material",
+            trigger_id=self.material.id,
+            next_run_at=timezone.now(),
+            model="edge-tts",
+        )
+
+        claimed_tts = claim_due_task(task_types=("edge_tts",))
+        claimed_default = claim_due_task(exclude_task_types=("edge_tts",))
+
+        self.assertEqual(claimed_tts.id, tts_task.id)
+        self.assertEqual(claimed_default.id, llm_task.id)
+        self.assertEqual(claimed_tts.status, "running")
+        self.assertEqual(claimed_default.status, "running")
 
     def test_all_standard_list_endpoints_are_paginated(self):
         endpoints = [

@@ -25,12 +25,13 @@ import {
   PlayCircleOutlined,
   SoundOutlined,
 } from '@ant-design/icons';
-import { Button, Divider, Popover, Space, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Divider, Drawer, Popover, Space, Tag, Tooltip, Typography, message } from 'antd';
 import type { Concept, Highlight, Material, Question } from '../../api';
 import {
   siteThemeOptions,
   type SiteTheme,
 } from '../../appearance';
+import { useMediaQuery } from '../../useMediaQuery';
 import './styles.css';
 
 const { Title, Text } = Typography;
@@ -588,6 +589,8 @@ export default function UniversalReader({
   const [selectionMenu, setSelectionMenu] = React.useState<SelectionMenu | null>(
     null,
   );
+  const selectionCaptureTimersRef = React.useRef<number[]>([]);
+  const selectionMenuInteractionRef = React.useRef(false);
   const [currentTime, setCurrentTime] = React.useState(0);
   const [speechState, setSpeechState] = React.useState<
     'idle' | 'speaking' | 'paused'
@@ -604,6 +607,8 @@ export default function UniversalReader({
     React.useState<Record<number, HighlightCommentPosition>>({});
   const [highlightCommentRailHeight, setHighlightCommentRailHeight] =
     React.useState(0);
+  const [mobileCommentId, setMobileCommentId] = React.useState<number | null>(null);
+  const isMobile = useMediaQuery('(max-width: 767px)');
   const isVideo = material.media_type === 'video' && Boolean(material.media_url);
   const highlightComments = React.useMemo(
     () =>
@@ -615,6 +620,9 @@ export default function UniversalReader({
   const selectedVoice =
     speechVoices.find((voice) => voice.voice === speechVoiceURI) ??
     speechVoices[0];
+  const mobileComment = highlights.find(
+    (highlight) => highlight.id === mobileCommentId,
+  );
   const darkMode =
     siteThemeOptions.find((option) => option.value === readerTheme)?.dark ?? false;
   const activeChunkId = isVideo
@@ -769,37 +777,25 @@ export default function UniversalReader({
   const clearSelection = () => {
     window.getSelection()?.removeAllRanges();
     setSelectionMenu(null);
+    selectionMenuInteractionRef.current = false;
   };
 
-  React.useEffect(() => {
-    const dismissWhenSelectionClears = () => {
-      const selection = window.getSelection();
-      if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-        setSelectionMenu(null);
-      }
-    };
-    const dismissOnScroll = () => setSelectionMenu(null);
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') clearSelection();
-    };
-    document.addEventListener('selectionchange', dismissWhenSelectionClears);
-    document.addEventListener('scroll', dismissOnScroll, true);
-    document.addEventListener('keydown', dismissOnEscape);
-    return () => {
-      document.removeEventListener('selectionchange', dismissWhenSelectionClears);
-      document.removeEventListener('scroll', dismissOnScroll, true);
-      document.removeEventListener('keydown', dismissOnEscape);
-    };
-  }, []);
-
-  const handleMouseUp = () => {
+  const captureSelection = React.useCallback(() => {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-      setSelectionMenu(null);
+      if (!selectionMenuInteractionRef.current) setSelectionMenu(null);
       return;
     }
 
     const range = selection.getRangeAt(0);
+    const content = transcriptRef.current;
+    if (
+      !content ||
+      !content.contains(range.startContainer) ||
+      !content.contains(range.endContainer)
+    ) {
+      return;
+    }
     const markdownStart = getMarkdownSourceOffset(
       range.startContainer,
       range.startOffset,
@@ -854,6 +850,43 @@ export default function UniversalReader({
         : Math.max(12, rect.top - menuHeight - 8),
       left: Math.max(12, Math.min(rect.left, window.innerWidth - menuWidth - 12)),
     });
+  }, [isVideo]);
+
+  const scheduleSelectionCapture = React.useCallback(
+    (delays = [0]) => {
+      selectionCaptureTimersRef.current.forEach(window.clearTimeout);
+      selectionCaptureTimersRef.current = delays.map((delay) =>
+        window.setTimeout(captureSelection, delay),
+      );
+    },
+    [captureSelection],
+  );
+
+  React.useEffect(() => {
+    const handleSelectionChange = () => {
+      scheduleSelectionCapture(isMobile ? [80, 260] : [0]);
+    };
+    const dismissOnScroll = () => {
+      if (!selectionMenuInteractionRef.current) setSelectionMenu(null);
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') clearSelection();
+    };
+    document.addEventListener('selectionchange', handleSelectionChange);
+    document.addEventListener('scroll', dismissOnScroll, true);
+    document.addEventListener('keydown', dismissOnEscape);
+    return () => {
+      selectionCaptureTimersRef.current.forEach(window.clearTimeout);
+      document.removeEventListener('selectionchange', handleSelectionChange);
+      document.removeEventListener('scroll', dismissOnScroll, true);
+      document.removeEventListener('keydown', dismissOnEscape);
+    };
+  }, [isMobile, scheduleSelectionCapture]);
+
+  const handleMouseUp = () => captureSelection();
+
+  const handleTouchEnd = () => {
+    scheduleSelectionCapture([80, 260, 500]);
   };
 
   const handleAction = (
@@ -1277,6 +1310,7 @@ export default function UniversalReader({
           className={`universal-reader__content ${isVideo ? 'universal-reader__transcript' : ''}`}
           ref={transcriptRef}
           onMouseUp={handleMouseUp}
+          onTouchEnd={handleTouchEnd}
           onClick={(event) => {
             onClearAnnotationSelection();
             if (!isVideo) openMarkdownAnnotation(event.target);
@@ -1386,11 +1420,7 @@ export default function UniversalReader({
                       {highlight.user_note}
                     </span>
                   </button>
-                  <Popover
-                    trigger="click"
-                    placement="leftTop"
-                    content={commentContent}
-                  >
+                  {isMobile ? (
                     <Button
                       className="universal-reader__comment-marker"
                       type="primary"
@@ -1399,8 +1429,28 @@ export default function UniversalReader({
                       icon={<CommentOutlined />}
                       style={{ top: position?.anchorTop ?? 0 }}
                       aria-label={`查看高亮备注：${sourceText}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setMobileCommentId(highlight.id);
+                      }}
                     />
-                  </Popover>
+                  ) : (
+                    <Popover
+                      trigger="click"
+                      placement="leftTop"
+                      content={commentContent}
+                    >
+                      <Button
+                        className="universal-reader__comment-marker"
+                        type="primary"
+                        shape="circle"
+                        size="small"
+                        icon={<CommentOutlined />}
+                        style={{ top: position?.anchorTop ?? 0 }}
+                        aria-label={`查看高亮备注：${sourceText}`}
+                      />
+                    </Popover>
+                  )}
                 </React.Fragment>
               );
             })}
@@ -1408,11 +1458,40 @@ export default function UniversalReader({
         )}
       </div>
 
+      <Drawer
+        title="高亮备注"
+        placement="bottom"
+        open={isMobile && Boolean(mobileComment)}
+        onClose={() => setMobileCommentId(null)}
+        maskClosable={false}
+        height="auto"
+        className="universal-reader__comment-drawer"
+      >
+        {mobileComment && (
+          <div className="universal-reader__comment-popover">
+            <div className="universal-reader__comment-source">
+              {mobileComment.locators.find(
+                (item) => item.material === material.id,
+              )?.source_text || '对应高亮'}
+            </div>
+            <div>{mobileComment.user_note}</div>
+          </div>
+        )}
+      </Drawer>
+
       {selectionMenu && (
         <div
           className="universal-reader__selection-menu"
           style={{ top: selectionMenu.top, left: selectionMenu.left }}
           onMouseDown={(event) => event.preventDefault()}
+          onPointerDown={() => {
+            selectionMenuInteractionRef.current = true;
+          }}
+          onPointerUp={() => {
+            window.setTimeout(() => {
+              selectionMenuInteractionRef.current = false;
+            }, 0);
+          }}
         >
           <Button
             type="text"

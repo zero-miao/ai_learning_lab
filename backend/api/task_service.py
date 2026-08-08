@@ -69,14 +69,18 @@ def recover_interrupted_tasks():
     )
 
 
-def claim_due_task():
+def claim_due_task(*, task_types=None, exclude_task_types=None):
     with transaction.atomic():
-        task = (
+        queryset = (
             AITask.objects.select_for_update()
             .filter(status="pending", next_run_at__lte=timezone.now())
             .order_by("-priority", "next_run_at", "id")
-            .first()
         )
+        if task_types:
+            queryset = queryset.filter(task_type__in=task_types)
+        if exclude_task_types:
+            queryset = queryset.exclude(task_type__in=exclude_task_types)
+        task = queryset.first()
         if task is None:
             return None
         task.status = "running"

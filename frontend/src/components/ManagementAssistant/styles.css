@@ -111,11 +111,23 @@
 
 @media (max-width: 720px) {
   .global-management-assistant-button {
-    right: 20px;
-    bottom: 20px;
+    right: max(16px, env(safe-area-inset-right));
+    bottom: calc(16px + env(safe-area-inset-bottom));
   }
 
   .management-assistant__messages {
-    max-height: calc(100vh - 210px);
+    min-height: 0;
+    max-height: calc(100dvh - 220px);
+  }
+
+  .management-assistant__field-change {
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
+
+  .management-assistant__composer {
+    position: sticky;
+    bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    background: inherit;
   }
 }

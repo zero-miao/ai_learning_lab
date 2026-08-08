@@ -35,6 +35,7 @@ import {
   AppstoreOutlined,
   ArrowLeftOutlined,
   CheckOutlined,
+  CompressOutlined,
   DeleteOutlined,
   EditOutlined,
   FileSearchOutlined,
@@ -72,6 +73,7 @@ import type {
 import UniversalReader from '../../components/UniversalReader';
 import type { ReaderFont, TextSelectionAnchor } from '../../components/UniversalReader';
 import { useSiteTheme } from '../../appearance';
+import { useMediaQuery } from '../../useMediaQuery';
 import './styles.css';
 
 const { Text } = Typography;
@@ -109,6 +111,10 @@ const MaterialReader: React.FC = () => {
   const [annotationScope, setAnnotationScope] = useState<'topic' | 'all'>('topic');
   const [showHighlightNotes, setShowHighlightNotes] = useState(
     () => window.localStorage.getItem('reader-highlight-notes') !== 'hidden',
+  );
+  const isMobile = useMediaQuery('(max-width: 767px)');
+  const [immersiveMode, setImmersiveMode] = useState(
+    () => window.matchMedia('(max-width: 767px)').matches,
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [tab, setTab] = useState('questions');
@@ -254,6 +260,12 @@ const MaterialReader: React.FC = () => {
       showHighlightNotes ? 'visible' : 'hidden',
     );
   }, [showHighlightNotes]);
+
+  useEffect(() => {
+    const enabled = isMobile && immersiveMode;
+    document.body.classList.toggle('mobile-reader-immersive', enabled);
+    return () => document.body.classList.remove('mobile-reader-immersive');
+  }, [immersiveMode, isMobile]);
 
   useEffect(() => {
     window.localStorage.setItem('reader-font', readerFont);
@@ -618,12 +630,16 @@ const MaterialReader: React.FC = () => {
 
   return (
     <>
-      <div style={{
-        minHeight: '100vh',
-        background: themeOption.page,
-        transition: 'background-color 160ms ease',
-      }}>
+      <div
+        className={`material-reader__page ${immersiveMode ? 'material-reader__page--immersive' : ''}`}
+        style={{
+          minHeight: '100vh',
+          background: themeOption.page,
+          transition: 'background-color 160ms ease',
+        }}
+      >
         <div
+          className="material-reader__container"
           style={{
             maxWidth: material.media_type === 'video' ? 1480 : 1080,
             margin: '0 auto',
@@ -669,6 +685,25 @@ const MaterialReader: React.FC = () => {
               </Button>
             </div>
           </div>
+          {isMobile && immersiveMode && (
+            <Button
+              className="material-reader__exit-immersive"
+              icon={<CompressOutlined />}
+              aria-label="退出沉浸阅读"
+              onClick={() => setImmersiveMode(false)}
+            >
+              退出沉浸
+            </Button>
+          )}
+          {isMobile && !immersiveMode && (
+            <Button
+              className="material-reader__enter-immersive"
+              type="primary"
+              onClick={() => setImmersiveMode(true)}
+            >
+              沉浸阅读
+            </Button>
+          )}
           {task && (
             <Alert
               showIcon

@@ -6,9 +6,22 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from .task_service import claim_due_task, execute_task, recover_interrupted_tasks
 
 _scheduler = None
-_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ai-task-worker")
+_executors = {
+    "default": ThreadPoolExecutor(
+        max_workers=1,
+        thread_name_prefix="ai-task-worker",
+    ),
+    "tts": ThreadPoolExecutor(
+        max_workers=1,
+        thread_name_prefix="tts-task-worker",
+    ),
+}
 _lock = Lock()
-_active_task = False
+_active_lanes = {"default": False, "tts": False}
+_lane_claim_options = {
+    "default": {"exclude_task_types": ("edge_tts",)},
+    "tts": {"task_types": ("edge_tts",)},
+}
 
 
 def start_scheduler():
@@ -30,21 +43,23 @@ def start_scheduler():
 
 
 def dispatch_due_task():
-    global _active_task
     with _lock:
-        if _active_task:
-            return
-        task = claim_due_task()
-        if task is None:
-            return
-        _active_task = True
-    _executor.submit(_run_and_release, task.id)
+        claimed = []
+        for lane, claim_options in _lane_claim_options.items():
+            if _active_lanes[lane]:
+                continue
+            task = claim_due_task(**claim_options)
+            if task is None:
+                continue
+            _active_lanes[lane] = True
+            claimed.append((lane, task.id))
+    for lane, task_id in claimed:
+        _executors[lane].submit(_run_and_release, lane, task_id)
 
 
-def _run_and_release(task_id):
-    global _active_task
+def _run_and_release(lane, task_id):
     try:
         execute_task(task_id)
     finally:
         with _lock:
-            _active_task = False
+            _active_lanes[lane] = False
