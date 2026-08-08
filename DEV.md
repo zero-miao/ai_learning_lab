@@ -10,6 +10,27 @@ AI Learning Lab 是一个本地部署的 AI 辅助学习系统项目。本文档
 /Users/meiao/ai_workspace/ai-learning-lab
 ```
 
+## Git 开发流程
+
+- 禁止直接在 `main` 分支修改或提交代码。开始任何开发任务前，必须先从最新的 `main` 创建独立分支。
+- 新功能使用 `feat/<简短描述>` 分支，缺陷修复、体验修正和文档约束使用 `fix/<简短描述>` 分支。
+- 所有代码修改、验证和提交均在对应的 `feat/` 或 `fix/` 分支完成，并将该分支推送到远端。
+- `main` 只接收经过验证的分支合并，不得使用 `git commit` 直接产生提交；紧急修复也不得绕过此规则。
+- 若开始工作时已经存在未提交修改，应先创建并切换到合适的 `feat/` 或 `fix/` 分支，再继续编辑和提交。
+
+推荐流程：
+
+```bash
+git switch main
+git pull --ff-only origin main
+git switch -c feat/<简短描述>  # 缺陷修复使用 fix/<简短描述>
+
+# 完成开发和验证后
+git add <相关文件>
+git commit -m "<提交说明>"
+git push -u origin HEAD
+```
+
 ## 技术栈
 
 - 后端：Python + Django + Django REST Framework
