@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -80,7 +87,8 @@ export default function ManagementAssistant() {
   const [draft, setDraft] = useState('');
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [tasks, setTasks] = useState<ManagementAssistantTask[]>([]);
-  const endRef = useRef<HTMLDivElement | null>(null);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickToBottomRef = useRef(false);
 
   const load = useCallback(async () => {
     const response = await getManagementAssistant();
@@ -109,14 +117,16 @@ export default function ManagementAssistant() {
     return () => window.clearInterval(timer);
   }, [activeTask, load, open]);
 
-  useEffect(() => {
-    if (!open) return;
-    endRef.current?.scrollIntoView({ block: 'nearest' });
+  useLayoutEffect(() => {
+    const container = messagesRef.current;
+    if (!open || !container || !shouldStickToBottomRef.current) return;
+    container.scrollTop = container.scrollHeight;
   }, [messages, open, tasks]);
 
   const send = async (content = draft) => {
     const normalized = content.trim();
     if (!normalized || sending || activeTask) return;
+    shouldStickToBottomRef.current = true;
     setSending(true);
     try {
       const response = await createManagementAssistantMessage(normalized);
@@ -316,7 +326,10 @@ export default function ManagementAssistant() {
         icon={<RobotOutlined />}
         aria-label="打开全站管理助手"
         title="全站管理助手"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          shouldStickToBottomRef.current = false;
+          setOpen(true);
+        }}
       />
       <Drawer
         title={
@@ -334,7 +347,18 @@ export default function ManagementAssistant() {
         }}
       >
         <Spin spinning={loading}>
-          <div className="management-assistant__messages">
+          <div
+            ref={messagesRef}
+            className="management-assistant__messages"
+            onScroll={(event) => {
+              const container = event.currentTarget;
+              shouldStickToBottomRef.current =
+                container.scrollHeight -
+                  container.scrollTop -
+                  container.clientHeight <
+                32;
+            }}
+          >
             {!messages.length && !loading ? (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -399,7 +423,6 @@ export default function ManagementAssistant() {
                 }
               />
             )}
-            <div ref={endRef} />
           </div>
         </Spin>
         <div

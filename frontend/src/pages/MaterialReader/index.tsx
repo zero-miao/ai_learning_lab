@@ -25,6 +25,7 @@ import {
   Skeleton,
   Space,
   Spin,
+  Switch,
   Tag,
   Tabs,
   Typography,
@@ -106,6 +107,9 @@ const MaterialReader: React.FC = () => {
     highlights: [],
   });
   const [annotationScope, setAnnotationScope] = useState<'topic' | 'all'>('topic');
+  const [showHighlightNotes, setShowHighlightNotes] = useState(
+    () => window.localStorage.getItem('reader-highlight-notes') !== 'hidden',
+  );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [tab, setTab] = useState('questions');
   const [selection, setSelection] = useState<TextSelectionAnchor | null>(null);
@@ -243,6 +247,13 @@ const MaterialReader: React.FC = () => {
   useEffect(() => {
     void load().catch(() => message.error('加载材料失败'));
   }, [load]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      'reader-highlight-notes',
+      showHighlightNotes ? 'visible' : 'hidden',
+    );
+  }, [showHighlightNotes]);
 
   useEffect(() => {
     window.localStorage.setItem('reader-font', readerFont);
@@ -645,6 +656,14 @@ const MaterialReader: React.FC = () => {
               <Text type="secondary">
                 {scoped.concepts.length} 概念 · {scoped.questions.length} 问答 · {scoped.highlights.length} 高亮
               </Text>
+              <Switch
+                size="small"
+                checked={showHighlightNotes}
+                checkedChildren="备注开"
+                unCheckedChildren="备注关"
+                aria-label="切换正文高亮备注"
+                onChange={setShowHighlightNotes}
+              />
               <Button icon={<AppstoreOutlined />} onClick={() => setDrawerOpen(true)}>
                 学习工作区
               </Button>
@@ -741,6 +760,7 @@ const MaterialReader: React.FC = () => {
             }, 300);
           }}
             selectedAnnotations={[]}
+            showHighlightNotes={showHighlightNotes}
             seekTime={seekTime}
             speechControlsTargetId="material-reader-reader-tools"
           />

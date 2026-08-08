@@ -1173,6 +1173,9 @@ class UserFeedbackViewSet(viewsets.ModelViewSet):
         category_filter = self.request.query_params.get("category")
         if category_filter:
             queryset = queryset.filter(category=category_filter)
+        feature_filter = self.request.query_params.get("feature")
+        if feature_filter:
+            queryset = queryset.filter(feature=feature_filter)
         return queryset
 
 

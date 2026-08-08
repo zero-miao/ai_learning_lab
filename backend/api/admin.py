@@ -482,16 +482,18 @@ class UserFeedbackAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "category",
+        "feature",
         "status",
         "description_preview",
         "page_title",
         "created_at",
         "updated_at",
     )
-    list_filter = ("status", "category", "created_at")
+    list_filter = ("status", "category", "feature", "created_at")
     search_fields = ("description", "page_url", "page_title", "resolution_note")
     readonly_fields = (
         "category",
+        "feature",
         "description",
         "page_url",
         "page_title",

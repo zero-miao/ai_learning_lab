@@ -690,6 +690,9 @@ class UserFeedbackSerializer(serializers.ModelSerializer):
     category_display = serializers.CharField(
         source="get_category_display", read_only=True
     )
+    feature_display = serializers.CharField(
+        source="get_feature_display", read_only=True
+    )
     status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
@@ -698,6 +701,8 @@ class UserFeedbackSerializer(serializers.ModelSerializer):
             "id",
             "category",
             "category_display",
+            "feature",
+            "feature_display",
             "description",
             "page_url",
             "page_title",
@@ -712,6 +717,7 @@ class UserFeedbackSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "category_display",
+            "feature_display",
             "status",
             "status_display",
             "resolution_note",
