@@ -5,6 +5,7 @@ import {
   Alert,
   Button,
   Card,
+  Collapse,
   Drawer,
   Empty,
   Input,
@@ -209,10 +210,11 @@ const TopicDiscussionDrawer: React.FC<Props> = ({
     }
   };
 
-  const recommendationCards = (messageId: number | null) =>
-    recommendations
-      .filter((item) => item.message === messageId)
-      .map((item) => (
+  const recommendationCards = (messageId: number | null) => {
+    const matching = recommendations.filter((item) => item.message === messageId);
+    const pending = matching.filter((item) => item.status === 'pending');
+    const decided = matching.filter((item) => item.status !== 'pending');
+    const renderCard = (item: MaterialRecommendation) => (
         <Card
           key={item.id}
           size="small"
@@ -264,7 +266,28 @@ const TopicDiscussionDrawer: React.FC<Props> = ({
             </Button>
           </Space>
         </Card>
-      ));
+    );
+
+    return (
+      <>
+        {pending.map(renderCard)}
+        {decided.length > 0 && (
+          <Collapse
+            ghost
+            size="small"
+            style={{ marginTop: 8, width: '100%' }}
+            items={[
+              {
+                key: 'decided',
+                label: `已处理材料（${decided.length}）`,
+                children: decided.map(renderCard),
+              },
+            ]}
+          />
+        )}
+      </>
+    );
+  };
 
   return (
     <Drawer

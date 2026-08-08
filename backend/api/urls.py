@@ -15,6 +15,7 @@ from .views import (
     TopicMaterialViewSet,
     TopicViewSet,
     UserFeedbackViewSet,
+    current_reading_preferences,
     discover_llm_models,
     health_check,
     management_assistant_confirm_topic,
@@ -64,6 +65,11 @@ urlpatterns = [
         "system-configuration/models/",
         discover_llm_models,
         name="discover_llm_models",
+    ),
+    path(
+        "system-configuration/preferences/",
+        current_reading_preferences,
+        name="current_reading_preferences",
     ),
     path("", include(router.urls)),
 ]

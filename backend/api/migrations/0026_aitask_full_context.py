@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0025_remove_v1_compatibility'),
+        ("api", "0025_remove_v1_compatibility"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='aitask',
-            name='full_context',
-            field=models.TextField(blank=True, verbose_name='LLM完整上下文'),
+            model_name="aitask",
+            name="full_context",
+            field=models.TextField(blank=True, verbose_name="LLM完整上下文"),
         ),
     ]

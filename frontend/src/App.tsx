@@ -4,7 +4,6 @@ import { BgColorsOutlined, MenuOutlined, SettingOutlined } from '@ant-design/ico
 import { Button, ConfigProvider, Dropdown, Layout, Popover, Space, Spin, Typography, theme } from 'antd';
 import {
   applySiteTheme,
-  hasStoredSiteTheme,
   siteThemeOptions,
   useSiteTheme,
 } from './appearance';
@@ -50,15 +49,19 @@ function App() {
     void getSystemConfiguration()
       .then((response) => {
         setApiTimeout(response.data.api_timeout_ms);
-        if (!hasStoredSiteTheme()) {
-          applySiteTheme(response.data.default_site_theme);
-        }
-        if (!window.localStorage.getItem('reader-font')) {
-          window.localStorage.setItem(
-            'reader-font',
-            response.data.default_reader_font,
-          );
-        }
+        applySiteTheme(response.data.current_site_theme);
+        window.localStorage.setItem(
+          'reader-font',
+          response.data.current_reader_font,
+        );
+        window.localStorage.setItem(
+          'reader-tts-voice',
+          response.data.current_tts_voice,
+        );
+        window.localStorage.setItem(
+          'reader-speech-rate',
+          String(response.data.current_speech_rate),
+        );
       })
       .catch(() => undefined);
   }, []);

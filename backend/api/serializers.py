@@ -37,6 +37,17 @@ class ModelDiscoverySerializer(serializers.Serializer):
     )
 
 
+class CurrentReadingPreferencesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SystemConfiguration
+        fields = [
+            "current_site_theme",
+            "current_reader_font",
+            "current_tts_voice",
+            "current_speech_rate",
+        ]
+
+
 class SystemConfigurationSerializer(serializers.ModelSerializer):
     class Meta:
         model = SystemConfiguration
@@ -63,12 +74,25 @@ class SystemConfigurationSerializer(serializers.ModelSerializer):
             "searxng_base_url",
             "crawl4ai_base_url",
             "supplement_relevance_threshold",
+            "supplement_excluded_domains",
             "default_site_theme",
             "default_reader_font",
+            "default_tts_voice",
+            "default_speech_rate",
+            "current_site_theme",
+            "current_reader_font",
+            "current_tts_voice",
+            "current_speech_rate",
             "api_timeout_ms",
             "updated_at",
         ]
-        read_only_fields = ["updated_at"]
+        read_only_fields = [
+            "current_site_theme",
+            "current_reader_font",
+            "current_tts_voice",
+            "current_speech_rate",
+            "updated_at",
+        ]
 
     def validate_tts_voices(self, value):
         voices = [item.strip() for item in value.split(",") if item.strip()]
@@ -77,6 +101,16 @@ class SystemConfigurationSerializer(serializers.ModelSerializer):
         if any(not item.partition("|")[0].strip() for item in voices):
             raise serializers.ValidationError("TTS 音色格式无效。")
         return ",".join(voices)
+
+    def validate_supplement_excluded_domains(self, value):
+        domains = [
+            item.strip().lower().lstrip(".")
+            for item in value.replace("\n", ",").split(",")
+            if item.strip()
+        ]
+        if any("/" in domain or " " in domain for domain in domains):
+            raise serializers.ValidationError("排除域名只允许填写域名。")
+        return ",".join(dict.fromkeys(domains))
 
 
 class MaterialTextLocatorSerializer(serializers.ModelSerializer):

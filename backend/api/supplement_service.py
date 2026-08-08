@@ -2,7 +2,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from urllib.error import URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 import trafilatura
@@ -43,6 +43,14 @@ def search(query, limit=10):
                 }
             )
     return results
+
+
+def is_excluded_url(url, excluded_domains):
+    hostname = (urlparse(url).hostname or "").lower().rstrip(".")
+    return any(
+        hostname == domain or hostname.endswith(f".{domain}")
+        for domain in excluded_domains
+    )
 
 
 def crawl(url):

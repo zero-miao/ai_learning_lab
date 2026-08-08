@@ -36,6 +36,7 @@ from .serializers import (
     AITaskSerializer,
     ConceptRelationSerializer,
     ConceptSerializer,
+    CurrentReadingPreferencesSerializer,
     ExamSerializer,
     HighlightSerializer,
     MaterialListSerializer,
@@ -355,6 +356,19 @@ def system_configuration_detail(request):
     from .ai_gateway import AIGateway
 
     AIGateway.reset_providers()
+    return Response(serializer.data)
+
+
+@api_view(["PATCH"])
+def current_reading_preferences(request):
+    configuration = SystemConfiguration.load()
+    serializer = CurrentReadingPreferencesSerializer(
+        configuration,
+        data=request.data,
+        partial=True,
+    )
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
     return Response(serializer.data)
 
 
@@ -678,6 +692,7 @@ class TopicViewSet(viewsets.ModelViewSet):
                 "relevance_threshold": get_config_value(
                     "supplement_relevance_threshold"
                 ),
+                "excluded_domains": get_config_value("supplement_excluded_domains"),
                 "max_recommendations": 5,
             },
         )

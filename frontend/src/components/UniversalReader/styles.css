@@ -195,6 +195,7 @@
   padding: 12px 14px;
   color: #1f2937;
   text-align: left;
+  overflow: hidden;
   cursor: pointer;
   background: #fffdf5;
   border: 1px solid #ffe58f;
@@ -221,12 +222,19 @@
 
 .universal-reader__comment-card-title {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 6px;
   margin-bottom: 7px;
   color: #8d6500;
   font-size: 13px;
   font-weight: 700;
+}
+
+.universal-reader__comment-card-title > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .universal-reader__comment-source {
@@ -238,6 +246,18 @@
   line-height: 1.5;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.universal-reader__comment-card .ant-input {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+
+.universal-reader__comment-actions {
+  margin-top: 8px;
 }
 
 .universal-reader__comment-text {

@@ -1437,7 +1437,7 @@ class SupplementSearchTask(BaseTask):
 
     def run(self) -> Dict[str, Any]:
         from .models import AITask, MaterialRecommendation, SessionMessage
-        from .supplement_service import content_md5, crawl, search
+        from .supplement_service import content_md5, crawl, is_excluded_url, search
 
         task_instance = AITask.objects.get(pk=self.task_id)
 
@@ -1480,14 +1480,23 @@ class SupplementSearchTask(BaseTask):
         _update_task_progress(task_instance, result)
 
         candidates_by_url = {}
+        excluded_domains = {
+            domain.strip().lower().lstrip(".")
+            for domain in str(self.task_data.get("excluded_domains", ""))
+            .replace("\n", ",")
+            .split(",")
+            if domain.strip()
+        }
         for query in queries:
             for candidate in search(query):
+                if is_excluded_url(candidate["url"], excluded_domains):
+                    continue
                 candidates_by_url.setdefault(candidate["url"], candidate)
 
         result.update(stage="crawling", searched_count=len(candidates_by_url))
         _update_task_progress(task_instance, result)
 
-        threshold = float(self.task_data.get("relevance_threshold", 0.8))
+        threshold = max(0.85, float(self.task_data.get("relevance_threshold", 0.85)))
         max_recommendations = min(int(self.task_data.get("max_recommendations", 5)), 5)
         message = SessionMessage.objects.filter(
             pk=self.task_data.get("recommendation_message_id")

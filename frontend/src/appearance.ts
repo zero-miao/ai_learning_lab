@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { updateCurrentReadingPreferences } from './api';
 
 export type SiteTheme =
   | 'paper'
@@ -75,6 +76,9 @@ export function useSiteTheme() {
   const setSiteTheme = (value: SiteTheme) => {
     setSiteThemeState(value);
     applySiteTheme(value);
+    void updateCurrentReadingPreferences({
+      current_site_theme: value,
+    }).catch(() => undefined);
   };
 
   return {

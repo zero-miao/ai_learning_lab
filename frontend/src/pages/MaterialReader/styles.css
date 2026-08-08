@@ -260,7 +260,25 @@
 }
 
 .reader-drawer-item {
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   transition: background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.material-reader__highlight-heading,
+.material-reader__highlight-heading .ant-space-item {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.material-reader__highlight-source,
+.material-reader__highlight-note {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .reader-drawer-item:hover {
