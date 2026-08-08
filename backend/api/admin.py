@@ -95,6 +95,7 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
 class TopicAdmin(admin.ModelAdmin):
     list_display = (
         "title",
+        "is_pinned",
         "status",
         "mastery_level",
         "material_count",
@@ -102,12 +103,12 @@ class TopicAdmin(admin.ModelAdmin):
         "session",
         "updated_at",
     )
-    list_filter = ("status", "mastery_level")
+    list_filter = ("is_pinned", "status", "mastery_level")
     search_fields = ("title", "goal", "scope")
     readonly_fields = ("created_at", "updated_at")
     list_select_related = ("session",)
     fieldsets = (
-        (None, {"fields": ("title", "status", "goal", "scope")}),
+        (None, {"fields": ("title", "is_pinned", "status", "goal", "scope")}),
         ("学习进度", {"fields": ("mastery_level",)}),
         ("学习讨论", {"fields": ("session",)}),
         ("时间", {"fields": ("created_at", "updated_at")}),

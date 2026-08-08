@@ -331,6 +331,7 @@ class V2ErApiTests(TestCase):
                 "id",
                 "title",
                 "goal",
+                "is_pinned",
                 "status",
                 "status_display",
                 "mastery_level",
@@ -341,6 +342,26 @@ class V2ErApiTests(TestCase):
             },
         )
         self.assertEqual(serialized["material_count"], 1)
+
+    def test_topic_pin_is_persisted_and_pinned_topics_sort_first(self):
+        pinned = Topic.objects.create(title="置顶话题", is_pinned=True)
+        Topic.objects.create(title="更新但未置顶的话题")
+
+        response = self.client.get("/api/topics/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["results"][0]["id"], pinned.id)
+        self.assertTrue(response.data["results"][0]["is_pinned"])
+
+        unpin = self.client.patch(
+            f"/api/topics/{pinned.id}/",
+            {"is_pinned": False},
+            format="json",
+        )
+        self.assertEqual(unpin.status_code, 200)
+        self.assertFalse(unpin.data["is_pinned"])
+        pinned.refresh_from_db()
+        self.assertFalse(pinned.is_pinned)
 
     def test_material_list_returns_summary_and_searches_server_side(self):
         self.material.digest = "QuerySet 查询摘要"
@@ -431,7 +452,7 @@ class V2ErApiTests(TestCase):
             "api_exam": {"exam_topic_created_idx"},
             "api_reviewrecord": {"review_result_due_idx"},
             "api_session": {"session_updated_idx"},
-            "api_topic": {"topic_updated_idx"},
+            "api_topic": {"topic_updated_idx", "topic_pinned_updated_idx"},
             "api_topicmaterial": {
                 "topicmat_active_topic_idx",
                 "topicmat_active_mat_idx",

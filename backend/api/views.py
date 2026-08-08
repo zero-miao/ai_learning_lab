@@ -507,7 +507,7 @@ class TopicViewSet(viewsets.ModelViewSet):
                     filter=Q(topic_materials__removed_at__isnull=True),
                     distinct=True,
                 )
-            )
+            ).order_by("-is_pinned", "-updated_at")
         return queryset
 
     def get_serializer_class(self):

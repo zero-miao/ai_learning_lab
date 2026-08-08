@@ -119,6 +119,7 @@ class Topic(models.Model):
     title = models.CharField(max_length=255, verbose_name="标题")
     goal = models.TextField(blank=True, verbose_name="学习目标")
     scope = models.TextField(blank=True, verbose_name="学习范围")
+    is_pinned = models.BooleanField(default=False, verbose_name="是否置顶")
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default="draft", verbose_name="状态"
     )
@@ -142,9 +143,13 @@ class Topic(models.Model):
     class Meta:
         verbose_name = "学习主题"
         verbose_name_plural = "学习主题"
-        ordering = ["-updated_at"]
+        ordering = ["-is_pinned", "-updated_at"]
         indexes = [
             models.Index(fields=["-updated_at"], name="topic_updated_idx"),
+            models.Index(
+                fields=["-is_pinned", "-updated_at"],
+                name="topic_pinned_updated_idx",
+            ),
         ]
 
     def __str__(self):

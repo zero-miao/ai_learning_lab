@@ -15,9 +15,20 @@ import {
   Typography,
   message,
 } from 'antd';
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined,
+  PlusOutlined,
+  PushpinFilled,
+  PushpinOutlined,
+} from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { createMaterial, createTopic, deleteTopic, getTopics } from '../../api';
+import {
+  createMaterial,
+  createTopic,
+  deleteTopic,
+  getTopics,
+  updateTopic,
+} from '../../api';
 import type { TopicSummary } from '../../api';
 
 const { Title, Paragraph } = Typography;
@@ -43,6 +54,7 @@ const TopicList: React.FC = () => {
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [deletingTopicId, setDeletingTopicId] = useState<number | null>(null);
+  const [pinningTopicId, setPinningTopicId] = useState<number | null>(null);
   const [form] = Form.useForm<CreateTopicValues>();
   const navigate = useNavigate();
 
@@ -120,6 +132,22 @@ const TopicList: React.FC = () => {
       message.error('删除话题失败');
     } finally {
       setDeletingTopicId(null);
+    }
+  };
+
+  const handlePin = async (topic: TopicSummary) => {
+    const nextPinned = !topic.is_pinned;
+    try {
+      setPinningTopicId(topic.id);
+      await updateTopic(topic.id, { is_pinned: nextPinned });
+      message.success(nextPinned ? `已置顶“${topic.title}”` : `已取消置顶“${topic.title}”`);
+      if (nextPinned && page !== 1) setPage(1);
+      else await fetchTopics();
+    } catch (error) {
+      console.error('Failed to pin topic:', error);
+      message.error(nextPinned ? '置顶话题失败' : '取消置顶失败');
+    } finally {
+      setPinningTopicId(null);
     }
   };
 
@@ -232,6 +260,17 @@ const TopicList: React.FC = () => {
               }
               extra={
                 <Space size={4} onClick={(event) => event.stopPropagation()} style={{ lineHeight: '56px' }}>
+                  <Tooltip title={item.is_pinned ? '取消置顶' : '置顶话题'}>
+                    <Button
+                      size="small"
+                      type={item.is_pinned ? 'primary' : 'text'}
+                      icon={item.is_pinned ? <PushpinFilled /> : <PushpinOutlined />}
+                      loading={pinningTopicId === item.id}
+                      aria-label={`${item.is_pinned ? '取消置顶' : '置顶'}话题 ${item.title}`}
+                      aria-pressed={item.is_pinned}
+                      onClick={() => void handlePin(item)}
+                    />
+                  </Tooltip>
                   <Popconfirm
                     title={`删除“${item.title}”？`}
                     description="相关材料、讨论记录、概念和任务都会一并删除，此操作不可恢复。"

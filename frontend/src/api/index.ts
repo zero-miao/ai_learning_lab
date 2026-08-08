@@ -218,6 +218,7 @@ export interface TopicSummary {
   id: number;
   title: string;
   goal: string;
+  is_pinned: boolean;
   status: 'draft' | 'learning' | 'exam_ready' | 'reviewing' | 'archived';
   status_display: string;
   mastery_level: 'unknown' | 'weak' | 'pass' | 'strong';
@@ -443,7 +444,9 @@ export const createTopic = (data: Pick<Topic, 'title'> & Partial<Pick<Topic, 'go
   api.post<Topic>('topics/', data);
 export const updateTopic = (
   id: number,
-  data: Partial<Pick<Topic, 'title' | 'goal' | 'scope' | 'status' | 'mastery_level'>>,
+  data: Partial<
+    Pick<Topic, 'title' | 'goal' | 'scope' | 'is_pinned' | 'status' | 'mastery_level'>
+  >,
 ) =>
   api.patch<Topic>(`topics/${id}/`, data);
 export const deleteTopic = (id: number) => api.delete(`topics/${id}/`);
