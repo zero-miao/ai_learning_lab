@@ -625,7 +625,7 @@ const MaterialReader: React.FC = () => {
       }}>
         <div
           style={{
-            maxWidth: material.media_type === 'video' ? 1480 : 1320,
+            maxWidth: material.media_type === 'video' ? 1480 : 1080,
             margin: '0 auto',
             padding: '24px 24px 48px',
           }}
