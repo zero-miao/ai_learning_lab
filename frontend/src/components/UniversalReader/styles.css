@@ -174,16 +174,17 @@
 
 .universal-reader__content-shell {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 760px) minmax(240px, 272px);
-  gap: 32px;
-  align-items: start;
+}
+
+.universal-reader__content-shell > .universal-reader__content {
+  margin-inline: auto;
 }
 
 .universal-reader__comment-rail {
-  position: relative;
-  align-self: stretch;
-  min-width: 0;
+  position: absolute;
+  top: 0;
+  left: calc(50% + 412px);
+  width: 272px;
   min-height: 100%;
 }
 
@@ -726,20 +727,10 @@
   }
 }
 
-@media (min-width: 1181px) and (max-width: 1380px) {
-  .universal-reader:not(.universal-reader--video) {
-    padding-inline: 64px;
-  }
-}
-
-@media (max-width: 1180px) {
-  .universal-reader__content-shell {
-    display: block;
-  }
-
+@media (max-width: 1380px) {
   .universal-reader__comment-rail {
-    position: absolute;
     inset: 0;
+    width: auto;
     pointer-events: none;
   }
 
