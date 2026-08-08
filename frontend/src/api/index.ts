@@ -357,6 +357,29 @@ export interface SystemConfiguration {
   updated_at: string;
 }
 
+export type FeedbackCategory =
+  | 'usability'
+  | 'bug'
+  | 'content'
+  | 'suggestion'
+  | 'other';
+
+export interface UserFeedback {
+  id: number;
+  category: FeedbackCategory;
+  category_display: string;
+  description: string;
+  page_url: string;
+  page_title: string;
+  user_agent: string;
+  context: Record<string, unknown>;
+  status: 'new' | 'reviewing' | 'resolved';
+  status_display: string;
+  resolution_note: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export const getSystemConfiguration = () =>
   api.get<SystemConfiguration>('system-configuration/');
 export const discoverProviderModels = (
@@ -506,5 +529,8 @@ export const listAITasks = (params?: Record<string, string | number>) =>
   api.get<PaginatedResponse<AITaskSummary>>('ai-tasks/', { params });
 export const retryAITask = (id: number) =>
   api.post<AITask>(`ai-tasks/${id}/retry/`);
+export const createUserFeedback = (
+  data: Pick<UserFeedback, 'category' | 'description' | 'page_url' | 'page_title' | 'user_agent' | 'context'>,
+) => api.post<UserFeedback>('feedback/', data);
 
 export default api;

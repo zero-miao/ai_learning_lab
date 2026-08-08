@@ -1,4 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
@@ -69,6 +76,12 @@ import './styles.css';
 const { Text } = Typography;
 const readerFonts: ReaderFont[] = ['system', 'song', 'kai', 'serif'];
 
+interface ReadingViewportAnchor {
+  sourceOffset: number;
+  top: number;
+  scrollContainer: HTMLElement | null;
+}
+
 const MarkdownDigest: React.FC<{ content: string }> = ({ content }) => (
   <div className="reader-briefing__markdown">
     <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
@@ -122,6 +135,8 @@ const MaterialReader: React.FC = () => {
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const viewportAnchorRef = useRef<ReadingViewportAnchor | null>(null);
+  const [annotationRefreshVersion, setAnnotationRefreshVersion] = useState(0);
 
   const [conceptForm] = Form.useForm<Partial<Concept>>();
   const [highlightForm] = Form.useForm<{ user_note: string }>();
@@ -148,6 +163,82 @@ const MaterialReader: React.FC = () => {
       setLoading(false);
     }
   }, [materialId, topicId]);
+
+  const captureReadingPosition = useCallback(() => {
+    const content = document.querySelector<HTMLElement>('.universal-reader__content');
+    if (!content) return;
+    const scrollContainer = content.classList.contains('universal-reader__transcript')
+      ? content
+      : null;
+    const viewportTop = scrollContainer
+      ? scrollContainer.getBoundingClientRect().top
+      : 132;
+    const viewportBottom = scrollContainer
+      ? scrollContainer.getBoundingClientRect().bottom
+      : window.innerHeight;
+    const anchors = Array.from(
+      content.querySelectorAll<HTMLElement>('[data-source-start], [data-start-offset]'),
+    );
+    const anchor = anchors.find((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.bottom > viewportTop && rect.top < viewportBottom;
+    });
+    if (!anchor) return;
+    const sourceOffset = Number(
+      anchor.dataset.sourceStart ?? anchor.dataset.startOffset,
+    );
+    if (!Number.isFinite(sourceOffset)) return;
+    viewportAnchorRef.current = {
+      sourceOffset,
+      top: anchor.getBoundingClientRect().top,
+      scrollContainer,
+    };
+  }, []);
+
+  const refreshAnnotations = useCallback(async (preservePosition = false) => {
+    if (!topicId || !materialId) return;
+    if (preservePosition) captureReadingPosition();
+    try {
+      const [topicResponse, annotationsResponse] = await Promise.all([
+        getTopic(Number(topicId)),
+        getMaterialAnnotations(Number(materialId)),
+      ]);
+      setTopic(topicResponse.data);
+      setAllAnnotations(annotationsResponse.data);
+      setAnnotationRefreshVersion((current) => current + 1);
+    } catch (error) {
+      viewportAnchorRef.current = null;
+      throw error;
+    }
+  }, [captureReadingPosition, materialId, topicId]);
+
+  useLayoutEffect(() => {
+    const savedAnchor = viewportAnchorRef.current;
+    if (!savedAnchor) return;
+    viewportAnchorRef.current = null;
+    const content = document.querySelector<HTMLElement>('.universal-reader__content');
+    const anchors = Array.from(
+      content?.querySelectorAll<HTMLElement>(
+        '[data-source-start], [data-start-offset]',
+      ) ?? [],
+    );
+    const anchor = anchors.find((element) => {
+      const start = Number(
+        element.dataset.sourceStart ?? element.dataset.startOffset,
+      );
+      const end = Number(
+        element.dataset.sourceEnd ?? element.dataset.endOffset ?? start + 1,
+      );
+      return start <= savedAnchor.sourceOffset && savedAnchor.sourceOffset < end;
+    });
+    if (!anchor) return;
+    const delta = anchor.getBoundingClientRect().top - savedAnchor.top;
+    if (savedAnchor.scrollContainer) {
+      savedAnchor.scrollContainer.scrollTop += delta;
+    } else {
+      window.scrollBy({ top: delta, behavior: 'auto' });
+    }
+  }, [annotationRefreshVersion]);
 
   useEffect(() => {
     void load().catch(() => message.error('加载材料失败'));
@@ -176,7 +267,7 @@ const MaterialReader: React.FC = () => {
         } else {
           message.success(`${response.data.task_type_display}已完成`);
         }
-        await load();
+        await refreshAnnotations(true);
         if (activeSession) {
           const sessionResponse = await getSession(activeSession.id);
           setActiveSession(sessionResponse.data);
@@ -184,7 +275,7 @@ const MaterialReader: React.FC = () => {
       }
     }, 1500);
     return () => window.clearInterval(timer);
-  }, [activeSession, load, task]);
+  }, [activeSession, refreshAnnotations, task]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: 'nearest' });
@@ -318,7 +409,7 @@ const MaterialReader: React.FC = () => {
       setConceptModal(false);
       setEditingConcept(null);
       setSelection(null);
-      await load();
+      await refreshAnnotations(true);
     } catch {
       message.error('保存失败');
     }
@@ -342,7 +433,7 @@ const MaterialReader: React.FC = () => {
       setHighlightModal(false);
       setEditingHighlight(null);
       setSelection(null);
-      await load();
+      await refreshAnnotations(true);
     } catch {
       message.error('保存失败');
     }
@@ -363,7 +454,7 @@ const MaterialReader: React.FC = () => {
       setSelection(null);
       setDrawerOpen(true);
       setTab('questions');
-      await load();
+      await refreshAnnotations(true);
       if (response.data.question.session) {
         void loadSession(response.data.question.session);
       }
@@ -825,7 +916,15 @@ const MaterialReader: React.FC = () => {
                               />
                               <Popconfirm
                                 title="删除这个问答？"
-                                onConfirm={() => void deleteQuestion(item.id).then(load)}
+                                onConfirm={() => {
+                                  captureReadingPosition();
+                                  void deleteQuestion(item.id)
+                                    .then(() => refreshAnnotations())
+                                    .catch(() => {
+                                      viewportAnchorRef.current = null;
+                                      message.error('删除失败');
+                                    });
+                                }}
                               >
                                 <Button type="text" size="small" danger icon={<DeleteOutlined />} title="删除" />
                               </Popconfirm>
@@ -896,12 +995,28 @@ const MaterialReader: React.FC = () => {
                                   icon={<CheckOutlined />}
                                   title="确认"
                                   style={{ color: '#52c41a' }}
-                                  onClick={() => void updateConcept(item.id, { status: 'confirmed' }).then(load)}
+                                  onClick={() => {
+                                    captureReadingPosition();
+                                    void updateConcept(item.id, { status: 'confirmed' })
+                                      .then(() => refreshAnnotations())
+                                      .catch(() => {
+                                        viewportAnchorRef.current = null;
+                                        message.error('确认失败');
+                                      });
+                                  }}
                                 />
                               )}
                               <Popconfirm
                                 title="删除这个概念？"
-                                onConfirm={() => void deleteConcept(item.id).then(load)}
+                                onConfirm={() => {
+                                  captureReadingPosition();
+                                  void deleteConcept(item.id)
+                                    .then(() => refreshAnnotations())
+                                    .catch(() => {
+                                      viewportAnchorRef.current = null;
+                                      message.error('删除失败');
+                                    });
+                                }}
                               >
                                 <Button type="text" size="small" danger icon={<DeleteOutlined />} title="删除" />
                               </Popconfirm>
@@ -957,7 +1072,15 @@ const MaterialReader: React.FC = () => {
                               />
                               <Popconfirm
                                 title="删除这条高亮？"
-                                onConfirm={() => void deleteHighlight(item.id).then(load)}
+                                onConfirm={() => {
+                                  captureReadingPosition();
+                                  void deleteHighlight(item.id)
+                                    .then(() => refreshAnnotations())
+                                    .catch(() => {
+                                      viewportAnchorRef.current = null;
+                                      message.error('删除失败');
+                                    });
+                                }}
                               >
                                 <Button type="text" size="small" danger icon={<DeleteOutlined />} title="删除" />
                               </Popconfirm>
@@ -975,7 +1098,7 @@ const MaterialReader: React.FC = () => {
           },
         ]} />
       </Drawer>
-    <Modal title={editingConcept ? "编辑概念" : "标记概念"} open={conceptModal} onCancel={() => { setConceptModal(false); setEditingConcept(null); }} onOk={() => conceptForm.submit()}>
+    <Modal title={editingConcept ? "编辑概念" : "标记概念"} open={conceptModal} focusTriggerAfterClose={false} onCancel={() => { setConceptModal(false); setEditingConcept(null); }} onOk={() => conceptForm.submit()}>
       <Form form={conceptForm} layout="vertical" onFinish={submitConcept}>
         <Form.Item name="title" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
         {editingConcept && (
@@ -988,7 +1111,7 @@ const MaterialReader: React.FC = () => {
         )}
       </Form>
     </Modal>
-    <Modal title={editingHighlight ? "编辑高亮" : "添加高亮"} open={highlightModal} onCancel={() => { setHighlightModal(false); setEditingHighlight(null); }} onOk={() => highlightForm.submit()}>
+    <Modal title={editingHighlight ? "编辑高亮" : "添加高亮"} open={highlightModal} focusTriggerAfterClose={false} onCancel={() => { setHighlightModal(false); setEditingHighlight(null); }} onOk={() => highlightForm.submit()}>
       <Form form={highlightForm} layout="vertical" onFinish={submitHighlight}>
         <Form.Item name="user_note" label="笔记内容"><Input.TextArea rows={4} /></Form.Item>
       </Form>

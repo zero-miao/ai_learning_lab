@@ -54,6 +54,7 @@ V2 不是独立新产品，也不是 V1 的缩减版重写，而是同一产品�
 | `Exam` / `ExamQuestion` / `ReviewRecord` | 掌握度评估和间隔复习闭环。 |
 | `AITask` | 所有异步任务的持久化状态、输入、完整上下文、结果和错误。 |
 | `SystemConfiguration` | 可持久化修改的运行期系统配置。 |
+| `UserFeedback` | 真实使用阶段的问题与建议，保存当前页面和设备诊断上下文及处理状态。 |
 
 V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新增加这些表、V1 兼容字段、`AITask` 业务外键，或让前端重新消费 `materials`、`anchors`、`ai_responses`、`import_status`、`source_type` 等旧契约。
 
@@ -82,6 +83,8 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 - 阅读字体由用户选择并持久化，正文、字幕和阅读型内容应一致继承当前字体；代码等具有明确语义的内容除外，不得在局部组件中随意写死字体。
 - 背景颜色和文字颜色必须跟随全站主题。浅色主题不得用大面积深色背景承载长文本或代码上下文；深色主题必须使用 Ant Design token 或主题相关颜色保证对比度和可读性。
 - 当前局域网入口以 Vite 开发服务器作为实际运行环境，React 根节点不启用 `StrictMode`，避免挂载阶段重复执行 effect 并发送重复 HTTP 请求；如未来改为生产静态服务，可重新评估该约束。
+- 阅读页新增或更新概念、问答和高亮时，标注样式不得改变正文排版尺寸；数据刷新必须通过正文 offset 锚点保持当前阅读位置。
+- 全站提供固定反馈入口，反馈草稿保存在当前设备，提交时自动记录页面 URL、视口与浏览器信息；处理状态统一在 Django Admin 维护。
 
 ### 删除与可观测性
 
@@ -113,6 +116,8 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 - 前端页面按路由懒加载，Ant Design、Markdown 和 Vidstack 按领域分包。
 - Topic、Material 和 AITask 集合接口使用摘要响应；材料与任务详情在页面展开时通过现有详情接口按需加载。
 - `start-lan.sh` 支持同一可信局域网内的其他设备直接访问，并自动处理 Node 20 环境。
+- 阅读页标注刷新已与材料全文刷新拆分，并基于正文 offset 恢复文本页窗口或视频字幕容器位置。
+- 全站支持随时提交使用反馈，反馈包含类型、描述、页面和设备上下文，并可在 Django Admin 中筛选和跟进。
 
 ### 尚未完成
 
@@ -134,7 +139,7 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 
 当前自动化基线：
 
-- 后端 `manage.py test api` 共 33 项通过，覆盖系统配置、Provider 模型发现、多轮问答、Topic 删除、集合摘要、统一分页与查询索引、补料人工采纳、TTS、跨 Topic 标注和视频学习全链路等关键契约。
+- 后端 `manage.py test api` 共 34 项通过，覆盖系统配置、Provider 模型发现、多轮问答、Topic 删除、集合摘要、统一分页与查询索引、补料人工采纳、TTS、跨 Topic 标注、反馈记录和视频学习全链路等关键契约。
 - `ruff check backend`、`manage.py check`、`makemigrations --check --dry-run`、前端 build/lint 均通过。
 - `ruff format --check backend` 仍会报告两份历史迁移文件需要格式化，不属于当前业务代码问题。
 - Vite 主入口约 10 kB；路由与依赖完成分包，最大 chunk 约 483 kB，不再报告 500 kB 体积告警。

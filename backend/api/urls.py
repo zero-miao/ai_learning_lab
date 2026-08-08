@@ -14,6 +14,7 @@ from .views import (
     SessionViewSet,
     TopicMaterialViewSet,
     TopicViewSet,
+    UserFeedbackViewSet,
     discover_llm_models,
     health_check,
     system_configuration_detail,
@@ -32,6 +33,7 @@ router.register(r"highlights", HighlightViewSet)
 router.register(r"exams", ExamViewSet)
 router.register(r"reviews", ReviewRecordViewSet)
 router.register(r"ai-tasks", AITaskViewSet)
+router.register(r"feedback", UserFeedbackViewSet)
 
 urlpatterns = [
     path("health/", health_check, name="health_check"),

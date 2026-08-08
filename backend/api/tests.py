@@ -27,6 +27,7 @@ from .models import (
     SystemConfiguration,
     Topic,
     TopicMaterial,
+    UserFeedback,
 )
 from .task_service import enqueue_or_reuse
 from .tasks import TaskRegistry, _create_material_chunks
@@ -92,6 +93,36 @@ class V2ErApiTests(TestCase):
         )
 
         self.assertEqual(update_response.status_code, 400)
+
+    def test_feedback_records_page_context_and_supports_filters(self):
+        response = self.client.post(
+            "/api/feedback/",
+            {
+                "category": "usability",
+                "description": " 阅读页保存高亮后发生跳动。 ",
+                "page_url": "http://192.168.1.10:5173/topics/1/materials/1",
+                "page_title": "AI Learning Lab",
+                "user_agent": "Mobile Browser",
+                "context": {"viewport": {"width": 390, "height": 844}},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        feedback = UserFeedback.objects.get()
+        self.assertEqual(feedback.description, "阅读页保存高亮后发生跳动。")
+        self.assertEqual(feedback.status, "new")
+        self.assertEqual(response.data["status_display"], "待处理")
+        filtered = self.client.get(
+            "/api/feedback/", {"status": "new", "category": "usability"}
+        )
+        self.assertEqual(filtered.data["count"], 1)
+        blank = self.client.post(
+            "/api/feedback/",
+            {"category": "bug", "description": "  "},
+            format="json",
+        )
+        self.assertEqual(blank.status_code, 400)
 
     def test_topic_list_returns_summary_without_nested_business_data(self):
         Topic.objects.bulk_create(
@@ -191,6 +222,7 @@ class V2ErApiTests(TestCase):
             "exams",
             "reviews",
             "ai-tasks",
+            "feedback",
         ]
         for endpoint in endpoints:
             with self.subTest(endpoint=endpoint):

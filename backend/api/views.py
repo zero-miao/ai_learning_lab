@@ -29,6 +29,7 @@ from .models import (
     SystemConfiguration,
     Topic,
     TopicMaterial,
+    UserFeedback,
 )
 from .serializers import (
     AITaskListSerializer,
@@ -50,6 +51,7 @@ from .serializers import (
     TopicDetailSerializer,
     TopicListSerializer,
     TopicMaterialSerializer,
+    UserFeedbackSerializer,
 )
 from .system_config import get_config_value
 from .task_service import INTERACTIVE_TASK_PRIORITY, enqueue_or_reuse, retry_task
@@ -876,6 +878,22 @@ class ConceptRelationViewSet(viewsets.ModelViewSet):
 class HighlightViewSet(viewsets.ModelViewSet):
     queryset = Highlight.objects.all()
     serializer_class = HighlightSerializer
+
+
+class UserFeedbackViewSet(viewsets.ModelViewSet):
+    queryset = UserFeedback.objects.all()
+    serializer_class = UserFeedbackSerializer
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        category_filter = self.request.query_params.get("category")
+        if category_filter:
+            queryset = queryset.filter(category=category_filter)
+        return queryset
 
 
 class TopicMaterialViewSet(viewsets.ModelViewSet):

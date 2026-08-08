@@ -19,6 +19,7 @@ from .models import (
     SystemConfiguration,
     Topic,
     TopicMaterial,
+    UserFeedback,
 )
 from .tasks import TaskRegistry
 
@@ -680,3 +681,43 @@ class AITaskListSerializer(AITaskSerializer):
             "updated_at",
         ]
         read_only_fields = fields
+
+
+class UserFeedbackSerializer(serializers.ModelSerializer):
+    category_display = serializers.CharField(
+        source="get_category_display", read_only=True
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = UserFeedback
+        fields = [
+            "id",
+            "category",
+            "category_display",
+            "description",
+            "page_url",
+            "page_title",
+            "user_agent",
+            "context",
+            "status",
+            "status_display",
+            "resolution_note",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "category_display",
+            "status",
+            "status_display",
+            "resolution_note",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate_description(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("请填写反馈内容。")
+        return value

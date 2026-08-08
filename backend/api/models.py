@@ -810,3 +810,59 @@ class AITask(models.Model):
         choices = dict(TaskRegistry.get_choices())
         task_type_display = choices.get(self.task_type, self.task_type)
         return f"{task_type_display} #{self.pk} ({self.get_status_display()})"
+
+
+class UserFeedback(models.Model):
+    CATEGORY_CHOICES = [
+        ("usability", "不好用"),
+        ("bug", "功能异常"),
+        ("content", "内容问题"),
+        ("suggestion", "功能建议"),
+        ("other", "其他"),
+    ]
+    STATUS_CHOICES = [
+        ("new", "待处理"),
+        ("reviewing", "处理中"),
+        ("resolved", "已解决"),
+    ]
+
+    category = models.CharField(
+        max_length=20,
+        choices=CATEGORY_CHOICES,
+        default="usability",
+        db_index=True,
+        verbose_name="反馈类型",
+    )
+    description = models.TextField(verbose_name="反馈内容")
+    page_url = models.CharField(max_length=2000, blank=True, verbose_name="页面地址")
+    page_title = models.CharField(max_length=255, blank=True, verbose_name="页面标题")
+    user_agent = models.TextField(blank=True, verbose_name="浏览器信息")
+    context = models.JSONField(default=dict, blank=True, verbose_name="页面上下文")
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="new",
+        db_index=True,
+        verbose_name="处理状态",
+    )
+    resolution_note = models.TextField(blank=True, verbose_name="处理记录")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "使用反馈"
+        verbose_name_plural = "使用反馈"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["status", "-created_at"],
+                name="feedback_status_created_idx",
+            ),
+            models.Index(
+                fields=["category", "-created_at"],
+                name="feedback_category_created_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.get_category_display()} #{self.pk}"

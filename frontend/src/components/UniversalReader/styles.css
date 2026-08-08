@@ -492,7 +492,7 @@
 }
 
 .universal-reader__annotation {
-  padding: 0 0.08em;
+  position: relative;
   color: inherit;
   border-radius: 2px;
   cursor: pointer;
@@ -515,7 +515,8 @@
 
 .universal-reader__annotation--concept-confirmed {
   color: #0958d9;
-  font-weight: 600;
+  text-decoration: underline solid;
+  text-underline-offset: 3px;
 }
 
 .universal-reader__annotation--concept-draft {
@@ -534,9 +535,9 @@
 
 .universal-reader__annotation--question::after,
 .universal-reader__annotation--question-saved::after {
-  position: relative;
-  top: -0.35em;
-  margin-left: 0.08em;
+  position: absolute;
+  top: -0.45em;
+  left: 100%;
   color: #d46b08;
   font-size: 0.7em;
   font-family: sans-serif;

@@ -1,0 +1,14 @@
+.global-feedback-button {
+  position: fixed;
+  right: 102px;
+  bottom: 32px;
+  z-index: 30;
+  box-shadow: 0 8px 22px rgba(22, 119, 255, 0.35);
+}
+
+@media (max-width: 720px) {
+  .global-feedback-button {
+    right: 20px;
+    bottom: 92px;
+  }
+}

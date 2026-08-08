@@ -9,6 +9,7 @@ import {
   useSiteTheme,
 } from './appearance';
 import { getSystemConfiguration, setApiTimeout } from './api';
+import FeedbackButton from './components/FeedbackButton';
 
 const { Header, Content, Footer } = Layout;
 const { Title } = Typography;
@@ -142,6 +143,7 @@ function App() {
       <Footer style={{ textAlign: 'center' }}>
         AI Learning Lab ©{new Date().getFullYear()} Created for Personal Learning
       </Footer>
+      <FeedbackButton />
     </Layout>
     </ConfigProvider>
   );

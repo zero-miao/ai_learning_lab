@@ -19,6 +19,7 @@ from .models import (
     SystemConfiguration,
     Topic,
     TopicMaterial,
+    UserFeedback,
 )
 from .tasks import TaskRegistry
 
@@ -472,3 +473,33 @@ class AITaskAdmin(admin.ModelAdmin):
 
             kwargs["widget"] = forms.Select(choices=TaskRegistry.get_choices())
         return super().formfield_for_dbfield(db_field, request, **kwargs)
+
+
+@admin.register(UserFeedback)
+class UserFeedbackAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "category",
+        "status",
+        "description_preview",
+        "page_title",
+        "created_at",
+        "updated_at",
+    )
+    list_filter = ("status", "category", "created_at")
+    search_fields = ("description", "page_url", "page_title", "resolution_note")
+    readonly_fields = (
+        "category",
+        "description",
+        "page_url",
+        "page_title",
+        "user_agent",
+        "context",
+        "created_at",
+        "updated_at",
+    )
+    date_hierarchy = "created_at"
+
+    @admin.display(description="反馈内容")
+    def description_preview(self, feedback):
+        return feedback.description[:100]
