@@ -63,9 +63,12 @@ class V2ErApiTests(TestCase):
             {
                 "llm_model": "default-model",
                 "llm_model_answer_question": "question-model",
-                "supplement_relevance_threshold": 0.65,
+                "supplement_relevance_threshold": 0.9,
+                "supplement_excluded_domains": "wikipedia.org, example.test",
                 "default_site_theme": "midnight",
                 "default_reader_font": "song",
+                "default_tts_voice": "zh-CN-YunxiNeural",
+                "default_speech_rate": 1.5,
                 "api_timeout_ms": 15000,
             }
         )
@@ -77,7 +80,13 @@ class V2ErApiTests(TestCase):
         configuration = SystemConfiguration.load()
         self.assertEqual(configuration.default_site_theme, "midnight")
         self.assertEqual(configuration.default_reader_font, "song")
-        self.assertEqual(configuration.supplement_relevance_threshold, 0.65)
+        self.assertEqual(configuration.supplement_relevance_threshold, 0.9)
+        self.assertEqual(
+            configuration.supplement_excluded_domains,
+            "wikipedia.org,example.test",
+        )
+        self.assertEqual(configuration.default_tts_voice, "zh-CN-YunxiNeural")
+        self.assertEqual(configuration.default_speech_rate, 1.5)
         self.assertEqual(
             AIGateway.get_model_for_task("answer_question"), "question-model"
         )
@@ -86,13 +95,43 @@ class V2ErApiTests(TestCase):
     def test_system_configuration_rejects_invalid_threshold(self):
         response = self.client.get("/api/system-configuration/")
         payload = dict(response.data)
-        payload["supplement_relevance_threshold"] = 1.5
+        payload["supplement_relevance_threshold"] = 0.8
 
         update_response = self.client.put(
             "/api/system-configuration/", payload, format="json"
         )
 
         self.assertEqual(update_response.status_code, 400)
+
+    def test_current_reading_preferences_update_independently(self):
+        configuration = SystemConfiguration.load()
+        original_model = configuration.llm_model
+
+        response = self.client.patch(
+            "/api/system-configuration/preferences/",
+            {
+                "current_site_theme": "midnight",
+                "current_reader_font": "kai",
+                "current_tts_voice": "zh-CN-YunxiNeural",
+                "current_speech_rate": 1.75,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        configuration.refresh_from_db()
+        self.assertEqual(configuration.current_site_theme, "midnight")
+        self.assertEqual(configuration.current_reader_font, "kai")
+        self.assertEqual(configuration.current_tts_voice, "zh-CN-YunxiNeural")
+        self.assertEqual(configuration.current_speech_rate, 1.75)
+        self.assertEqual(configuration.llm_model, original_model)
+
+        invalid_response = self.client.patch(
+            "/api/system-configuration/preferences/",
+            {"current_speech_rate": 4},
+            format="json",
+        )
+        self.assertEqual(invalid_response.status_code, 400)
 
     @patch("api.tasks.AIGateway.get_provider")
     def test_management_assistant_lists_topic_learning_scopes(self, get_provider):
@@ -1145,7 +1184,7 @@ class V2ErApiTests(TestCase):
             json.dumps({"queries": ["Django ORM QuerySet"]}),  # generate_queries
             json.dumps(
                 {  # evaluate_supplement
-                    "relevance_score": 0.2,
+                    "relevance_score": 0.82,
                     "category": "recommended_reading",
                     "import_reason": "无关。",
                 }
@@ -1180,6 +1219,43 @@ class V2ErApiTests(TestCase):
 
         self.assertEqual(result["recommended_count"], 0)
         self.assertEqual(result["candidates"][0]["reason"], "相关度低于阈值")
+
+    @patch("api.tasks.BaseTask._call_llm")
+    @patch("api.supplement_service.crawl")
+    @patch("api.supplement_service.search")
+    def test_supplement_skips_excluded_domains(self, search, crawl, call_llm):
+        call_llm.return_value = json.dumps({"queries": ["Django ORM"]})
+        search.return_value = [
+            {
+                "title": "维基百科",
+                "url": "https://zh.wikipedia.org/wiki/Django",
+                "snippet": "",
+                "engine": "test",
+            }
+        ]
+        task, _ = enqueue_or_reuse(
+            "supplement_search",
+            trigger_type="Topic",
+            trigger_id=self.topic.id,
+            task_data={
+                "topic_id": self.topic.id,
+                "relevance_threshold": 0.85,
+                "excluded_domains": "wikipedia.org",
+            },
+        )
+
+        task_cls = TaskRegistry.get_task_class(task.task_type)
+        result = task_cls(
+            task_id=task.id,
+            task_data=task.task_data,
+            trigger_type=task.trigger_type,
+            trigger_id=task.trigger_id,
+            model=task.model,
+        ).run()
+
+        self.assertEqual(result["searched_count"], 0)
+        self.assertEqual(result["recommended_count"], 0)
+        crawl.assert_not_called()
 
     @patch("api.tasks.BaseTask._call_llm")
     def test_topic_discussion_uses_topic_context_and_queues_material_search(

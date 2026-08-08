@@ -65,14 +65,31 @@ class SystemConfiguration(models.Model):
     searxng_base_url = models.URLField(default="http://127.0.0.1:8080")
     crawl4ai_base_url = models.URLField(default="http://127.0.0.1:11235")
     supplement_relevance_threshold = models.FloatField(
-        default=0.8,
-        validators=[MinValueValidator(0), MaxValueValidator(1)],
+        default=0.85,
+        validators=[MinValueValidator(0.85), MaxValueValidator(1)],
     )
+    supplement_excluded_domains = models.TextField(default="wikipedia.org")
     default_site_theme = models.CharField(
         max_length=20, choices=SITE_THEME_CHOICES, default="paper"
     )
     default_reader_font = models.CharField(
         max_length=20, choices=READER_FONT_CHOICES, default="system"
+    )
+    default_tts_voice = models.CharField(max_length=100, default="zh-CN-YunxiNeural")
+    default_speech_rate = models.FloatField(
+        default=1.5,
+        validators=[MinValueValidator(0.5), MaxValueValidator(3)],
+    )
+    current_site_theme = models.CharField(
+        max_length=20, choices=SITE_THEME_CHOICES, default="paper"
+    )
+    current_reader_font = models.CharField(
+        max_length=20, choices=READER_FONT_CHOICES, default="system"
+    )
+    current_tts_voice = models.CharField(max_length=100, default="zh-CN-YunxiNeural")
+    current_speech_rate = models.FloatField(
+        default=1.5,
+        validators=[MinValueValidator(0.5), MaxValueValidator(3)],
     )
     api_timeout_ms = models.PositiveIntegerField(
         default=10000, validators=[MinValueValidator(1000)]

@@ -52,11 +52,13 @@ import {
   getAITask,
   getMaterialAnnotations,
   getSession,
+  getSystemConfiguration,
   getTopic,
   listAITasks,
   retryAITask,
   triggerSupplement,
   updateConcept,
+  updateCurrentReadingPreferences,
   updateHighlight,
   createSessionMessage,
 } from '../../api';
@@ -139,6 +141,10 @@ const MaterialReader: React.FC = () => {
       ? configuredDefault as ReaderFont
       : 'system';
   });
+  const [speechPreferences, setSpeechPreferences] = useState(() => ({
+    voice: window.localStorage.getItem('reader-tts-voice') ?? '',
+    rate: Number(window.localStorage.getItem('reader-speech-rate')) || 1,
+  }));
   const darkMode = themeOption.dark;
   const [editingConcept, setEditingConcept] = useState<Concept | null>(null);
   const [editingHighlight, setEditingHighlight] = useState<Highlight | null>(null);
@@ -255,6 +261,26 @@ const MaterialReader: React.FC = () => {
   }, [load]);
 
   useEffect(() => {
+    void getSystemConfiguration()
+      .then((response) => {
+        const { current_reader_font, current_tts_voice, current_speech_rate } =
+          response.data;
+        setReaderFont(current_reader_font);
+        setSpeechPreferences({
+          voice: current_tts_voice,
+          rate: current_speech_rate,
+        });
+        window.localStorage.setItem('reader-font', current_reader_font);
+        window.localStorage.setItem('reader-tts-voice', current_tts_voice);
+        window.localStorage.setItem(
+          'reader-speech-rate',
+          String(current_speech_rate),
+        );
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     window.localStorage.setItem(
       'reader-highlight-notes',
       showHighlightNotes ? 'visible' : 'hidden',
@@ -270,6 +296,37 @@ const MaterialReader: React.FC = () => {
   useEffect(() => {
     window.localStorage.setItem('reader-font', readerFont);
   }, [readerFont]);
+
+  const changeReaderFont = (font: ReaderFont) => {
+    setReaderFont(font);
+    window.localStorage.setItem('reader-font', font);
+    void updateCurrentReadingPreferences({
+      current_reader_font: font,
+    }).catch(() => message.warning('字体偏好同步失败'));
+  };
+
+  const changeSpeechPreferences = (
+    values: { voice?: string; rate?: number },
+  ) => {
+    setSpeechPreferences((current) => ({
+      voice: values.voice ?? current.voice,
+      rate: values.rate ?? current.rate,
+    }));
+    if (values.voice !== undefined) {
+      window.localStorage.setItem('reader-tts-voice', values.voice);
+    }
+    if (values.rate !== undefined) {
+      window.localStorage.setItem('reader-speech-rate', String(values.rate));
+    }
+    void updateCurrentReadingPreferences({
+      ...(values.voice === undefined
+        ? {}
+        : { current_tts_voice: values.voice }),
+      ...(values.rate === undefined
+        ? {}
+        : { current_speech_rate: values.rate }),
+    }).catch(() => message.warning('朗读偏好同步失败'));
+  };
 
   useEffect(() => {
     if (material?.status !== 'generating_audio') return;
@@ -460,6 +517,11 @@ const MaterialReader: React.FC = () => {
     } catch {
       message.error('保存失败');
     }
+  };
+
+  const saveHighlightNote = async (highlightId: number, userNote: string) => {
+    await updateHighlight(highlightId, { user_note: userNote });
+    await refreshAnnotations(true);
   };
 
   const createQuestionFromSelection = async () => {
@@ -755,7 +817,10 @@ const MaterialReader: React.FC = () => {
             readerTheme={readerTheme}
             onReaderThemeChange={setReaderTheme}
             readerFont={readerFont}
-            onReaderFontChange={setReaderFont}
+            onReaderFontChange={changeReaderFont}
+            preferredSpeechVoice={speechPreferences.voice}
+            preferredSpeechRate={speechPreferences.rate}
+            onSpeechPreferencesChange={changeSpeechPreferences}
             onMarkConcept={(next) => {
               setSelection(next);
               conceptForm.setFieldsValue({ title: next.text.slice(0, 80) });
@@ -796,6 +861,7 @@ const MaterialReader: React.FC = () => {
           }}
             selectedAnnotations={[]}
             showHighlightNotes={showHighlightNotes}
+            onHighlightNoteSave={saveHighlightNote}
             seekTime={seekTime}
             speechControlsTargetId="material-reader-reader-tools"
           />
@@ -1100,8 +1166,15 @@ const MaterialReader: React.FC = () => {
                           onClick={() => jumpToSource(item.locators[0]?.id)}
                         >
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                            <Space size={6} wrap style={{ flex: 1, marginRight: 8 }}>
-                              <Text strong ellipsis>{item.locators[0]?.source_text}</Text>
+                            <Space
+                              className="material-reader__highlight-heading"
+                              size={6}
+                              wrap
+                              style={{ flex: 1, minWidth: 0, marginRight: 8 }}
+                            >
+                              <Text strong className="material-reader__highlight-source">
+                                {item.locators[0]?.source_text}
+                              </Text>
                               {annotationScope === 'all' && item.locators[0] && (
                                 <Tag>{item.locators[0].topic_title}</Tag>
                               )}
@@ -1142,7 +1215,11 @@ const MaterialReader: React.FC = () => {
                             </Space>
                           </div>
                           {item.user_note && (
-                            <Text type="secondary" style={{ fontSize: '13px' }}>
+                            <Text
+                              className="material-reader__highlight-note"
+                              type="secondary"
+                              style={{ fontSize: '13px' }}
+                            >
                               {item.user_note}
                             </Text>
                           )}

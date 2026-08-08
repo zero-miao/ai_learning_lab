@@ -19,13 +19,15 @@ import '@vidstack/react/player/styles/default/layouts/video.css';
 import {
   BookOutlined,
   CommentOutlined,
+  EditOutlined,
   HighlightOutlined,
   LinkOutlined,
   PauseCircleOutlined,
   PlayCircleOutlined,
+  SaveOutlined,
   SoundOutlined,
 } from '@ant-design/icons';
-import { Button, Divider, Drawer, Popover, Space, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Divider, Drawer, Input, Popover, Space, Tag, Tooltip, Typography, message } from 'antd';
 import type { Concept, Highlight, Material, Question } from '../../api';
 import {
   siteThemeOptions,
@@ -54,6 +56,12 @@ interface UniversalReaderProps {
   onReaderThemeChange: (theme: ReaderTheme) => void;
   readerFont: ReaderFont;
   onReaderFontChange: (font: ReaderFont) => void;
+  preferredSpeechVoice?: string;
+  preferredSpeechRate?: number;
+  onSpeechPreferencesChange?: (values: {
+    voice?: string;
+    rate?: number;
+  }) => void;
   onMarkConcept: (selection: TextSelectionAnchor) => void;
   onAskQuestion: (selection: TextSelectionAnchor) => void;
   onHighlight: (selection: TextSelectionAnchor) => void;
@@ -67,6 +75,7 @@ interface UniversalReaderProps {
     id: number | null;
   }>;
   showHighlightNotes?: boolean;
+  onHighlightNoteSave?: (highlightId: number, userNote: string) => Promise<void>;
   seekTime?: { time: number | null; nonce: string };
   speechControlsTargetId?: string;
 }
@@ -560,6 +569,9 @@ export default function UniversalReader({
   onReaderThemeChange,
   readerFont,
   onReaderFontChange,
+  preferredSpeechVoice,
+  preferredSpeechRate,
+  onSpeechPreferencesChange,
   onMarkConcept,
   onAskQuestion,
   onHighlight,
@@ -567,6 +579,7 @@ export default function UniversalReader({
   onAnnotationClick,
   selectedAnnotations,
   showHighlightNotes = false,
+  onHighlightNoteSave,
   seekTime,
   speechControlsTargetId,
 }: UniversalReaderProps) {
@@ -595,8 +608,13 @@ export default function UniversalReader({
   const [speechState, setSpeechState] = React.useState<
     'idle' | 'speaking' | 'paused'
   >('idle');
-  const [speechRate, setSpeechRate] = React.useState(1);
-  const [speechVoiceURI, setSpeechVoiceURI] = React.useState('');
+  const [speechRate, setSpeechRate] = React.useState(() => {
+    const saved = Number(window.localStorage.getItem('reader-speech-rate'));
+    return saved >= 0.5 && saved <= 3 ? saved : 1;
+  });
+  const [speechVoiceURI, setSpeechVoiceURI] = React.useState(
+    () => window.localStorage.getItem('reader-tts-voice') ?? '',
+  );
   const [spokenChunkId, setSpokenChunkId] = React.useState<number | null>(null);
   const [openToolPanel, setOpenToolPanel] = React.useState<
     'theme' | 'font' | 'voice' | 'rate' | null
@@ -608,6 +626,10 @@ export default function UniversalReader({
   const [highlightCommentRailHeight, setHighlightCommentRailHeight] =
     React.useState(0);
   const [mobileCommentId, setMobileCommentId] = React.useState<number | null>(null);
+  const [commentDrafts, setCommentDrafts] = React.useState<Record<number, string>>({});
+  const [savingCommentId, setSavingCommentId] = React.useState<number | null>(null);
+  const [editingCommentId, setEditingCommentId] = React.useState<number | null>(null);
+  const [activeCommentId, setActiveCommentId] = React.useState<number | null>(null);
   const isMobile = useMediaQuery('(max-width: 767px)');
   const isVideo = material.media_type === 'video' && Boolean(material.media_url);
   const highlightComments = React.useMemo(
@@ -672,6 +694,33 @@ export default function UniversalReader({
     setSpokenChunkId(null);
   }, [material.id, speechVoices]);
   React.useEffect(() => {
+    if (
+      preferredSpeechVoice &&
+      speechVoices.some((voice) => voice.voice === preferredSpeechVoice)
+    ) {
+      setSpeechVoiceURI(preferredSpeechVoice);
+    }
+  }, [preferredSpeechVoice, speechVoices]);
+  React.useEffect(() => {
+    if (
+      preferredSpeechRate !== undefined &&
+      preferredSpeechRate >= 0.5 &&
+      preferredSpeechRate <= 3
+    ) {
+      setSpeechRate(preferredSpeechRate);
+      if (audioRef.current) {
+        audioRef.current.playbackRate = preferredSpeechRate;
+      }
+    }
+  }, [preferredSpeechRate]);
+  React.useEffect(() => {
+    setCommentDrafts(
+      Object.fromEntries(
+        highlights.map((highlight) => [highlight.id, highlight.user_note]),
+      ),
+    );
+  }, [highlights]);
+  React.useEffect(() => {
     if (!speechControlsTargetId) {
       setSpeechControlsTarget(null);
       return;
@@ -727,6 +776,9 @@ export default function UniversalReader({
     updatePositions();
     const resizeObserver = new ResizeObserver(updatePositions);
     resizeObserver.observe(content);
+    shell
+      .querySelectorAll<HTMLElement>('[data-highlight-comment-id]')
+      .forEach((card) => resizeObserver.observe(card));
     window.addEventListener('resize', updatePositions);
     return () => {
       resizeObserver.disconnect();
@@ -963,12 +1015,16 @@ export default function UniversalReader({
 
   const changeSpeechRate = (rate: number) => {
     setSpeechRate(rate);
+    window.localStorage.setItem('reader-speech-rate', String(rate));
+    onSpeechPreferencesChange?.({ rate });
     if (audioRef.current) audioRef.current.playbackRate = rate;
   };
 
   const changeSpeechVoice = (voiceURI: string) => {
     stopSpeech();
     setSpeechVoiceURI(voiceURI);
+    window.localStorage.setItem('reader-tts-voice', voiceURI);
+    onSpeechPreferencesChange?.({ voice: voiceURI });
   };
 
   const syncSpokenChunk = () => {
@@ -981,6 +1037,20 @@ export default function UniversalReader({
         item.startOffset <= sourceOffset && sourceOffset < item.endOffset,
     );
     setSpokenChunkId(chunk?.id ?? null);
+  };
+
+  const saveHighlightNote = async (highlightId: number) => {
+    if (!onHighlightNoteSave) return;
+    setSavingCommentId(highlightId);
+    try {
+      await onHighlightNoteSave(highlightId, commentDrafts[highlightId] ?? '');
+      setEditingCommentId(null);
+      message.success('高亮备注已保存');
+    } catch {
+      message.error('高亮备注保存失败');
+    } finally {
+      setSavingCommentId(null);
+    }
   };
 
   const openMarkdownAnnotation = (
@@ -1312,6 +1382,7 @@ export default function UniversalReader({
           onMouseUp={handleMouseUp}
           onTouchEnd={handleTouchEnd}
           onClick={(event) => {
+            setActiveCommentId(null);
             onClearAnnotationSelection();
             if (!isVideo) openMarkdownAnnotation(event.target);
           }}
@@ -1367,7 +1438,13 @@ export default function UniversalReader({
                     chunks,
                     ranges: annotationRanges,
                     activeChunkId: visibleActiveChunkId,
-                    selectedAnnotations,
+                    selectedAnnotations:
+                      activeCommentId === null
+                        ? selectedAnnotations
+                        : [
+                            ...selectedAnnotations,
+                            { type: 'highlight' as const, id: activeCommentId },
+                          ],
                   },
                 ],
               ]}
@@ -1388,38 +1465,105 @@ export default function UniversalReader({
                   (item) => item.material === material.id,
                 ) ?? highlight.locators[0];
               const sourceText = locator?.source_text || '对应高亮';
-              const commentContent = (
-                <div className="universal-reader__comment-popover">
+              const isEditing = editingCommentId === highlight.id;
+              const startEditing = () => {
+                setCommentDrafts((current) => ({
+                  ...current,
+                  [highlight.id]: highlight.user_note,
+                }));
+                setEditingCommentId(highlight.id);
+              };
+              const cancelEditing = () => {
+                setCommentDrafts((current) => ({
+                  ...current,
+                  [highlight.id]: highlight.user_note,
+                }));
+                setEditingCommentId(null);
+              };
+              const renderCommentBody = () => (
+                <>
+                  <span className="universal-reader__comment-card-title">
+                    <span>
+                      <CommentOutlined />
+                      高亮备注
+                    </span>
+                    {!isEditing && (
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<EditOutlined />}
+                        aria-label={`编辑高亮备注：${sourceText}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          startEditing();
+                        }}
+                      />
+                    )}
+                  </span>
                   <div className="universal-reader__comment-source">
                     {sourceText}
                   </div>
-                  <div>{highlight.user_note}</div>
-                </div>
+                  {isEditing ? (
+                    <>
+                      <Input.TextArea
+                        value={commentDrafts[highlight.id] ?? highlight.user_note}
+                        autoSize={{ minRows: 2, maxRows: 8 }}
+                        aria-label={`编辑高亮备注：${sourceText}`}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) =>
+                          setCommentDrafts((current) => ({
+                            ...current,
+                            [highlight.id]: event.target.value,
+                          }))
+                        }
+                      />
+                      <Space className="universal-reader__comment-actions">
+                        <Button
+                          type="primary"
+                          size="small"
+                          icon={<SaveOutlined />}
+                          loading={savingCommentId === highlight.id}
+                          disabled={
+                            !onHighlightNoteSave ||
+                            (commentDrafts[highlight.id] ??
+                              highlight.user_note) === highlight.user_note
+                          }
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void saveHighlightNote(highlight.id);
+                          }}
+                        >
+                          保存
+                        </Button>
+                        <Button
+                          size="small"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            cancelEditing();
+                          }}
+                        >
+                          取消
+                        </Button>
+                      </Space>
+                    </>
+                  ) : (
+                    <span className="universal-reader__comment-text">
+                      {highlight.user_note}
+                    </span>
+                  )}
+                </>
               );
 
               return (
                 <React.Fragment key={highlight.id}>
-                  <button
-                    type="button"
+                  <div
                     className="universal-reader__comment-card"
                     data-highlight-comment-id={highlight.id}
                     style={{ top: position?.top ?? 0 }}
-                    onClick={() => onAnnotationClick('highlight', highlight.id)}
+                    onClick={() => setActiveCommentId(highlight.id)}
                   >
-                    <span className="universal-reader__comment-card-title">
-                      <CommentOutlined />
-                      高亮备注
-                    </span>
-                    <span
-                      className="universal-reader__comment-source"
-                      title={sourceText}
-                    >
-                      {sourceText}
-                    </span>
-                    <span className="universal-reader__comment-text">
-                      {highlight.user_note}
-                    </span>
-                  </button>
+                    {renderCommentBody()}
+                  </div>
                   {isMobile ? (
                     <Button
                       className="universal-reader__comment-marker"
@@ -1431,6 +1575,7 @@ export default function UniversalReader({
                       aria-label={`查看高亮备注：${sourceText}`}
                       onClick={(event) => {
                         event.stopPropagation();
+                        setActiveCommentId(highlight.id);
                         setMobileCommentId(highlight.id);
                       }}
                     />
@@ -1438,7 +1583,14 @@ export default function UniversalReader({
                     <Popover
                       trigger="click"
                       placement="leftTop"
-                      content={commentContent}
+                      content={
+                        <div
+                          className="universal-reader__comment-popover"
+                          onClick={() => setActiveCommentId(highlight.id)}
+                        >
+                          {renderCommentBody()}
+                        </div>
+                      }
                     >
                       <Button
                         className="universal-reader__comment-marker"
@@ -1448,6 +1600,7 @@ export default function UniversalReader({
                         icon={<CommentOutlined />}
                         style={{ top: position?.anchorTop ?? 0 }}
                         aria-label={`查看高亮备注：${sourceText}`}
+                        onClick={() => setActiveCommentId(highlight.id)}
                       />
                     </Popover>
                   )}
@@ -1462,19 +1615,89 @@ export default function UniversalReader({
         title="高亮备注"
         placement="bottom"
         open={isMobile && Boolean(mobileComment)}
-        onClose={() => setMobileCommentId(null)}
+        onClose={() => {
+          setMobileCommentId(null);
+          setEditingCommentId(null);
+        }}
         maskClosable={false}
         height="auto"
         className="universal-reader__comment-drawer"
       >
         {mobileComment && (
           <div className="universal-reader__comment-popover">
+            <div className="universal-reader__comment-card-title">
+              <span>
+                <CommentOutlined />
+                高亮备注
+              </span>
+              {editingCommentId !== mobileComment.id && (
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<EditOutlined />}
+                  aria-label="编辑高亮备注"
+                  onClick={() => {
+                    setCommentDrafts((current) => ({
+                      ...current,
+                      [mobileComment.id]: mobileComment.user_note,
+                    }));
+                    setEditingCommentId(mobileComment.id);
+                  }}
+                />
+              )}
+            </div>
             <div className="universal-reader__comment-source">
               {mobileComment.locators.find(
                 (item) => item.material === material.id,
               )?.source_text || '对应高亮'}
             </div>
-            <div>{mobileComment.user_note}</div>
+            {editingCommentId === mobileComment.id ? (
+              <>
+                <Input.TextArea
+                  value={
+                    commentDrafts[mobileComment.id] ?? mobileComment.user_note
+                  }
+                  autoSize={{ minRows: 3, maxRows: 8 }}
+                  aria-label="编辑高亮备注"
+                  onChange={(event) =>
+                    setCommentDrafts((current) => ({
+                      ...current,
+                      [mobileComment.id]: event.target.value,
+                    }))
+                  }
+                />
+                <Space className="universal-reader__comment-actions">
+                  <Button
+                    type="primary"
+                    icon={<SaveOutlined />}
+                    loading={savingCommentId === mobileComment.id}
+                    disabled={
+                      !onHighlightNoteSave ||
+                      (commentDrafts[mobileComment.id] ??
+                        mobileComment.user_note) === mobileComment.user_note
+                    }
+                    onClick={() => void saveHighlightNote(mobileComment.id)}
+                  >
+                    保存
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setCommentDrafts((current) => ({
+                        ...current,
+                        [mobileComment.id]: mobileComment.user_note,
+                      }));
+                      setEditingCommentId(null);
+                    }}
+                  >
+                    取消
+                  </Button>
+                </Space>
+              </>
+            ) : (
+              <div className="universal-reader__comment-text">
+                {mobileComment.user_note}
+              </div>
+            )}
           </div>
         )}
       </Drawer>

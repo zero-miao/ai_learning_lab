@@ -345,6 +345,7 @@ export interface SystemConfiguration {
   searxng_base_url: string;
   crawl4ai_base_url: string;
   supplement_relevance_threshold: number;
+  supplement_excluded_domains: string;
   default_site_theme:
     | 'paper'
     | 'sepia'
@@ -355,6 +356,20 @@ export interface SystemConfiguration {
     | 'charcoal'
     | 'coffee';
   default_reader_font: 'system' | 'song' | 'kai' | 'serif';
+  default_tts_voice: string;
+  default_speech_rate: number;
+  current_site_theme:
+    | 'paper'
+    | 'sepia'
+    | 'green'
+    | 'gray'
+    | 'dark'
+    | 'midnight'
+    | 'charcoal'
+    | 'coffee';
+  current_reader_font: 'system' | 'song' | 'kai' | 'serif';
+  current_tts_voice: string;
+  current_speech_rate: number;
   api_timeout_ms: number;
   updated_at: string;
 }
@@ -409,6 +424,20 @@ export const updateSystemConfiguration = (
   data: Omit<SystemConfiguration, 'updated_at'>,
 ) =>
   api.put<SystemConfiguration>('system-configuration/', data);
+export type CurrentReadingPreferences = Pick<
+  SystemConfiguration,
+  | 'current_site_theme'
+  | 'current_reader_font'
+  | 'current_tts_voice'
+  | 'current_speech_rate'
+>;
+export const updateCurrentReadingPreferences = (
+  data: Partial<CurrentReadingPreferences>,
+) =>
+  api.patch<CurrentReadingPreferences>(
+    'system-configuration/preferences/',
+    data,
+  );
 
 export const getSession = (id: number) => api.get<Session>(`sessions/${id}/`);
 export const createSessionMessage = (sessionId: number, content: string) =>

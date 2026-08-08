@@ -4,23 +4,22 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0026_aitask_full_context'),
+        ("api", "0026_aitask_full_context"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='aitask',
-            name='input_json',
+            model_name="aitask",
+            name="input_json",
         ),
         migrations.RemoveField(
-            model_name='aitask',
-            name='prompt_version',
+            model_name="aitask",
+            name="prompt_version",
         ),
         migrations.AddField(
-            model_name='aitask',
-            name='task_data',
-            field=models.JSONField(blank=True, default=dict, verbose_name='任务数据'),
+            model_name="aitask",
+            name="task_data",
+            field=models.JSONField(blank=True, default=dict, verbose_name="任务数据"),
         ),
     ]

@@ -67,6 +67,7 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
                     "searxng_base_url",
                     "crawl4ai_base_url",
                     "supplement_relevance_threshold",
+                    "supplement_excluded_domains",
                 )
             },
         ),
@@ -76,6 +77,12 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
                 "fields": (
                     "default_site_theme",
                     "default_reader_font",
+                    "default_tts_voice",
+                    "default_speech_rate",
+                    "current_site_theme",
+                    "current_reader_font",
+                    "current_tts_voice",
+                    "current_speech_rate",
                     "api_timeout_ms",
                 )
             },

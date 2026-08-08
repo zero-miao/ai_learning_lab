@@ -22,7 +22,7 @@ import {
   updateSystemConfiguration,
 } from '../../api';
 import type { SystemConfiguration } from '../../api';
-import { applySiteTheme, siteThemeOptions } from '../../appearance';
+import { siteThemeOptions } from '../../appearance';
 
 type ConfigurationForm = Omit<SystemConfiguration, 'updated_at'>;
 
@@ -117,11 +117,6 @@ const SystemSettings: React.FC = () => {
       form.setFieldsValue(response.data);
       setUpdatedAt(response.data.updated_at);
       setApiTimeout(response.data.api_timeout_ms);
-      applySiteTheme(response.data.default_site_theme);
-      window.localStorage.setItem(
-        'reader-font',
-        response.data.default_reader_font,
-      );
       message.success('系统设置已保存并生效');
     } catch {
       message.error('保存系统设置失败，请检查输入');
@@ -256,7 +251,7 @@ const SystemSettings: React.FC = () => {
                 label="补料最低相关度"
                 rules={[{ required: true, message: '请填写相关度' }]}
               >
-                <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} />
+                <InputNumber min={0.85} max={1} step={0.05} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
@@ -267,6 +262,15 @@ const SystemSettings: React.FC = () => {
             <Col xs={24} md={12}>
               <Form.Item name="crawl4ai_base_url" label="Crawl4AI 地址" rules={requiredRule}>
                 <Input />
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item
+                name="supplement_excluded_domains"
+                label="补料排除域名"
+                extra="英文逗号或换行分隔，自动排除对应子域名。"
+              >
+                <Input.TextArea rows={2} placeholder="wikipedia.org" />
               </Form.Item>
             </Col>
             <Col span={24}>
@@ -304,6 +308,16 @@ const SystemSettings: React.FC = () => {
                     { value: 'serif', label: '衬线字体' },
                   ]}
                 />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={8}>
+              <Form.Item name="default_tts_voice" label="默认朗读音色">
+                <Input placeholder="zh-CN-YunxiNeural" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={8}>
+              <Form.Item name="default_speech_rate" label="默认朗读语速">
+                <InputNumber min={0.5} max={3} step={0.25} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col xs={24} md={8}>
