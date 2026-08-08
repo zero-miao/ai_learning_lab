@@ -85,6 +85,11 @@ interface SelectionMenu {
   left: number;
 }
 
+interface HighlightCommentPosition {
+  anchorTop: number;
+  top: number;
+}
+
 function formatTimestamp(seconds: number) {
   const totalSeconds = Math.max(0, Math.floor(seconds));
   const minutes = Math.floor(totalSeconds / 60);
@@ -275,7 +280,6 @@ interface AnnotationRange {
   start: number;
   end: number;
   sourceStart: number;
-  userNote?: string;
 }
 
 interface MarkdownNode {
@@ -311,7 +315,6 @@ function getAnnotationRanges(
         start: locator.start_offset,
         end: locator.end_offset,
         sourceStart: locator.start_offset,
-        userNote: highlight.user_note.trim() || undefined,
       })),
     ),
     ...concepts.flatMap((concept) =>
@@ -409,6 +412,12 @@ function readerMarkdownPlugin(options: ReaderMarkdownPluginOptions) {
             'data-source-start': start,
             'data-source-end': end,
           };
+          const highlightIds = activeRanges
+            .filter((range) => range.type === 'highlight')
+            .map((range) => range.id);
+          if (highlightIds.length) {
+            properties['data-highlight-ids'] = highlightIds.join(' ');
+          }
           if (chunk) {
             properties['data-chunk-id'] = chunk.id;
             if (!anchoredChunks.has(chunk.id)) {
@@ -427,12 +436,6 @@ function readerMarkdownPlugin(options: ReaderMarkdownPluginOptions) {
             properties.tabIndex = 0;
           }
 
-          const highlightNotes = activeRanges.filter(
-            (range) =>
-              range.type === 'highlight' &&
-              range.sourceStart === start &&
-              range.userNote,
-          );
           return {
             type: 'element',
             tagName: 'span',
@@ -445,16 +448,6 @@ function readerMarkdownPlugin(options: ReaderMarkdownPluginOptions) {
                   Math.max(0, end - sourceStart),
                 ),
               },
-              ...highlightNotes.map((range) => ({
-                type: 'element',
-                tagName: 'span',
-                properties: {
-                  className: ['universal-reader__highlight-note'],
-                  'data-reader-ignore-offset': true,
-                  title: '高亮备注',
-                },
-                children: [{ type: 'text', value: range.userNote }],
-              })),
             ],
           };
         });
@@ -552,23 +545,6 @@ function renderChunk(
         }}
       >
         {content}
-        {activeRanges
-          .filter(
-            (range) =>
-              range.type === 'highlight' &&
-              range.sourceStart === absoluteStart &&
-              range.userNote,
-          )
-          .map((range) => (
-            <span
-              key={`highlight-note-${range.id}`}
-              className="universal-reader__highlight-note"
-              data-reader-ignore-offset
-              title="高亮备注"
-            >
-              {range.userNote}
-            </span>
-          ))}
       </span>
     );
   });
@@ -601,16 +577,13 @@ export default function UniversalReader({
     [material.tts_assets],
   );
   const annotationRanges = React.useMemo(
-    () =>
-      getAnnotationRanges(highlights, concepts, questions).map((range) => ({
-        ...range,
-        userNote: showHighlightNotes ? range.userNote : undefined,
-      })),
-    [concepts, highlights, questions, showHighlightNotes],
+    () => getAnnotationRanges(highlights, concepts, questions),
+    [concepts, highlights, questions],
   );
   const playerRef = React.useRef<MediaPlayerInstance | null>(null);
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const pendingSpeechOffsetRef = React.useRef<number | null>(null);
+  const contentShellRef = React.useRef<HTMLDivElement | null>(null);
   const transcriptRef = React.useRef<HTMLDivElement | null>(null);
   const [selectionMenu, setSelectionMenu] = React.useState<SelectionMenu | null>(
     null,
@@ -627,7 +600,18 @@ export default function UniversalReader({
   >(null);
   const [speechControlsTarget, setSpeechControlsTarget] =
     React.useState<HTMLElement | null>(null);
+  const [highlightCommentPositions, setHighlightCommentPositions] =
+    React.useState<Record<number, HighlightCommentPosition>>({});
+  const [highlightCommentRailHeight, setHighlightCommentRailHeight] =
+    React.useState(0);
   const isVideo = material.media_type === 'video' && Boolean(material.media_url);
+  const highlightComments = React.useMemo(
+    () =>
+      showHighlightNotes && !isVideo
+        ? highlights.filter((highlight) => highlight.user_note.trim())
+        : [],
+    [highlights, isVideo, showHighlightNotes],
+  );
   const selectedVoice =
     speechVoices.find((voice) => voice.voice === speechVoiceURI) ??
     speechVoices[0];
@@ -686,6 +670,61 @@ export default function UniversalReader({
     }
     setSpeechControlsTarget(document.getElementById(speechControlsTargetId));
   }, [speechControlsTargetId]);
+  React.useLayoutEffect(() => {
+    const shell = contentShellRef.current;
+    const content = transcriptRef.current;
+    if (!shell || !content || !highlightComments.length) {
+      setHighlightCommentPositions({});
+      setHighlightCommentRailHeight(0);
+      return;
+    }
+
+    const updatePositions = () => {
+      const shellRect = shell.getBoundingClientRect();
+      const anchors = highlightComments
+        .map((highlight) => {
+          const anchor = content.querySelector<HTMLElement>(
+            `[data-highlight-ids~="${highlight.id}"]`,
+          );
+          if (!anchor) return null;
+          return {
+            highlight,
+            anchorTop: anchor.getBoundingClientRect().top - shellRect.top,
+          };
+        })
+        .filter(
+          (
+            item,
+          ): item is {
+            highlight: Highlight;
+            anchorTop: number;
+          } => item !== null,
+        )
+        .sort((left, right) => left.anchorTop - right.anchorTop);
+
+      let previousBottom = 0;
+      const nextPositions: Record<number, HighlightCommentPosition> = {};
+      anchors.forEach(({ highlight, anchorTop }) => {
+        const card = shell.querySelector<HTMLElement>(
+          `[data-highlight-comment-id="${highlight.id}"]`,
+        );
+        const top = Math.max(anchorTop, previousBottom ? previousBottom + 12 : 0);
+        nextPositions[highlight.id] = { anchorTop, top };
+        previousBottom = top + (card?.offsetHeight ?? 96);
+      });
+      setHighlightCommentPositions(nextPositions);
+      setHighlightCommentRailHeight(previousBottom);
+    };
+
+    updatePositions();
+    const resizeObserver = new ResizeObserver(updatePositions);
+    resizeObserver.observe(content);
+    window.addEventListener('resize', updatePositions);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updatePositions);
+    };
+  }, [highlightComments, material.clean_text, readerFont]);
   const videoMarkers = isVideo
     ? [
         ...concepts.flatMap((concept) =>
@@ -1182,7 +1221,19 @@ export default function UniversalReader({
 
       <Divider className="universal-reader__divider" />
 
-      <div className={isVideo ? 'universal-reader__video-workspace' : undefined}>
+      <div
+        ref={contentShellRef}
+        className={
+          isVideo
+            ? 'universal-reader__video-workspace'
+            : 'universal-reader__content-shell'
+        }
+        style={
+          !isVideo && highlightCommentRailHeight
+            ? { minHeight: highlightCommentRailHeight }
+            : undefined
+        }
+      >
         {isVideo && (
           <section className="universal-reader__video">
             <MediaPlayer
@@ -1264,12 +1315,7 @@ export default function UniversalReader({
                 </span>
                 {renderChunk(
                   chunk,
-                  showHighlightNotes
-                    ? highlights
-                    : highlights.map((highlight) => ({
-                        ...highlight,
-                        user_note: '',
-                      })),
+                  highlights,
                   concepts,
                   questions,
                   onAnnotationClick,
@@ -1296,6 +1342,70 @@ export default function UniversalReader({
             </ReactMarkdown>
           )}
         </div>
+        {!isVideo && highlightComments.length > 0 && (
+          <aside
+            className="universal-reader__comment-rail"
+            aria-label="高亮备注"
+          >
+            {highlightComments.map((highlight) => {
+              const position = highlightCommentPositions[highlight.id];
+              const locator =
+                highlight.locators.find(
+                  (item) => item.material === material.id,
+                ) ?? highlight.locators[0];
+              const sourceText = locator?.source_text || '对应高亮';
+              const commentContent = (
+                <div className="universal-reader__comment-popover">
+                  <div className="universal-reader__comment-source">
+                    {sourceText}
+                  </div>
+                  <div>{highlight.user_note}</div>
+                </div>
+              );
+
+              return (
+                <React.Fragment key={highlight.id}>
+                  <button
+                    type="button"
+                    className="universal-reader__comment-card"
+                    data-highlight-comment-id={highlight.id}
+                    style={{ top: position?.top ?? 0 }}
+                    onClick={() => onAnnotationClick('highlight', highlight.id)}
+                  >
+                    <span className="universal-reader__comment-card-title">
+                      <CommentOutlined />
+                      高亮备注
+                    </span>
+                    <span
+                      className="universal-reader__comment-source"
+                      title={sourceText}
+                    >
+                      {sourceText}
+                    </span>
+                    <span className="universal-reader__comment-text">
+                      {highlight.user_note}
+                    </span>
+                  </button>
+                  <Popover
+                    trigger="click"
+                    placement="leftTop"
+                    content={commentContent}
+                  >
+                    <Button
+                      className="universal-reader__comment-marker"
+                      type="primary"
+                      shape="circle"
+                      size="small"
+                      icon={<CommentOutlined />}
+                      style={{ top: position?.anchorTop ?? 0 }}
+                      aria-label={`查看高亮备注：${sourceText}`}
+                    />
+                  </Popover>
+                </React.Fragment>
+              );
+            })}
+          </aside>
+        )}
       </div>
 
       {selectionMenu && (
