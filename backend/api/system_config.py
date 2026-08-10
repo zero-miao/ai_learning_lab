@@ -51,7 +51,7 @@ FIELD_ENV_DEFAULTS = {
     "supplement_relevance_threshold": ("SUPPLEMENT_RELEVANCE_THRESHOLD", "0.85"),
     "supplement_excluded_domains": (
         "SUPPLEMENT_EXCLUDED_DOMAINS",
-        "wikipedia.org",
+        "wikipedia.org,weread.qq.com,douban.com",
     ),
     "default_site_theme": ("VITE_DEFAULT_SITE_THEME", "paper"),
     "default_reader_font": ("VITE_DEFAULT_READER_FONT", "system"),

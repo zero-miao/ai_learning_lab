@@ -35,7 +35,6 @@ import {
   deleteConcept,
   deleteHighlight,
   deleteQuestion,
-  getAITask,
   getMaterials,
   getTopic,
   createMaterial,
@@ -48,7 +47,6 @@ import {
   uploadVideo,
 } from '../../api';
 import type {
-  AITask,
   Concept,
   Highlight,
   MaterialSummary,
@@ -80,7 +78,6 @@ const TopicDetail: React.FC = () => {
   const navigate = useNavigate();
   const [topic, setTopic] = useState<Topic | null>(null);
   const [loading, setLoading] = useState(false);
-  const [supplementTask, setSupplementTask] = useState<AITask | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
@@ -132,34 +129,6 @@ const TopicDetail: React.FC = () => {
     void loadTopic();
   }, [loadTopic]);
 
-  useEffect(() => {
-    if (!supplementTask || !['pending', 'running'].includes(supplementTask.status)) {
-      return;
-    }
-    const timer = window.setInterval(async () => {
-      const response = await getAITask(supplementTask.id);
-      setSupplementTask(response.data);
-      if (['succeeded', 'failed'].includes(response.data.status)) {
-        if (response.data.status === 'succeeded') {
-          const count = Number(response.data.result_json.recommended_count ?? 0);
-          message.success(count ? `找到 ${count} 篇候选材料，请人工采纳。` : '未找到达标资料。');
-          await loadTopic();
-        } else {
-          message.error(response.data.error_message || '材料检索失败');
-        }
-      }
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [loadTopic, supplementTask]);
-
-  const triggerTopicSupplement = async () => {
-    if (!topic) return;
-    const response = await triggerSupplement(topic.id);
-    setSupplementTask(response.data.task);
-    setDiscussionOpen(true);
-    message.info(response.data.created ? '正在检索补充资料。' : '已有补料任务正在执行。');
-  };
-
   const updateCategory = async (
     relation: TopicMaterial,
     category: TopicMaterial['category'],
@@ -181,8 +150,7 @@ const TopicDetail: React.FC = () => {
   const runSupplement = async (type: 'Concept' | 'Question' | 'Highlight', id: number) => {
     if (!topic) return;
     try {
-      const response = await triggerSupplement(topic.id, type, id);
-      setSupplementTask(response.data.task);
+      await triggerSupplement(topic.id, type, id);
       setDiscussionOpen(true);
       message.info('正在检索补充资料。');
     } catch {
@@ -352,12 +320,6 @@ const TopicDetail: React.FC = () => {
                 onClick={() => setDiscussionOpen(true)}
               >
                 学习讨论
-              </Button>
-              <Button
-                loading={supplementTask?.status === 'pending' || supplementTask?.status === 'running'}
-                onClick={() => void triggerTopicSupplement()}
-              >
-                查找材料
               </Button>
               <Button icon={<ApartmentOutlined />} onClick={() => navigate(`/topics/${topic.id}/map`)}>
                 概念图

@@ -691,8 +691,11 @@ class V2ErApiTests(TestCase):
         self.assertEqual(task.trigger_id, message.id)
         self.assertEqual(task.task_data, {"question_id": question.id})
 
+    @patch("api.supplement_service.search_with_exclusions", return_value=[])
     @patch("api.tasks.BaseTask._call_llm")
-    def test_reading_question_uses_selection_and_session_history(self, call_llm):
+    def test_reading_question_uses_selection_and_session_history(
+        self, call_llm, search
+    ):
         call_llm.side_effect = ["QuerySet 支持链式组合。", "因为查询在求值前不会执行。"]
         response = self.client.post(
             "/api/questions/",
@@ -752,6 +755,54 @@ class V2ErApiTests(TestCase):
                 ("user", "为什么要等到求值时？"),
                 ("ai", "因为查询在求值前不会执行。"),
             ],
+        )
+        self.assertEqual(search.call_args_list[0].args[0], "为什么可以组合？")
+        self.assertEqual(search.call_args_list[1].args[0], "为什么要等到求值时？")
+
+    @patch("api.supplement_service.search_with_exclusions")
+    @patch("api.tasks.BaseTask._call_llm", return_value="结合材料与外部资料回答。")
+    def test_reading_question_adds_filtered_web_background(self, call_llm, search):
+        search.return_value = [
+            {
+                "title": "Django 官方文档",
+                "url": "https://docs.djangoproject.com/querysets/",
+                "snippet": "QuerySet 在求值前保持惰性。",
+                "engine": "test",
+            }
+        ]
+        response = self.client.post(
+            "/api/questions/",
+            {
+                "topic": self.topic.id,
+                "material": self.material.id,
+                "start_offset": 0,
+                "end_offset": 10,
+                "question_text": "QuerySet 的背景是什么？",
+            },
+            format="json",
+        )
+        task = AITask.objects.get(pk=response.data["task"]["id"])
+
+        TaskRegistry.get_task_class(task.task_type)(
+            task_id=task.id,
+            task_data=task.task_data,
+            trigger_type=task.trigger_type,
+            trigger_id=task.trigger_id,
+            model=task.model,
+        ).run()
+
+        system_prompt = call_llm.call_args.args[0][0]["content"]
+        self.assertIn("互联网背景资料", system_prompt)
+        self.assertIn("https://docs.djangoproject.com/querysets/", system_prompt)
+        search.assert_called_once_with(
+            "QuerySet 的背景是什么？",
+            limit=5,
+            excluded_domains={
+                "wikipedia.org",
+                "weread.qq.com",
+                "douban.com",
+            },
+            timeout=3,
         )
 
     def test_delete_topic_removes_discussion_session_and_related_tasks(self):
@@ -1255,6 +1306,45 @@ class V2ErApiTests(TestCase):
 
         self.assertEqual(result["searched_count"], 0)
         self.assertEqual(result["recommended_count"], 0)
+        crawl.assert_not_called()
+
+    @patch("api.tasks.BaseTask._call_llm")
+    @patch("api.supplement_service.crawl")
+    @patch("api.supplement_service.search")
+    def test_supplement_uses_current_exclusions_when_task_has_no_snapshot(
+        self, search, crawl, call_llm
+    ):
+        call_llm.return_value = json.dumps({"queries": ["Django ORM"]})
+        search.return_value = [
+            {
+                "title": "豆瓣读书",
+                "url": "https://book.douban.com/subject/123/",
+                "snippet": "",
+                "engine": "test",
+            },
+            {
+                "title": "微信读书",
+                "url": "https://weread.qq.com/web/reader/123",
+                "snippet": "",
+                "engine": "test",
+            },
+        ]
+        task, _ = enqueue_or_reuse(
+            "supplement_search",
+            trigger_type="Topic",
+            trigger_id=self.topic.id,
+            task_data={"topic_id": self.topic.id},
+        )
+
+        result = TaskRegistry.get_task_class(task.task_type)(
+            task_id=task.id,
+            task_data=task.task_data,
+            trigger_type=task.trigger_type,
+            trigger_id=task.trigger_id,
+            model=task.model,
+        ).run()
+
+        self.assertEqual(result["searched_count"], 0)
         crawl.assert_not_called()
 
     @patch("api.tasks.BaseTask._call_llm")

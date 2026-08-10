@@ -25,10 +25,11 @@ def _json_request(url, *, method="GET", payload=None, timeout=20):
         raise ValueError(f"本地服务请求失败：{error}") from error
 
 
-def search(query, limit=10):
+def search(query, limit=10, timeout=20):
     base_url = get_config_value("searxng_base_url").rstrip("/")
     payload = _json_request(
-        f"{base_url}/search?{urlencode({'q': query, 'format': 'json', 'categories': 'general'})}"
+        f"{base_url}/search?{urlencode({'q': query, 'format': 'json', 'categories': 'general'})}",
+        timeout=timeout,
     )
     results = []
     for item in payload.get("results", [])[:limit]:
@@ -51,6 +52,22 @@ def is_excluded_url(url, excluded_domains):
         hostname == domain or hostname.endswith(f".{domain}")
         for domain in excluded_domains
     )
+
+
+def parse_excluded_domains(value):
+    return {
+        domain.strip().lower().lstrip(".")
+        for domain in str(value).replace("\n", ",").split(",")
+        if domain.strip()
+    }
+
+
+def search_with_exclusions(query, *, limit=10, excluded_domains=(), timeout=20):
+    return [
+        candidate
+        for candidate in search(query, limit=limit, timeout=timeout)
+        if not is_excluded_url(candidate["url"], excluded_domains)
+    ]
 
 
 def crawl(url):
