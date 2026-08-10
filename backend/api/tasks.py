@@ -625,15 +625,47 @@ class AnswerQuestionTask(BaseTask):
         )
         history = list(session.messages.order_by("-id")[:20])
         history.reverse()
+        latest_question = (
+            user_message.msg_content if user_message else question.question_text
+        )
+        web_context = ""
+        try:
+            from .supplement_service import (
+                parse_excluded_domains,
+                search_with_exclusions,
+            )
+            from .system_config import get_config_value
+
+            excluded_domains = parse_excluded_domains(
+                get_config_value("supplement_excluded_domains")
+            )
+            web_results = search_with_exclusions(
+                latest_question,
+                limit=5,
+                excluded_domains=excluded_domains,
+                timeout=3,
+            )
+            if web_results:
+                web_context = "\n\n互联网背景资料（仅用于补充，回答中用 Markdown 链接标注来源）：\n"
+                web_context += "\n".join(
+                    f"- [{item['title'] or item['url']}]({item['url']})："
+                    f"{item['snippet'] or '无摘要'}"
+                    for item in web_results
+                )
+        except ValueError:
+            # 联网检索是增强能力；本地搜索服务不可用时仍应完成材料问答。
+            pass
 
         messages = [
             {
                 "role": "system",
                 "content": (
                     "你是一个专业的学习助手。请基于提供的材料和对话历史回答"
-                    "用户最新的问题。如果材料中没有相关信息，请明确说明，不要编造。\n\n"
+                    "用户最新的问题。优先使用学习材料；材料不足时可以使用给定的互联网"
+                    "背景资料，并明确标注来源。不得编造未提供的事实或链接。\n\n"
                     f"学习材料：\n{context}\n\n"
                     f"用户最初选中的原文：\n{source_text}"
+                    f"{web_context}"
                 ),
             },
         ]
@@ -1437,7 +1469,13 @@ class SupplementSearchTask(BaseTask):
 
     def run(self) -> Dict[str, Any]:
         from .models import AITask, MaterialRecommendation, SessionMessage
-        from .supplement_service import content_md5, crawl, is_excluded_url, search
+        from .supplement_service import (
+            content_md5,
+            crawl,
+            parse_excluded_domains,
+            search_with_exclusions,
+        )
+        from .system_config import get_config_value
 
         task_instance = AITask.objects.get(pk=self.task_id)
 
@@ -1480,17 +1518,14 @@ class SupplementSearchTask(BaseTask):
         _update_task_progress(task_instance, result)
 
         candidates_by_url = {}
-        excluded_domains = {
-            domain.strip().lower().lstrip(".")
-            for domain in str(self.task_data.get("excluded_domains", ""))
-            .replace("\n", ",")
-            .split(",")
-            if domain.strip()
-        }
+        excluded_domains = parse_excluded_domains(
+            self.task_data.get("excluded_domains")
+            or get_config_value("supplement_excluded_domains")
+        )
         for query in queries:
-            for candidate in search(query):
-                if is_excluded_url(candidate["url"], excluded_domains):
-                    continue
+            for candidate in search_with_exclusions(
+                query, excluded_domains=excluded_domains
+            ):
                 candidates_by_url.setdefault(candidate["url"], candidate)
 
         result.update(stage="crawling", searched_count=len(candidates_by_url))

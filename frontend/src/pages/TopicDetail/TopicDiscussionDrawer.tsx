@@ -20,6 +20,7 @@ import {
 import {
   CheckOutlined,
   CloseOutlined,
+  FileSearchOutlined,
   LinkOutlined,
   SendOutlined,
 } from '@ant-design/icons';
@@ -29,6 +30,7 @@ import {
   dismissMaterialRecommendation,
   getAITask,
   getDiscussion,
+  triggerSupplement,
 } from '../../api';
 import './discussion.css';
 import type {
@@ -63,6 +65,7 @@ const TopicDiscussionDrawer: React.FC<Props> = ({
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [startingSearch, setStartingSearch] = useState(false);
   const [processingId, setProcessingId] = useState<number | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const { token } = theme.useToken();
@@ -95,6 +98,18 @@ const TopicDiscussionDrawer: React.FC<Props> = ({
       );
       const failed = nextTasks.find((task) => task.status === 'failed');
       if (failed) message.error(failed.error_message || `${failed.task_type_display}失败`);
+      const completedSupplement = nextTasks.find(
+        (task) =>
+          task.task_type === 'supplement_search' &&
+          task.status === 'succeeded' &&
+          tasks.find((current) => current.id === task.id)?.status !== 'succeeded',
+      );
+      if (completedSupplement) {
+        const count = Number(completedSupplement.result_json.recommended_count ?? 0);
+        message.success(
+          count ? `找到 ${count} 篇候选材料，请人工采纳。` : '未找到达到相关度要求的资料。',
+        );
+      }
       const completed = nextTasks.some(
         (task) =>
           task.status !== tasks.find((current) => current.id === task.id)?.status &&
@@ -173,6 +188,25 @@ const TopicDiscussionDrawer: React.FC<Props> = ({
       message.error('发送失败，请重试');
     } finally {
       setSending(false);
+    }
+  };
+
+  const startMaterialSearch = async () => {
+    if (startingSearch || activeSupplementTask) return;
+    setStartingSearch(true);
+    try {
+      const response = await triggerSupplement(topicId);
+      setTasks((current) => {
+        const remaining = current.filter((task) => task.id !== response.data.task.id);
+        return [...remaining, response.data.task];
+      });
+      message.info(
+        response.data.created ? '正在检索补充资料。' : '已有资料检索任务正在执行。',
+      );
+    } catch {
+      message.error('查找材料失败，请确认本地检索服务已启动后重试');
+    } finally {
+      setStartingSearch(false);
     }
   };
 
@@ -414,7 +448,22 @@ const TopicDiscussionDrawer: React.FC<Props> = ({
             void send();
           }}
         />
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 8,
+            marginTop: 8,
+          }}
+        >
+          <Button
+            icon={<FileSearchOutlined />}
+            loading={startingSearch}
+            disabled={Boolean(activeSupplementTask)}
+            onClick={() => void startMaterialSearch()}
+          >
+            查找材料
+          </Button>
           <Button
             type="primary"
             icon={<SendOutlined />}

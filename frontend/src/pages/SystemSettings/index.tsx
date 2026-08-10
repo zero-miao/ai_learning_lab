@@ -270,7 +270,10 @@ const SystemSettings: React.FC = () => {
                 label="补料排除域名"
                 extra="英文逗号或换行分隔，自动排除对应子域名。"
               >
-                <Input.TextArea rows={2} placeholder="wikipedia.org" />
+                <Input.TextArea
+                  rows={2}
+                  placeholder="wikipedia.org,weread.qq.com,douban.com"
+                />
               </Form.Item>
             </Col>
             <Col span={24}>
