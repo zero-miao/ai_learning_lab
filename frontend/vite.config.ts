@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { viteStaticCopy } from 'vite-plugin-static-copy'
 
 const antdForms = new Set([
   'auto-complete', 'button', 'cascader', 'checkbox', 'color-picker', 'date-picker',
@@ -26,7 +27,17 @@ const antdLayout = new Set([
 // https://vite.dev/config/
 export default defineConfig({
   envDir: '..',
-  plugins: [react()],
+  plugins: [
+    react(),
+    viteStaticCopy({
+      targets: [
+        {
+          src: 'node_modules/vditor/dist',
+          dest: 'vditor',
+        },
+      ],
+    }),
+  ],
   server: {
     host: '0.0.0.0',
     proxy: {
@@ -46,6 +57,7 @@ export default defineConfig({
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined
           if (id.includes('@vidstack')) return 'media'
+          if (id.includes('/vditor/')) return 'markdown-editor'
           if (id.includes('react-markdown') || id.includes('remark-')) return 'markdown'
           if (id.includes('@ant-design/icons')) return 'antd-icons'
           if (id.includes('@ant-design')) return 'antd-core'

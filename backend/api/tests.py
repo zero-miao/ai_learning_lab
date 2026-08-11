@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -18,6 +19,8 @@ from .models import (
     Highlight,
     Material,
     MaterialChunk,
+    MaterialDraft,
+    MaterialDraftVersion,
     MaterialRecommendation,
     MaterialTextLocator,
     Question,
@@ -356,6 +359,138 @@ class V2ErApiTests(TestCase):
             format="json",
         )
         self.assertEqual(blank.status_code, 400)
+
+    def test_markdown_material_draft_saves_without_creating_material(self):
+        response = self.client.post(
+            "/api/material-drafts/",
+            {
+                "topic": self.topic.id,
+                "title": "QuerySet 写作草稿",
+                "content": "# QuerySet\n\n初稿内容",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        draft_id = response.data["id"]
+        self.assertEqual(MaterialDraft.objects.get(pk=draft_id).topic, self.topic)
+        self.assertEqual(Material.objects.count(), 1)
+        self.assertEqual(AITask.objects.count(), 0)
+
+        updated = self.client.patch(
+            f"/api/material-drafts/{draft_id}/",
+            {"content": "# QuerySet\n\n继续编辑后的内容"},
+            format="json",
+        )
+        listed = self.client.get("/api/material-drafts/", {"topic": self.topic.id})
+        invalid_topic = self.client.get("/api/material-drafts/", {"topic": "invalid"})
+
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(listed.data["results"][0]["id"], draft_id)
+        self.assertIn("继续编辑", listed.data["results"][0]["content"])
+        self.assertEqual(invalid_topic.status_code, 200)
+        self.assertEqual(invalid_topic.data["count"], 0)
+
+    def test_publish_markdown_draft_creates_material_and_starts_briefing(self):
+        draft = MaterialDraft.objects.create(
+            topic=self.topic,
+            title="QuerySet 指南",
+            content="# QuerySet\n\n- 惰性求值\n- 支持组合",
+        )
+
+        response = self.client.post(f"/api/material-drafts/{draft.id}/publish/")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(MaterialDraft.objects.filter(pk=draft.id).exists())
+        material = Material.objects.get(pk=response.data["material"]["id"])
+        self.assertEqual(material.raw_text, draft.content)
+        self.assertEqual(material.clean_text, draft.content)
+        self.assertEqual(material.media_meta["source_format"], "markdown")
+        self.assertEqual(material.status, "summarizing")
+        self.assertTrue(material.chunks.exists())
+        self.assertTrue(
+            TopicMaterial.objects.filter(topic=self.topic, material=material).exists()
+        )
+        task = AITask.objects.get(pk=response.data["task"]["id"])
+        self.assertEqual(task.task_type, "briefing")
+        self.assertEqual(task.trigger_id, material.id)
+
+    def test_publish_markdown_draft_requires_title_and_content(self):
+        draft = MaterialDraft.objects.create(topic=self.topic)
+
+        response = self.client.post(f"/api/material-drafts/{draft.id}/publish/")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(MaterialDraft.objects.filter(pk=draft.id).exists())
+        self.assertEqual(Material.objects.count(), 1)
+
+    def test_markdown_draft_versions_after_ten_minutes_of_inactivity(self):
+        draft = MaterialDraft.objects.create(
+            topic=self.topic,
+            title="初始标题",
+            content="初始内容",
+        )
+        MaterialDraft.objects.filter(pk=draft.id).update(
+            updated_at=timezone.now() - timedelta(minutes=11)
+        )
+
+        response = self.client.patch(
+            f"/api/material-drafts/{draft.id}/",
+            {"title": "新标题", "content": "新内容"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        version = MaterialDraftVersion.objects.get(draft=draft)
+        self.assertEqual(version.version_number, 1)
+        self.assertEqual(version.title, "初始标题")
+        self.assertEqual(version.content, "初始内容")
+        draft.refresh_from_db()
+        self.assertEqual((draft.title, draft.content), ("新标题", "新内容"))
+
+        continued = self.client.patch(
+            f"/api/material-drafts/{draft.id}/",
+            {"content": "连续编辑内容"},
+            format="json",
+        )
+        no_change = self.client.patch(
+            f"/api/material-drafts/{draft.id}/",
+            {"content": "连续编辑内容"},
+            format="json",
+        )
+
+        self.assertEqual(continued.status_code, 200)
+        self.assertEqual(no_change.status_code, 200)
+        self.assertEqual(MaterialDraftVersion.objects.filter(draft=draft).count(), 1)
+
+    def test_restore_draft_version_preserves_current_content_as_history(self):
+        draft = MaterialDraft.objects.create(
+            topic=self.topic,
+            title="当前标题",
+            content="当前内容",
+        )
+        historical = MaterialDraftVersion.objects.create(
+            draft=draft,
+            version_number=1,
+            title="历史标题",
+            content="历史内容",
+        )
+
+        response = self.client.post(
+            f"/api/material-draft-versions/{historical.id}/restore/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        draft.refresh_from_db()
+        self.assertEqual((draft.title, draft.content), ("历史标题", "历史内容"))
+        preserved = MaterialDraftVersion.objects.get(draft=draft, version_number=2)
+        self.assertEqual((preserved.title, preserved.content), ("当前标题", "当前内容"))
+        listed = self.client.get("/api/material-draft-versions/", {"draft": draft.id})
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.data["count"], 2)
+        self.assertNotIn("content", listed.data["results"][0])
+        detail = self.client.get(f"/api/material-draft-versions/{historical.id}/")
+        self.assertEqual(detail.data["content"], "历史内容")
 
     def test_topic_list_returns_summary_without_nested_business_data(self):
         Topic.objects.bulk_create(

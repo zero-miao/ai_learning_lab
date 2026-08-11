@@ -7,6 +7,8 @@ from .views import (
     ConceptViewSet,
     ExamViewSet,
     HighlightViewSet,
+    MaterialDraftVersionViewSet,
+    MaterialDraftViewSet,
     MaterialRecommendationViewSet,
     MaterialViewSet,
     QuestionViewSet,
@@ -28,6 +30,8 @@ router = DefaultRouter()
 router.register(r"topics", TopicViewSet)
 router.register(r"sessions", SessionViewSet)
 router.register(r"materials", MaterialViewSet)
+router.register(r"material-drafts", MaterialDraftViewSet)
+router.register(r"material-draft-versions", MaterialDraftVersionViewSet)
 router.register(r"material-recommendations", MaterialRecommendationViewSet)
 router.register(r"topic-materials", TopicMaterialViewSet)
 router.register(r"questions", QuestionViewSet)

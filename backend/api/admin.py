@@ -10,6 +10,8 @@ from .models import (
     Highlight,
     Material,
     MaterialChunk,
+    MaterialDraft,
+    MaterialDraftVersion,
     MaterialRecommendation,
     MaterialTextLocator,
     Question,
@@ -22,6 +24,27 @@ from .models import (
     UserFeedback,
 )
 from .tasks import TaskRegistry
+
+
+@admin.register(MaterialDraft)
+class MaterialDraftAdmin(admin.ModelAdmin):
+    list_display = ("id", "title", "topic", "updated_at")
+    search_fields = ("title", "content", "topic__title")
+    list_filter = ("updated_at",)
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(MaterialDraftVersion)
+class MaterialDraftVersionAdmin(admin.ModelAdmin):
+    list_display = ("id", "draft", "version_number", "created_at")
+    search_fields = ("title", "content", "draft__title")
+    readonly_fields = (
+        "draft",
+        "version_number",
+        "title",
+        "content",
+        "created_at",
+    )
 
 
 @admin.register(SystemConfiguration)

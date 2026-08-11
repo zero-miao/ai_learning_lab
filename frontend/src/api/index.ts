@@ -98,6 +98,27 @@ export interface Material
   chunks: MaterialChunk[];
 }
 
+export interface MaterialDraft {
+  id: number;
+  topic: number;
+  title: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MaterialDraftVersionSummary {
+  id: number;
+  draft: number;
+  version_number: number;
+  title: string;
+  created_at: string;
+}
+
+export interface MaterialDraftVersion extends MaterialDraftVersionSummary {
+  content: string;
+}
+
 export interface TopicMaterial {
   id: number;
   topic: number;
@@ -512,6 +533,28 @@ export const getMaterialAnnotations = (id: number, topic?: number) =>
 export const reImportMaterial = (id: number) =>
   api.post<{ material: Material; task: AITask | null }>(`materials/${id}/re_import/`);
 export const deleteMaterial = (id: number) => api.delete(`materials/${id}/`);
+export const getMaterialDrafts = (topic: number) =>
+  api.get<PaginatedResponse<MaterialDraft>>('material-drafts/', {
+    params: { topic, page_size: 100 },
+  });
+export const createMaterialDraft = (data: Pick<MaterialDraft, 'topic' | 'title' | 'content'>) =>
+  api.post<MaterialDraft>('material-drafts/', data);
+export const updateMaterialDraft = (
+  id: number,
+  data: Partial<Pick<MaterialDraft, 'title' | 'content'>>,
+) => api.patch<MaterialDraft>(`material-drafts/${id}/`, data);
+export const deleteMaterialDraft = (id: number) =>
+  api.delete(`material-drafts/${id}/`);
+export const publishMaterialDraft = (id: number) =>
+  api.post<{ material: Material; task: AITask }>(`material-drafts/${id}/publish/`);
+export const getMaterialDraftVersions = (draft: number) =>
+  api.get<PaginatedResponse<MaterialDraftVersionSummary>>('material-draft-versions/', {
+    params: { draft, page_size: 100 },
+  });
+export const getMaterialDraftVersion = (id: number) =>
+  api.get<MaterialDraftVersion>(`material-draft-versions/${id}/`);
+export const restoreMaterialDraftVersion = (id: number) =>
+  api.post<MaterialDraft>(`material-draft-versions/${id}/restore/`);
 export const uploadVideo = (data: FormData) =>
   api.post<{ material: Material; task: AITask }>('materials/upload-video/', data, {
     headers: { 'Content-Type': 'multipart/form-data' },

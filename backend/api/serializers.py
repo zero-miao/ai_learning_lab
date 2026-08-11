@@ -10,6 +10,8 @@ from .models import (
     Highlight,
     Material,
     MaterialChunk,
+    MaterialDraft,
+    MaterialDraftVersion,
     MaterialRecommendation,
     MaterialTextLocator,
     Question,
@@ -233,6 +235,32 @@ class MaterialSerializer(serializers.ModelSerializer):
             "status_display",
             "chunks",
         ]
+
+
+class MaterialDraftSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MaterialDraft
+        fields = ["id", "topic", "title", "content", "created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class MaterialDraftVersionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MaterialDraftVersion
+        fields = [
+            "id",
+            "draft",
+            "version_number",
+            "title",
+            "content",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class MaterialDraftVersionListSerializer(MaterialDraftVersionSerializer):
+    class Meta(MaterialDraftVersionSerializer.Meta):
+        fields = ["id", "draft", "version_number", "title", "created_at"]
 
 
 class MaterialListSerializer(MaterialSerializer):
