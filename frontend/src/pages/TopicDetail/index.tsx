@@ -23,9 +23,11 @@ import {
   ApartmentOutlined,
   ArrowLeftOutlined,
   CheckOutlined,
+  CheckCircleOutlined,
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
+  FileTextOutlined,
   FileSearchOutlined,
   LinkOutlined,
   MessageOutlined,
@@ -35,10 +37,14 @@ import {
   deleteConcept,
   deleteHighlight,
   deleteQuestion,
+  createMaterialDraft,
+  deleteMaterialDraft,
+  getMaterialDrafts,
   getMaterials,
   getTopic,
   createMaterial,
   removeTopicMaterial,
+  publishMaterialDraft,
   triggerSupplement,
   updateConcept,
   updateHighlight,
@@ -49,6 +55,7 @@ import {
 import type {
   Concept,
   Highlight,
+  MaterialDraft,
   MaterialSummary,
   Topic,
   TopicMaterial,
@@ -57,13 +64,13 @@ import TopicDiscussionDrawer from './TopicDiscussionDrawer';
 
 const { Title, Text } = Typography;
 const OUTPUT_PAGE_SIZE = 5;
+const MaterialDraftEditor = React.lazy(() => import('./MaterialDraftEditor'));
 type OutputTab = 'concepts' | 'questions' | 'highlights';
 
 interface MaterialFormValues {
   title: string;
   type: 'url' | 'text' | 'video' | 'existing';
   source_url?: string;
-  raw_text?: string;
   existing_material_id?: number;
 }
 
@@ -82,6 +89,11 @@ const TopicDetail: React.FC = () => {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
   const [allMaterials, setAllMaterials] = useState<MaterialSummary[]>([]);
+  const [materialDrafts, setMaterialDrafts] = useState<MaterialDraft[]>([]);
+  const [activeMaterialDraft, setActiveMaterialDraft] = useState<MaterialDraft | null>(null);
+  const [draftEditorOpen, setDraftEditorOpen] = useState(false);
+  const [creatingDraft, setCreatingDraft] = useState(false);
+  const [draftActionId, setDraftActionId] = useState<number | null>(null);
   const [materialForm] = Form.useForm<MaterialFormValues>();
   const [outputTab, setOutputTab] = useState<OutputTab>('concepts');
   const [outputPage, setOutputPage] = useState(1);
@@ -112,12 +124,14 @@ const TopicDetail: React.FC = () => {
     if (!id) return;
     setLoading(true);
     try {
-      const [topicRes, materialsRes] = await Promise.all([
+      const [topicRes, materialsRes, draftsRes] = await Promise.all([
         getTopic(Number(id)),
-        getMaterials({ page_size: 20 })
+        getMaterials({ page_size: 20 }),
+        getMaterialDrafts(Number(id)),
       ]);
       setTopic(topicRes.data);
       setAllMaterials(materialsRes.data.results);
+      setMaterialDrafts(draftsRes.data.results);
     } catch {
       message.error('加载数据失败');
     } finally {
@@ -257,13 +271,22 @@ const TopicDetail: React.FC = () => {
             ? '视频与字幕已上传，正在处理时间轴'
             : '视频已上传，正在生成转录稿',
         );
+      } else if (values.type === 'text') {
+        const response = await createMaterialDraft({
+          topic: topic.id,
+          title: values.title,
+          content: '',
+        });
+        setMaterialDrafts((current) => [response.data, ...current]);
+        setActiveMaterialDraft(response.data);
+        setDraftEditorOpen(true);
+        message.info('草稿已创建，完成写作后再导入为材料');
       } else {
         await createMaterial({
           topic: topic.id,
           title: values.title,
-          media_type: values.type === 'url' ? 'web_page' : 'text',
-          media_uri: values.type === 'url' ? values.source_url : '',
-          raw_text: values.type === 'text' ? values.raw_text : '',
+          media_type: 'web_page',
+          media_uri: values.source_url,
         });
         message.success('材料已导入');
       }
@@ -275,6 +298,54 @@ const TopicDetail: React.FC = () => {
     } catch (error) {
       console.error('Failed to import material:', error);
       message.error('导入失败');
+    }
+  };
+
+  const createMarkdownDraft = async () => {
+    if (!topic || creatingDraft) return;
+    setCreatingDraft(true);
+    try {
+      const response = await createMaterialDraft({
+        topic: topic.id,
+        title: '',
+        content: '',
+      });
+      setMaterialDrafts((current) => [response.data, ...current]);
+      setActiveMaterialDraft(response.data);
+      setDraftEditorOpen(true);
+    } catch {
+      message.error('创建草稿失败');
+    } finally {
+      setCreatingDraft(false);
+    }
+  };
+
+  const publishDraft = async (draft: MaterialDraft) => {
+    setDraftActionId(draft.id);
+    try {
+      await publishMaterialDraft(draft.id);
+      setMaterialDrafts((current) => current.filter((item) => item.id !== draft.id));
+      if (activeMaterialDraft?.id === draft.id) setActiveMaterialDraft(null);
+      await loadTopic();
+      message.success('Markdown 材料已导入，正在生成摘要');
+    } catch {
+      message.error('导入失败，草稿仍已保留');
+    } finally {
+      setDraftActionId(null);
+    }
+  };
+
+  const removeDraft = async (draft: MaterialDraft) => {
+    setDraftActionId(draft.id);
+    try {
+      await deleteMaterialDraft(draft.id);
+      setMaterialDrafts((current) => current.filter((item) => item.id !== draft.id));
+      if (activeMaterialDraft?.id === draft.id) setActiveMaterialDraft(null);
+      message.success('草稿已删除');
+    } catch {
+      message.error('删除草稿失败');
+    } finally {
+      setDraftActionId(null);
     }
   };
 
@@ -460,8 +531,85 @@ const TopicDetail: React.FC = () => {
 
         <Card
           title={`学习材料 (${topic.topic_materials.length})`}
-          extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setImportOpen(true)}>添加材料</Button>}
+          extra={
+            <Space>
+              <Button
+                icon={<FileTextOutlined />}
+                loading={creatingDraft}
+                onClick={() => void createMarkdownDraft()}
+              >
+                Markdown 写作
+              </Button>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setImportOpen(true)}>
+                添加材料
+              </Button>
+            </Space>
+          }
         >
+          {materialDrafts.length > 0 && (
+            <Card
+              size="small"
+              type="inner"
+              title={`写作草稿 (${materialDrafts.length})`}
+              style={{ marginBottom: 16 }}
+            >
+              <List
+                size="small"
+                dataSource={materialDrafts}
+                renderItem={(draft) => (
+                  <List.Item
+                    actions={[
+                      <Button
+                        key="continue"
+                        type="link"
+                        onClick={() => {
+                          setActiveMaterialDraft(draft);
+                          setDraftEditorOpen(true);
+                        }}
+                      >
+                        继续编辑
+                      </Button>,
+                      <Popconfirm
+                        key="publish"
+                        title="完成写作并导入为正式材料？"
+                        description="导入后草稿将转为正式材料并开始生成摘要。"
+                        disabled={!draft.title.trim() || !draft.content.trim()}
+                        onConfirm={() => void publishDraft(draft)}
+                      >
+                        <Button
+                          type="link"
+                          icon={<CheckCircleOutlined />}
+                          loading={draftActionId === draft.id}
+                          disabled={!draft.title.trim() || !draft.content.trim()}
+                        >
+                          完成并导入
+                        </Button>
+                      </Popconfirm>,
+                      <Popconfirm
+                        key="delete"
+                        title="删除这份草稿？"
+                        description="草稿及其历史版本都会删除，且无法恢复。"
+                        onConfirm={() => void removeDraft(draft)}
+                      >
+                        <Button
+                          type="text"
+                          danger
+                          icon={<DeleteOutlined />}
+                          disabled={draftActionId === draft.id}
+                        />
+                      </Popconfirm>,
+                    ]}
+                  >
+                    <List.Item.Meta
+                      avatar={<FileTextOutlined />}
+                      title={draft.title || '未命名草稿'}
+                      description={`最后保存：${new Date(draft.updated_at).toLocaleString()}`}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+          )}
           <List
             dataSource={topic.topic_materials}
             locale={{ emptyText: '暂无材料。可导入视频、文本或查找候选材料。' }}
@@ -538,6 +686,7 @@ const TopicDetail: React.FC = () => {
           materialForm.resetFields();
         }}
         onOk={() => materialForm.submit()}
+        okText="继续"
       >
         <Form form={materialForm} layout="vertical" initialValues={{ type: 'url' }} onFinish={(values) => void importMaterial(values)}>
           <Form.Item
@@ -552,7 +701,7 @@ const TopicDetail: React.FC = () => {
           <Form.Item name="type" label="材料类型">
             <Radio.Group>
               <Radio value="url">网页链接</Radio>
-              <Radio value="text">粘贴文本</Radio>
+              <Radio value="text">Markdown 文本</Radio>
               <Radio value="video">本地视频</Radio>
               <Radio value="existing">已有材料</Radio>
             </Radio.Group>
@@ -591,7 +740,12 @@ const TopicDetail: React.FC = () => {
                 return <Form.Item name="source_url" label="网页链接" rules={[{ required: true, type: 'url', message: '请输入有效 URL' }]}><Input placeholder="https://..." /></Form.Item>;
               }
               if (type === 'text') {
-                return <Form.Item name="raw_text" label="材料正文" rules={[{ required: true, message: '请输入正文' }]}><Input.TextArea rows={7} /></Form.Item>;
+                return (
+                  <Typography.Paragraph type="secondary">
+                    点击“继续”后进入 Markdown 写作模式。内容会自动保存为草稿，
+                    只有点击“完成并导入”后才会成为正式学习材料。
+                  </Typography.Paragraph>
+                );
               }
               if (type === 'video') {
                 return (
@@ -676,6 +830,22 @@ const TopicDetail: React.FC = () => {
         onClose={() => setDiscussionOpen(false)}
         onMaterialsChanged={loadTopic}
       />
+      {activeMaterialDraft && (
+        <React.Suspense fallback={null}>
+          <MaterialDraftEditor
+            key={activeMaterialDraft.id}
+            draft={activeMaterialDraft}
+            open={draftEditorOpen}
+            onClose={() => setDraftEditorOpen(false)}
+            onSaved={(savedDraft) => {
+              setActiveMaterialDraft(savedDraft);
+              setMaterialDrafts((current) =>
+                current.map((draft) => draft.id === savedDraft.id ? savedDraft : draft),
+              );
+            }}
+          />
+        </React.Suspense>
+      )}
     </div>
   );
 };

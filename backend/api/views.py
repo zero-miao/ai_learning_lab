@@ -1,4 +1,5 @@
 import shutil
+from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -20,6 +21,8 @@ from .models import (
     Highlight,
     Material,
     MaterialChunk,
+    MaterialDraft,
+    MaterialDraftVersion,
     MaterialRecommendation,
     MaterialTextLocator,
     Question,
@@ -39,6 +42,9 @@ from .serializers import (
     CurrentReadingPreferencesSerializer,
     ExamSerializer,
     HighlightSerializer,
+    MaterialDraftSerializer,
+    MaterialDraftVersionListSerializer,
+    MaterialDraftVersionSerializer,
     MaterialListSerializer,
     MaterialRecommendationSerializer,
     MaterialSerializer,
@@ -1098,6 +1104,132 @@ class MaterialViewSet(viewsets.ModelViewSet):
                 ).data,
             }
         )
+
+
+class MaterialDraftViewSet(viewsets.ModelViewSet):
+    queryset = MaterialDraft.objects.select_related("topic")
+    serializer_class = MaterialDraftSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        topic = self.request.query_params.get("topic")
+        if not topic:
+            return queryset
+        return (
+            queryset.filter(topic_id=int(topic)) if topic.isdigit() else queryset.none()
+        )
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        current = self.get_object()
+        with transaction.atomic():
+            draft = MaterialDraft.objects.select_for_update().get(pk=current.pk)
+            serializer = self.get_serializer(draft, data=request.data, partial=partial)
+            serializer.is_valid(raise_exception=True)
+            next_title = serializer.validated_data.get("title", draft.title)
+            next_content = serializer.validated_data.get("content", draft.content)
+            if next_title == draft.title and next_content == draft.content:
+                return Response(self.get_serializer(draft).data)
+            if (
+                draft.title or draft.content
+            ) and timezone.now() - draft.updated_at >= timedelta(minutes=10):
+                _create_material_draft_version(draft)
+            serializer.save()
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def publish(self, request, pk=None):
+        draft = self.get_object()
+        title = draft.title.strip()
+        content = draft.content.strip()
+        if not title or not content:
+            return Response(
+                {"detail": "发布前请填写标题和正文。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from .tasks import _create_material_chunks
+
+        with transaction.atomic():
+            material = Material.objects.create(
+                title=title,
+                media_type="text",
+                media_meta={"source_format": "markdown"},
+                raw_text=content,
+                clean_text=content,
+                status="summarizing",
+                created_by="manual",
+            )
+            TopicMaterial.objects.create(
+                topic=draft.topic,
+                material=material,
+                import_by="manual",
+                import_reason="Markdown 草稿发布",
+            )
+            _create_material_chunks(material)
+            task, _ = enqueue_or_reuse(
+                "briefing", trigger_type="Material", trigger_id=material.id
+            )
+            draft.delete()
+
+        return Response(
+            {
+                "material": MaterialSerializer(
+                    material, context=self.get_serializer_context()
+                ).data,
+                "task": AITaskSerializer(task).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+def _create_material_draft_version(draft):
+    latest_number = (
+        draft.versions.order_by("-version_number")
+        .values_list("version_number", flat=True)
+        .first()
+        or 0
+    )
+    return MaterialDraftVersion.objects.create(
+        draft=draft,
+        version_number=latest_number + 1,
+        title=draft.title,
+        content=draft.content,
+    )
+
+
+class MaterialDraftVersionViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = MaterialDraftVersion.objects.select_related("draft")
+    serializer_class = MaterialDraftVersionSerializer
+
+    def get_serializer_class(self):
+        return (
+            MaterialDraftVersionListSerializer
+            if self.action == "list"
+            else MaterialDraftVersionSerializer
+        )
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        draft = self.request.query_params.get("draft")
+        if not draft:
+            return queryset
+        return (
+            queryset.filter(draft_id=int(draft)) if draft.isdigit() else queryset.none()
+        )
+
+    @action(detail=True, methods=["post"])
+    def restore(self, request, pk=None):
+        version = self.get_object()
+        with transaction.atomic():
+            draft = MaterialDraft.objects.select_for_update().get(pk=version.draft_id)
+            if draft.title != version.title or draft.content != version.content:
+                if draft.title or draft.content:
+                    _create_material_draft_version(draft)
+                draft.title = version.title
+                draft.content = version.content
+                draft.save(update_fields=["title", "content", "updated_at"])
+        return Response(MaterialDraftSerializer(draft).data)
 
 
 class QuestionViewSet(viewsets.ModelViewSet):

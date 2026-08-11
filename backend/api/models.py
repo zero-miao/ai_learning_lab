@@ -233,6 +233,69 @@ class Material(models.Model):
         return self.title
 
 
+class MaterialDraft(models.Model):
+    topic = models.ForeignKey(
+        Topic,
+        related_name="material_drafts",
+        on_delete=models.CASCADE,
+        verbose_name="所属主题",
+    )
+    title = models.CharField(
+        max_length=255, blank=True, default="", verbose_name="标题"
+    )
+    content = models.TextField(blank=True, default="", verbose_name="Markdown 正文")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "材料草稿"
+        verbose_name_plural = "材料草稿"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(
+                fields=["topic", "-updated_at"], name="draft_topic_updated_idx"
+            )
+        ]
+
+    def __str__(self):
+        return self.title or f"未命名草稿 #{self.pk}"
+
+
+class MaterialDraftVersion(models.Model):
+    draft = models.ForeignKey(
+        MaterialDraft,
+        related_name="versions",
+        on_delete=models.CASCADE,
+        verbose_name="所属草稿",
+    )
+    version_number = models.PositiveIntegerField(verbose_name="版本号")
+    title = models.CharField(
+        max_length=255, blank=True, default="", verbose_name="标题"
+    )
+    content = models.TextField(blank=True, default="", verbose_name="Markdown 正文")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "材料草稿历史版本"
+        verbose_name_plural = "材料草稿历史版本"
+        ordering = ["-version_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["draft", "version_number"],
+                name="unique_draft_version",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["draft", "-version_number"],
+                name="draft_version_number_idx",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.draft} - 版本 {self.version_number}"
+
+
 class MaterialChunk(models.Model):
     material = models.ForeignKey(
         Material,
