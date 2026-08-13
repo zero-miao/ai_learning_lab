@@ -69,7 +69,7 @@ class SystemConfiguration(models.Model):
         validators=[MinValueValidator(0.85), MaxValueValidator(1)],
     )
     supplement_excluded_domains = models.TextField(
-        default="wikipedia.org,weread.qq.com,douban.com"
+        default="wikipedia.org,weread.qq.com,douban.com,dedao.cn"
     )
     default_site_theme = models.CharField(
         max_length=20, choices=SITE_THEME_CHOICES, default="paper"

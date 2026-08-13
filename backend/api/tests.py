@@ -32,6 +32,7 @@ from .models import (
     TopicMaterial,
     UserFeedback,
 )
+from .services import MaterialService, _validate_remote_url
 from .task_service import claim_due_task, enqueue_or_reuse, execute_task
 from .tasks import TaskRegistry, _create_material_chunks
 
@@ -105,6 +106,130 @@ class V2ErApiTests(TestCase):
         )
 
         self.assertEqual(update_response.status_code, 400)
+
+    @patch("api.services._download_pdf", return_value=b"%PDF-1.7 content")
+    @patch(
+        "api.services.anydoc.to_markdown_bytes",
+        return_value="# PDF 标题\n\n提取后的正文",
+    )
+    def test_pdf_url_uses_anydoc_extraction(self, to_markdown, download_pdf):
+        material = Material.objects.create(
+            title="PDF 材料",
+            media_type="web_page",
+            media_uri="https://example.com/guide.pdf?download=1",
+        )
+
+        MaterialService.process_material(material)
+
+        material.refresh_from_db()
+        self.assertEqual(material.raw_text, "# PDF 标题\n\n提取后的正文")
+        self.assertEqual(material.error, "")
+        download_pdf.assert_called_once_with(material.media_uri)
+        to_markdown.assert_called_once_with(b"%PDF-1.7 content", "pdf")
+
+    def test_restricted_document_preview_fails_with_actionable_error(self):
+        material = Material.objects.create(
+            title="受控预览材料",
+            media_type="web_page",
+            media_uri="https://www.scribd.com/document/123/example",
+        )
+
+        MaterialService.process_material(material)
+
+        material.refresh_from_db()
+        self.assertEqual(material.status, "failed")
+        self.assertIn("请改用原始 PDF 直链", material.error)
+
+    def test_material_import_rejects_local_and_private_urls(self):
+        for url in (
+            "file:///tmp/private.pdf",
+            "http://127.0.0.1/private.pdf",
+            "http://192.168.1.10/private.pdf",
+        ):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                _validate_remote_url(url)
+
+    def test_failed_web_reimport_preserves_existing_readable_content(self):
+        material = Material.objects.create(
+            title="已有网页材料",
+            media_type="web_page",
+            media_uri="file:///tmp/private.pdf",
+            raw_text="旧原文",
+            clean_text="旧正文",
+            digest="旧摘要",
+            status="ready",
+        )
+        chunk = MaterialChunk.objects.create(
+            material=material,
+            chunk_index=0,
+            content="旧正文",
+            start_offset=0,
+            end_offset=3,
+        )
+
+        MaterialService.process_material(material)
+
+        material.refresh_from_db()
+        self.assertEqual(material.status, "failed")
+        self.assertEqual(material.raw_text, "旧原文")
+        self.assertEqual(material.clean_text, "旧正文")
+        self.assertEqual(material.digest, "旧摘要")
+        self.assertTrue(MaterialChunk.objects.filter(pk=chunk.pk).exists())
+
+    def test_reimport_rejects_material_with_any_annotation(self):
+        for entity_type in ("concept", "highlight", "question"):
+            with self.subTest(entity_type=entity_type):
+                locator = MaterialTextLocator.objects.create(
+                    material=self.material,
+                    chunk=self.chunk,
+                    topic=self.topic,
+                    source_text="Django",
+                    start_offset=0,
+                    end_offset=6,
+                    entity_type=entity_type,
+                    entity_id=1,
+                )
+
+                response = self.client.post(
+                    f"/api/materials/{self.material.id}/re_import/"
+                )
+
+                self.assertEqual(response.status_code, 409)
+                self.assertIn("不允许重新导入", response.data["detail"])
+                self.material.refresh_from_db()
+                self.assertEqual(self.material.status, "ready")
+                self.assertTrue(MaterialChunk.objects.filter(pk=self.chunk.pk).exists())
+                self.assertFalse(
+                    AITask.objects.filter(
+                        task_type="process",
+                        trigger_type="Material",
+                        trigger_id=self.material.id,
+                    ).exists()
+                )
+                locator.delete()
+
+    def test_clean_text_final_failure_marks_material_failed(self):
+        self.material.raw_text = ""
+        self.material.clean_text = ""
+        self.material.status = "cleaning"
+        self.material.save(update_fields=["raw_text", "clean_text", "status"])
+        task = AITask.objects.create(
+            task_type="clean_text",
+            trigger_type="Material",
+            trigger_id=self.material.id,
+            status="running",
+            attempt_count=3,
+            max_attempts=3,
+            next_run_at=timezone.now(),
+        )
+
+        execute_task(task.id)
+
+        task.refresh_from_db()
+        self.material.refresh_from_db()
+        self.assertEqual(task.status, "failed")
+        self.assertEqual(self.material.status, "failed")
+        self.assertIn("正文清洗失败", self.material.error)
 
     def test_current_reading_preferences_update_independently(self):
         configuration = SystemConfiguration.load()
@@ -936,6 +1061,7 @@ class V2ErApiTests(TestCase):
                 "wikipedia.org",
                 "weread.qq.com",
                 "douban.com",
+                "dedao.cn",
             },
             timeout=3,
         )
@@ -1460,6 +1586,12 @@ class V2ErApiTests(TestCase):
             {
                 "title": "微信读书",
                 "url": "https://weread.qq.com/web/reader/123",
+                "snippet": "",
+                "engine": "test",
+            },
+            {
+                "title": "得到课程",
+                "url": "https://www.dedao.cn/course/detail?id=123",
                 "snippet": "",
                 "engine": "test",
             },

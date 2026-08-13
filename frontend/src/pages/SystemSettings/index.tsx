@@ -272,7 +272,7 @@ const SystemSettings: React.FC = () => {
               >
                 <Input.TextArea
                   rows={2}
-                  placeholder="wikipedia.org,weread.qq.com,douban.com"
+                  placeholder="wikipedia.org,weread.qq.com,douban.com,dedao.cn"
                 />
               </Form.Item>
             </Col>

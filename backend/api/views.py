@@ -967,11 +967,23 @@ class MaterialViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def re_import(self, request, pk=None):
         material = self.get_object()
+        if material.text_locators.filter(
+            entity_type__in=("concept", "highlight", "question")
+        ).exists():
+            return Response(
+                {
+                    "detail": (
+                        "该材料已有概念、高亮或问答，重新导入会使原文定位失效，"
+                        "因此不允许重新导入。"
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
         with transaction.atomic():
             material.status = "pending"
             material.error = ""
-            material.digest = ""
-            material.save(update_fields=["status", "error", "digest", "updated_at"])
+            material.save(update_fields=["status", "error", "updated_at"])
 
             if material.media_type == "video":
                 task, _ = enqueue_or_reuse(
