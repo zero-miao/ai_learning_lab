@@ -8,6 +8,29 @@ from .models import AITask
 
 RETRY_DELAYS_SECONDS = (5, 15, 45)
 INTERACTIVE_TASK_PRIORITY = 100
+MATERIAL_TASK_FAILURE_PREFIXES = {
+    "process": "材料导入失败",
+    "clean_text": "正文清洗失败",
+    "briefing": "阅读前导生成失败",
+    "asr": "视频处理失败",
+    "edge_tts": "朗读音频生成失败",
+}
+
+
+def _mark_material_task_failed(task, message):
+    if task.trigger_type != "Material":
+        return
+    prefix = MATERIAL_TASK_FAILURE_PREFIXES.get(task.task_type)
+    if not prefix:
+        return
+
+    from .models import Material
+
+    Material.objects.filter(pk=task.trigger_id).update(
+        status="failed",
+        error=f"{prefix}：{message[:300]}",
+        updated_at=timezone.now(),
+    )
 
 
 def enqueue_or_reuse(
@@ -62,11 +85,14 @@ def recover_interrupted_tasks():
         next_run_at=now,
         started_at=None,
     )
-    AITask.objects.filter(status="running", attempt_count__gte=3).update(
+    failed_tasks = list(AITask.objects.filter(status="running", attempt_count__gte=3))
+    AITask.objects.filter(pk__in=[task.pk for task in failed_tasks]).update(
         status="failed",
         error_message="服务重启前任务未完成，已达到最大重试次数。",
         finished_at=now,
     )
+    for task in failed_tasks:
+        _mark_material_task_failed(task, "服务重启前任务未完成，已达到最大重试次数。")
 
 
 def claim_due_task(*, task_types=None, exclude_task_types=None):
@@ -115,15 +141,8 @@ def _handle_failure(task_id, error):
         task.next_run_at = timezone.now() + timedelta(seconds=delay)
         task.started_at = None
     task.save()
-    if task.task_type in {"asr", "edge_tts"} and task.trigger_type == "Material":
-        from .models import Material
-
-        material = Material.objects.filter(pk=task.trigger_id).first()
-        if material and task.attempt_count >= task.max_attempts:
-            prefix = "视频处理失败" if task.task_type == "asr" else "朗读音频生成失败"
-            material.status = "failed"
-            material.error = f"{prefix}：{message[:300]}"
-            material.save(update_fields=["status", "error", "updated_at"])
+    if task.attempt_count >= task.max_attempts:
+        _mark_material_task_failed(task, message)
 
 
 def execute_task(task_id):

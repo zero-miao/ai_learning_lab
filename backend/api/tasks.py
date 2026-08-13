@@ -475,17 +475,12 @@ class CleanTextTask(BaseTask):
             source_text = material.raw_text or material.clean_text
 
             if not source_text and material.media_type == "web_page":
-                import trafilatura
+                from .services import extract_web_text
 
-                downloaded = trafilatura.fetch_url(material.media_uri)
-                source_text = (
-                    trafilatura.extract(downloaded, include_comments=False)
-                    if downloaded
-                    else ""
-                )
+                source_text = extract_web_text(material.media_uri)
 
             if not source_text:
-                result["error"] = "没有可用的文本内容进行清洗"
+                raise ValueError("没有可用的文本内容进行清洗。")
             else:
                 # 改进的分段逻辑：按段落分组，避免重叠导致的内容重复
                 max_chunk_size = 8000

@@ -2,6 +2,8 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkParse from 'remark-parse';
+import { unified } from 'unified';
 import {
   MediaPlayer,
   MediaProvider,
@@ -26,6 +28,7 @@ import {
   PlayCircleOutlined,
   SaveOutlined,
   SoundOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons';
 import { Button, Divider, Drawer, Input, Popover, Space, Tag, Tooltip, Typography, message } from 'antd';
 import type { Concept, Highlight, Material, Question } from '../../api';
@@ -98,6 +101,48 @@ interface SelectionMenu {
 interface HighlightCommentPosition {
   anchorTop: number;
   top: number;
+}
+
+interface ReaderHeading {
+  depth: number;
+  id: string;
+  label: string;
+}
+
+interface MarkdownAstNode {
+  type: string;
+  value?: string;
+  alt?: string;
+  depth?: number;
+  children?: MarkdownAstNode[];
+}
+
+function markdownNodeText(node: MarkdownAstNode): string {
+  if (node.value) return node.value;
+  if (node.alt) return node.alt;
+  return node.children?.map(markdownNodeText).join('') ?? '';
+}
+
+function extractHeadings(markdown: string): ReaderHeading[] {
+  const headings: ReaderHeading[] = [];
+  const tree = unified()
+    .use(remarkParse)
+    .use(remarkGfm)
+    .parse(markdown) as MarkdownAstNode;
+
+  const visit = (node: MarkdownAstNode) => {
+    if (node.type === 'heading' && node.depth) {
+      headings.push({
+        depth: node.depth,
+        id: `reader-heading-${headings.length}`,
+        label: markdownNodeText(node).trim() || '未命名标题',
+      });
+    }
+    node.children?.forEach(visit);
+  };
+  visit(tree);
+
+  return headings;
 }
 
 function formatTimestamp(seconds: number) {
@@ -356,8 +401,16 @@ function getAnnotationRanges(
 function readerMarkdownPlugin(options: ReaderMarkdownPluginOptions) {
   return (tree: MarkdownNode) => {
     const anchoredChunks = new Set<number>();
+    let headingIndex = 0;
 
     const transform = (node: MarkdownNode) => {
+      if (node.tagName && /^h[1-6]$/.test(node.tagName)) {
+        node.properties = {
+          ...node.properties,
+          id: `reader-heading-${headingIndex}`,
+        };
+        headingIndex += 1;
+      }
       if (!node.children) return;
       node.children = node.children.flatMap((child) => {
         if (child.type !== 'text' || !child.value || !child.position) {
@@ -617,7 +670,7 @@ export default function UniversalReader({
   );
   const [spokenChunkId, setSpokenChunkId] = React.useState<number | null>(null);
   const [openToolPanel, setOpenToolPanel] = React.useState<
-    'theme' | 'font' | 'voice' | 'rate' | null
+    'toc' | 'theme' | 'font' | 'voice' | 'rate' | null
   >(null);
   const [speechControlsTarget, setSpeechControlsTarget] =
     React.useState<HTMLElement | null>(null);
@@ -632,6 +685,10 @@ export default function UniversalReader({
   const [activeCommentId, setActiveCommentId] = React.useState<number | null>(null);
   const isMobile = useMediaQuery('(max-width: 767px)');
   const isVideo = material.media_type === 'video' && Boolean(material.media_url);
+  const headings = React.useMemo(
+    () => isVideo ? [] : extractHeadings(material.clean_text),
+    [isVideo, material.clean_text],
+  );
   const highlightComments = React.useMemo(
     () =>
       showHighlightNotes && !isVideo
@@ -1113,6 +1170,46 @@ export default function UniversalReader({
         />
       </Tooltip>
       <div className={`universal-reader__tool-dock ${darkMode ? 'universal-reader__tool-dock--dark' : ''}`}>
+        <Popover
+          trigger="click"
+          placement="leftTop"
+          arrow
+          open={openToolPanel === 'toc'}
+          onOpenChange={(open) => setOpenToolPanel(open ? 'toc' : null)}
+          content={
+            <nav
+              className="universal-reader__toc-panel"
+              aria-label="文章目录"
+            >
+              <Text strong>文章目录</Text>
+              {headings.map((heading) => (
+                <Button
+                  key={heading.id}
+                  type="text"
+                  style={{ paddingInlineStart: 8 + (heading.depth - 1) * 12 }}
+                  onClick={() => {
+                    document.getElementById(heading.id)?.scrollIntoView({
+                      behavior: 'smooth',
+                      block: 'start',
+                    });
+                    setOpenToolPanel(null);
+                  }}
+                >
+                  {heading.label}
+                </Button>
+              ))}
+            </nav>
+          }
+        >
+          <Button
+            type="text"
+            className="universal-reader__setting-button"
+            disabled={!headings.length}
+            icon={<UnorderedListOutlined />}
+            title={headings.length ? '文章目录' : '正文没有可用标题'}
+            aria-label="打开文章目录"
+          />
+        </Popover>
         <Popover
         trigger="click"
         placement="leftTop"

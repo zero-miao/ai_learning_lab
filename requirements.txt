@@ -1,6 +1,7 @@
 Django>=4.2,<5.0
 djangorestframework>=3.14
 trafilatura>=1.8
+firecrawl-anydoc>=0.1.8
 APScheduler>=3.10
 pytest>=7.0
 pytest-django>=4.5

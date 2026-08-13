@@ -146,6 +146,36 @@
   text-align: left;
 }
 
+.universal-reader__toc-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(320px, calc(100vw - 96px));
+  max-height: min(65vh, 560px);
+  padding: 4px;
+  overflow-y: auto;
+}
+
+.universal-reader__toc-panel > .ant-typography {
+  padding: 6px 8px 10px;
+}
+
+.universal-reader__toc-panel .ant-btn {
+  justify-content: flex-start;
+  height: auto;
+  min-height: 36px;
+  text-align: left;
+  white-space: normal;
+}
+
+.universal-reader__content h1,
+.universal-reader__content h2,
+.universal-reader__content h3,
+.universal-reader__content h4,
+.universal-reader__content h5,
+.universal-reader__content h6 {
+  scroll-margin-top: 132px;
+}
+
 .universal-reader__voice-panel {
   width: min(300px, calc(100vw - 90px));
   max-height: 360px;

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import axios from 'axios';
 import { Link } from 'react-router-dom';
 import {
   Button,
@@ -132,7 +133,10 @@ const MaterialManagement: React.FC = () => {
       void loadMaterials();
     } catch (error) {
       console.error('Re-import failed:', error);
-      message.error('触发重新导入失败');
+      const detail = axios.isAxiosError(error) ? error.response?.data?.detail : null;
+      message.error(
+        typeof detail === 'string' ? detail : '触发重新导入失败',
+      );
     }
   };
   const handleDelete = async (material: MaterialSummary) => {
