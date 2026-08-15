@@ -3,6 +3,7 @@ from django.db.models import Count, Q
 
 from .models import (
     AITask,
+    CapturedDocument,
     Concept,
     ConceptRelation,
     Exam,
@@ -24,6 +25,14 @@ from .models import (
     UserFeedback,
 )
 from .tasks import TaskRegistry
+
+
+@admin.register(CapturedDocument)
+class CapturedDocumentAdmin(admin.ModelAdmin):
+    list_display = ("id", "title", "site_name", "status", "created_at")
+    search_fields = ("title", "source_url", "site_name")
+    list_filter = ("status", "adapter")
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(MaterialDraft)

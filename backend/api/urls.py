@@ -1,6 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .browser_capture import CapturedDocumentViewSet
 from .views import (
     AITaskViewSet,
     ConceptRelationViewSet,
@@ -42,6 +43,7 @@ router.register(r"exams", ExamViewSet)
 router.register(r"reviews", ReviewRecordViewSet)
 router.register(r"ai-tasks", AITaskViewSet)
 router.register(r"feedback", UserFeedbackViewSet)
+router.register(r"browser-captures", CapturedDocumentViewSet)
 
 urlpatterns = [
     path("health/", health_check, name="health_check"),

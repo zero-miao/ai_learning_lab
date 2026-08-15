@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Learning Lab 页面采集器</title>
+  </head>
+  <body>
+    <div class="popup">
+      <header>
+        <strong>采集当前页</strong>
+        <span id="connection" class="connection">检测本机服务</span>
+      </header>
+      <main>
+        <div id="page-title" class="page-title">正在读取页面...</div>
+        <label>
+          <span>采集方式</span>
+          <select id="mode">
+            <option value="auto">自动</option>
+            <option value="article">文章正文</option>
+            <option value="document">完整文档</option>
+            <option value="selection">选中内容</option>
+            <option value="visible">整页可见内容</option>
+          </select>
+        </label>
+        <label>
+          <span>采集目标</span>
+          <select id="topic">
+            <option value="">稍后整理</option>
+          </select>
+        </label>
+        <label>
+          <span>本机服务</span>
+          <input id="service-url" type="url" value="http://127.0.0.1:8000" />
+        </label>
+        <label class="checkbox">
+          <input id="stay" type="checkbox" />
+          <span>采集后留在当前页</span>
+        </label>
+        <button id="capture" type="button">采集当前页</button>
+        <div id="progress" class="progress" aria-live="polite"></div>
+      </main>
+    </div>
+    <script type="module" src="/src/popup.ts"></script>
+  </body>
+</html>

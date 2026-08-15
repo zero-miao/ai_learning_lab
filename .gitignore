@@ -222,3 +222,5 @@ __marimo__/
 .DS_Store
 frontend/test-results/
 frontend/playwright-report/
+browser-extension/node_modules/
+browser-extension/release/

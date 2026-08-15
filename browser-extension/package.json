@@ -1,0 +1,21 @@
+{
+  "name": "ai-learning-lab-browser-capture",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b && vite build",
+    "dev": "vite build --watch",
+    "package": "npm run build && mkdir -p release && cd dist && zip -qr ../release/ai-learning-lab-browser-capture.zip ."
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.35",
+    "@types/node": "^24.13.3",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0",
+    "vite-plugin-static-copy": "^3.4.0"
+  }
+}

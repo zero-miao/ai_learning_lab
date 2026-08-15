@@ -1203,6 +1203,19 @@ class MaterialDraftViewSet(viewsets.ModelViewSet):
             queryset.filter(topic_id=int(topic)) if topic.isdigit() else queryset.none()
         )
 
+    def perform_destroy(self, instance):
+        source_capture = getattr(instance, "source_capture", None)
+        if source_capture is not None:
+            from .services import _delete_paths
+
+            _delete_paths(
+                asset.get("path")
+                for asset in source_capture.asset_manifest
+                if isinstance(asset, dict)
+            )
+            source_capture.delete()
+        instance.delete()
+
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
         current = self.get_object()
@@ -1224,6 +1237,7 @@ class MaterialDraftViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def publish(self, request, pk=None):
         draft = self.get_object()
+        source_capture = getattr(draft, "source_capture", None)
         title = draft.title.strip()
         content = draft.content.strip()
         if not title or not content:
@@ -1244,6 +1258,14 @@ class MaterialDraftViewSet(viewsets.ModelViewSet):
                 status="summarizing",
                 created_by="manual",
             )
+            if source_capture is not None:
+                from .browser_capture import attach_capture_assets_to_material
+
+                attach_capture_assets_to_material(
+                    source_capture,
+                    material,
+                    markdown=content,
+                )
             TopicMaterial.objects.create(
                 topic=draft.topic,
                 material=material,

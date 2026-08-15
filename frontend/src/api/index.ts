@@ -122,6 +122,36 @@ export interface MaterialDraftVersion extends MaterialDraftVersionSummary {
   content: string;
 }
 
+export interface CapturedDocumentSummary {
+  id: number;
+  title: string;
+  source_url: string;
+  site_name: string;
+  adapter: string;
+  status: 'receiving' | 'ready' | 'imported' | 'failed';
+  draft: number | null;
+  material: number | null;
+  block_count: number;
+  asset_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CapturedDocument extends CapturedDocumentSummary {
+  snapshot_json: {
+    blocks?: Array<Record<string, unknown>>;
+    warnings?: string[];
+  };
+  markdown: string;
+  asset_manifest: Array<{
+    id: string;
+    path: string;
+    content_type: string;
+    size: number;
+  }>;
+  warnings: string[];
+}
+
 export interface TopicMaterial {
   id: number;
   topic: number;
@@ -544,6 +574,23 @@ export const getMaterialDraftVersion = (id: number) =>
   api.get<MaterialDraftVersion>(`material-draft-versions/${id}/`);
 export const restoreMaterialDraftVersion = (id: number) =>
   api.post<MaterialDraft>(`material-draft-versions/${id}/restore/`);
+export const getBrowserCaptures = (params?: PaginationParams & { status?: string }) =>
+  api.get<PaginatedResponse<CapturedDocumentSummary>>('browser-captures/', { params });
+export const getBrowserCapture = (id: number) =>
+  api.get<CapturedDocument>(`browser-captures/${id}/`);
+export const updateBrowserCapture = (
+  id: number,
+  data: Partial<Pick<CapturedDocument, 'title' | 'snapshot_json'>>,
+) => api.patch<CapturedDocument>(`browser-captures/${id}/`, data);
+export const deleteBrowserCapture = (id: number) =>
+  api.delete(`browser-captures/${id}/`);
+export const importBrowserCapture = (id: number, topic: number) =>
+  api.post<{ material: number; task: number }>(`browser-captures/${id}/import/`, { topic });
+export const createDraftFromBrowserCapture = (id: number, topic: number) =>
+  api.post<{ draft: number; capture: CapturedDocument }>(
+    `browser-captures/${id}/create-draft/`,
+    { topic },
+  );
 export const uploadVideo = (data: FormData) =>
   api.post<{ material: Material; task: AITask }>('materials/upload-video/', data, {
     headers: { 'Content-Type': 'multipart/form-data' },
