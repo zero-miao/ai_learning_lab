@@ -60,6 +60,10 @@ import type {
   Topic,
   TopicMaterial,
 } from '../../api';
+import {
+  ConceptEditorModal,
+  HighlightEditorModal,
+} from '../../components/AnnotationEditors';
 import TopicDiscussionDrawer from './TopicDiscussionDrawer';
 
 const { Title, Text } = Typography;
@@ -89,6 +93,7 @@ const TopicDetail: React.FC = () => {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
   const [allMaterials, setAllMaterials] = useState<MaterialSummary[]>([]);
+  const [materialOptionsLoading, setMaterialOptionsLoading] = useState(false);
   const [materialDrafts, setMaterialDrafts] = useState<MaterialDraft[]>([]);
   const [activeMaterialDraft, setActiveMaterialDraft] = useState<MaterialDraft | null>(null);
   const [draftEditorOpen, setDraftEditorOpen] = useState(false);
@@ -104,8 +109,6 @@ const TopicDetail: React.FC = () => {
   const [topicModal, setTopicModal] = useState(false);
   const [discussionOpen, setDiscussionOpen] = useState(false);
   const [topicForm] = Form.useForm<TopicFormValues>();
-  const [conceptForm] = Form.useForm<Partial<Concept>>();
-  const [highlightForm] = Form.useForm<{ user_note: string }>();
   const { token } = theme.useToken();
   const outputTextStyle: React.CSSProperties = {
     color: token.colorText,
@@ -124,13 +127,11 @@ const TopicDetail: React.FC = () => {
     if (!id) return;
     setLoading(true);
     try {
-      const [topicRes, materialsRes, draftsRes] = await Promise.all([
+      const [topicRes, draftsRes] = await Promise.all([
         getTopic(Number(id)),
-        getMaterials({ page_size: 20 }),
         getMaterialDrafts(Number(id)),
       ]);
       setTopic(topicRes.data);
-      setAllMaterials(materialsRes.data.results);
       setMaterialDrafts(draftsRes.data.results);
     } catch {
       message.error('加载数据失败');
@@ -142,6 +143,21 @@ const TopicDetail: React.FC = () => {
   useEffect(() => {
     void loadTopic();
   }, [loadTopic]);
+
+  const loadMaterialOptions = useCallback(async (query = '') => {
+    setMaterialOptionsLoading(true);
+    try {
+      const response = await getMaterials({
+        page_size: 20,
+        ...(query.trim() ? { q: query.trim() } : {}),
+      });
+      setAllMaterials(response.data.results);
+    } catch {
+      message.error('加载已有材料失败');
+    } finally {
+      setMaterialOptionsLoading(false);
+    }
+  }, []);
 
   const updateCategory = async (
     relation: TopicMaterial,
@@ -174,13 +190,11 @@ const TopicDetail: React.FC = () => {
 
   const handleEditConcept = (concept: Concept) => {
     setEditingConcept(concept);
-    conceptForm.setFieldsValue(concept);
     setConceptModal(true);
   };
 
   const handleEditHighlight = (highlight: Highlight) => {
     setEditingHighlight(highlight);
-    highlightForm.setFieldsValue({ user_note: highlight.user_note });
     setHighlightModal(true);
   };
 
@@ -699,7 +713,13 @@ const TopicDetail: React.FC = () => {
             }}
           </Form.Item>
           <Form.Item name="type" label="材料类型">
-            <Radio.Group>
+            <Radio.Group
+              onChange={(event) => {
+                if (event.target.value === 'existing') {
+                  void loadMaterialOptions();
+                }
+              }}
+            >
               <Radio value="url">网页链接</Radio>
               <Radio value="text">Markdown 文本</Radio>
               <Radio value="video">本地视频</Radio>
@@ -721,15 +741,11 @@ const TopicDetail: React.FC = () => {
                   >
                     <Select
                       showSearch
+                      loading={materialOptionsLoading}
                       placeholder="搜索并选择已有材料"
                       filterOption={false}
                       onSearch={(value) => {
-                        void getMaterials({
-                          page_size: 20,
-                          ...(value.trim() ? { q: value.trim() } : {}),
-                        }).then((response) => {
-                          setAllMaterials(response.data.results);
-                        });
+                        void loadMaterialOptions(value);
                       }}
                       options={available.map(m => ({ label: m.title, value: m.id }))}
                     />
@@ -787,15 +803,15 @@ const TopicDetail: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
-      <Modal title={editingConcept ? "编辑概念" : "标记概念"} open={conceptModal} onCancel={() => { setConceptModal(false); setEditingConcept(null); }} onOk={() => conceptForm.submit()}>
-        <Form form={conceptForm} layout="vertical" onFinish={submitConcept}>
-          <Form.Item name="title" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="definition" label="定义"><Input.TextArea rows={3} /></Form.Item>
-          <Form.Item name="principle" label="原理"><Input.TextArea rows={3} /></Form.Item>
-          <Form.Item name="pitfalls" label="易错点"><Input.TextArea rows={3} /></Form.Item>
-          <Form.Item name="applications" label="应用"><Input.TextArea rows={3} /></Form.Item>
-        </Form>
-      </Modal>
+      <ConceptEditorModal
+        open={conceptModal}
+        concept={editingConcept}
+        onCancel={() => {
+          setConceptModal(false);
+          setEditingConcept(null);
+        }}
+        onSubmit={submitConcept}
+      />
       <Modal
         title="编辑话题信息"
         open={topicModal}
@@ -819,11 +835,15 @@ const TopicDetail: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
-      <Modal title={editingHighlight ? "编辑高亮" : "添加高亮"} open={highlightModal} onCancel={() => { setHighlightModal(false); setEditingHighlight(null); }} onOk={() => highlightForm.submit()}>
-        <Form form={highlightForm} layout="vertical" onFinish={submitHighlight}>
-          <Form.Item name="user_note" label="笔记内容"><Input.TextArea rows={4} /></Form.Item>
-        </Form>
-      </Modal>
+      <HighlightEditorModal
+        open={highlightModal}
+        note={editingHighlight?.user_note}
+        onCancel={() => {
+          setHighlightModal(false);
+          setEditingHighlight(null);
+        }}
+        onSubmit={submitHighlight}
+      />
       <TopicDiscussionDrawer
         topicId={topic.id}
         open={discussionOpen}

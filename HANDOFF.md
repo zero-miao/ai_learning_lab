@@ -2,6 +2,8 @@
 
 > 本文只记录长期有效的产品/工程决策、V2-alpha 整体进度和不易复现的验收结论。API、迁移、分支和具体实现以代码与 Git 为准。
 
+当前质量加固工作位于 `fix/architecture-quality-hardening` 分支；用户验收前不得提交或合并。
+
 ## 1. V1 与 V2 的关系
 
 V2 不是独立新产品，也不是 V1 的缩减版重写，而是同一产品的数据模型和实现架构升级。
@@ -27,17 +29,27 @@ V2 不是独立新产品，也不是 V1 的缩减版重写，而是同一产品�
 
 - 保持本地单体架构和 SQLite 持久化，不引入多用户鉴权、Celery、Redis、消息队列或复杂 Docker 编排。
 - 允许在可信本地局域网内访问，但不提供用户隔离；不得通过端口映射或公网隧道暴露服务。
-- 局域网启动统一使用 `./scripts/start-lan.sh`；脚本负责加载 Node 20、启动前后端并输出 LAN URL，不要求调用者预先切换 Node 版本。
+- 局域网启动统一使用 `./scripts/start-lan.sh`；脚本负责加载 Node 20、分别启动 Django Web、`run_ai_worker` 和 Vite，并输出 LAN URL，不要求调用者预先切换 Node 版本。AI worker 不得重新绑定到 `runserver` 的 `AppConfig.ready()`。
 - 不以公网部署、云备份、同步协作为目标。前端正式支持电脑浏览器和手机浏览器，采用同一套 React 代码与 API，通过响应式布局提供两种界面。
 - 实现功能时，若已有稳定、活跃维护且满足需求的开源组件，必须优先复用，不得重复自研；确需自研时必须记录现有组件无法满足的具体原因。
 - 长耗时 LLM、ASR、TTS、检索和抓取必须通过持久化 `AITask` 异步执行；默认任务通道保持单 worker 串行，`edge_tts` 使用独立的单 worker 通道，可与 Ollama 任务并行但不得放开多个 LLM 任务并发。前端必须展示排队、执行、失败状态并提供重试。
+- 任务成功只能通过 `status=running` 条件更新写入；取消或删除后的任务不得复活。任务类在外部模型调用前后检查取消状态，材料业务失败必须向任务层抛出异常，禁止出现 Material 失败但 AITask 成功。
 - `AITask` 通过 `trigger_type + trigger_id` 关联业务对象。新增任务类型必须利用 Python 元类能力接入 `TaskRegistry` 自动注册，并将任务逻辑、提示词和显示名称内聚在任务类中；禁止维护中心分发表或增加硬编码任务分支。
-- 环境变量只负责基础设施参数和系统配置首次初始化。运行期模型路由、本地服务地址、补料阈值和界面默认值由单例 `SystemConfiguration` 管理。
+- 环境变量只负责基础设施参数和系统配置首次初始化。运行期模型路由、本地服务地址、补料阈值和当前界面偏好由单例 `SystemConfiguration` 管理；单用户模式不再维护 default/current 两套偏好字段。
 - 任务入队时固化实际模型；重试继续使用原模型。所有环境默认项必须在 `.env.example` 中完整声明并附中文说明。
 - LLM 通过 OpenAI-compatible 接口接入，必须支持本地 Ollama。当前模型只是可变配置，不写入 handoff 作为固定契约。
 - 集合接口使用面向列表场景的摘要 serializer，只返回渲染和筛选所需字段；大文本与嵌套业务对象由详情接口按需返回。列表计数使用数据库聚合，禁止通过完整序列化关联对象后在前端计数。
 - 所有标准 REST 集合接口统一使用服务端页码分页，响应结构为 `count / next / previous / results`；默认每页 20 条，`page_size` 最大 100。前端列表的搜索、筛选和翻页必须传给后端，禁止先获取全集再在浏览器中分页。
 - 集合查询索引必须与实际过滤和排序字段成组设计。当前已覆盖 Topic/Session/Concept 分页、活跃 TopicMaterial、Exam/Review 历史以及 AITask 触发源、状态和 worker 领取任务路径；SQLite `%关键词%` 搜索不添加无效的普通 B-tree 索引。
+
+架构演进采用“保持单体、明确分层”，不通过引入微服务掩盖模块职责：
+
+1. `views/serializers` 只负责 HTTP 输入校验和响应，不承载长材料选择、外部抓取或任务状态机。
+2. 领域层负责 Material/Topic/Locator 的归属、删除和发布事务；跨实体删除必须集中到可测试的领域函数，后续不得继续把清理分支散落到各 ViewSet。
+3. `learning_context.py` 统一负责分段、相关 Chunk 选择和 Topic 均衡上下文；任务类只定义任务步骤与 Prompt。
+4. `task_service.py + run_ai_worker` 负责 claim、重试、取消和最终状态；Web 进程只入队，外部 Provider/ASR/TTS/抓取作为适配器调用。
+5. 前端按 `page -> domain component -> shared hook/API` 分层；页面不得自行实现 AITask 轮询、通用 Markdown、标注表单或阅读偏好持久化。
+6. 当前 `views.py` 和 `tasks.py` 仍较大；后续新增功能必须按 Topic/Material/Learning/Assistant 边界拆模块，不再继续增长这两个文件。拆分时保持路由、TaskRegistry 和迁移契约不变，避免无行为收益的大爆炸重写。
 
 ## 3. V2 核心契约
 
@@ -50,8 +62,8 @@ V2 不是独立新产品，也不是 V1 的缩减版重写，而是同一产品�
 | `MaterialDraftVersion` | MaterialDraft 的不可变历史快照；支持按需查看，并可保留当前内容后恢复为新的当前版本。 |
 | `TopicMaterial` | Topic 与 Material 的关联语境，保存分类、相关度、导入理由和软删除状态。 |
 | `MaterialRecommendation` | 自动补料候选及人工采纳状态。候选不会直接成为 Topic 材料。 |
-| `MaterialChunk` | 正文 offset；视频/音频额外保存真实时间区间。 |
-| `MaterialTextLocator` | Concept、Highlight、Question 共用的原文定位器，同时承载文字和媒体时间坐标。 |
+| `MaterialChunk` | 正文 offset；视频额外保存真实时间区间。 |
+| `MaterialTextLocator` | Concept、Highlight、Question 共用的原文定位器，通过三个可空外键和“恰有一个实体”约束保证完整性，同时承载文字和媒体时间坐标。 |
 | `Session` / `SessionMessage` | 阅读问答和 Topic 讨论的统一多轮会话。 |
 | `Exam` / `ExamQuestion` / `ReviewRecord` | 掌握度评估和间隔复习闭环。 |
 | `AITask` | 所有异步任务的持久化状态、输入、完整上下文、结果和错误。 |
@@ -70,11 +82,13 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 - 远程文本型 PDF 使用 Firecrawl AnyDoc 在本地提取为 Markdown；扫描版、加密 PDF 和未提供原文件的受控预览页必须返回明确错误，不得把页面元数据误判为正文。远程材料只允许使用 `http/https` 公网地址，并在初始请求和重定向时拒绝本机及私网目标。
 - 材料重新导入必须先成功获取新正文，再替换现有正文和 Chunk；失败时保留原有可读内容。已有概念、高亮或问答 Locator 的材料禁止重新导入，避免原文定位失效。
 - 长文本清洗必须按自然段分段，并向每段提供已清洗上文和待处理下文，不能通过截断规避上下文长度。
+- 长材料摘要必须先逐段归纳再合并，确保尾部内容参与摘要；阅读问答按选区邻近 Chunk 和问题词项相关度选择上下文；评估与复习按材料均衡分配上下文预算，禁止简单取 Topic 拼接正文的前 N 个字符。
 - `raw_text` 保存原始文本或转录，`clean_text` 保存 AI 清洗后的正文；MaterialChunk 只基于 `clean_text` 创建。
 
 ### Locator 与媒体
 
 - 文本、网页和视频共用 MaterialTextLocator。概念、高亮、问题不得各自维护另一套定位字段。
+- Locator 不得恢复 `entity_type + entity_id` 裸整数多态关联；对外 serializer 可继续派生这两个兼容展示字段。Question 与 Highlight 必须显式归属 Topic，删除实体、Topic 或独占阅读 Session 时必须由外键和领域删除逻辑闭环清理。
 - 视频 Chunk 的时间坐标必须依据原始字幕/ASR segments 与清洗正文做单调文本对齐；禁止按清洗后的段落序号硬配时间戳。
 - 阅读器中的时间戳、按钮等展示节点必须标记为不参与正文 offset，避免污染划词定位。
 - 视频和 TTS 媒体响应必须保留 HTTP Range 支持。
@@ -88,6 +102,7 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 - 页面必须简洁高效，学习页面优先保障连续阅读：减少重复入口和无意义层级，把主要空间留给正文与学习内容，同时保证关键操作在长页面中始终容易触达。
 - 前端文案必须使用清晰的本地化描述，不直接展示内部状态 Key。长文本应控制行宽、段落间距和换行，正文行高原则上不低于 `1.6`，避免拥挤或过度稀疏。
 - AI 输出、摘要、讨论、问答和复习提示统一按 Markdown/GFM 渲染，完整支持标题、列表、引用、链接、代码和表格；Markdown 容器不得使用 `white-space: pre-wrap` 破坏排版。
+- 普通 AI 输出统一复用 `MarkdownContent`；概念/高亮编辑统一复用 `AnnotationEditors`；AITask 状态恢复统一复用 `useAITaskPolling`；阅读偏好只由 `ReadingPreferencesProvider` 持有。`UniversalReader` 为保持 AST offset 映射而保留专用 Markdown 渲染，这是必要例外。
 - 阅读字体由用户选择并持久化，正文、字幕和阅读型内容应一致继承当前字体；代码等具有明确语义的内容除外，不得在局部组件中随意写死字体。
 - 背景颜色和文字颜色必须跟随全站主题。浅色主题不得用大面积深色背景承载长文本或代码上下文；深色主题必须使用 Ant Design token 或主题相关颜色保证对比度和可读性。
 - 当前局域网入口以 Vite 开发服务器作为实际运行环境，React 根节点不启用 `StrictMode`，避免挂载阶段重复执行 effect 并发送重复 HTTP 请求；如未来改为生产静态服务，可重新评估该约束。
@@ -133,12 +148,14 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 - 全站管理助手支持普通对话、以 Markdown 表格列出 Topic 学习目标/范围，以及确认后幂等执行批量创建/更新；缺字段项不会阻塞其他变更，执行过程复用 AITask 的排队、失败和重试能力。
 - 数据库中真实使用反馈 #1-#35、#37、#39 已完成。补料与阅读问答默认排除 wikipedia.org、weread.qq.com、douban.com 和 dedao.cn；学习阅读页通过固定阅读工具栏提供 Markdown 标题目录；远程文本型 PDF 已接入 Firecrawl AnyDoc 本地解析。Markdown 草稿采用 Vditor 全屏沉浸写作和 5 秒自动保存，支持常用 Markdown 快捷语法、固定工具栏、`Ctrl+S` / `Cmd+S` 主动保存、深色编辑主题、可收起的浮动目录及原生表格行列操作；发布、删除与继续编辑并列在草稿列表。超过 10 分钟未保存后的首次改动自动生成历史版本，并支持只读查看与恢复。
 - 手机端长按划词创建概念、高亮和问答已在真实手机浏览器验收通过；触控选区通过 `selectionchange + touchend` 多阶段捕获，底部操作栏在原生选区折叠时保持可操作。
+- `0041_harden_locator_ownership` 会把有效 Locator 迁移到真实实体外键，删除指向不存在实体的 Locator，并清理无 Topic 归属的 Question/Highlight 及其独占 Session；已在正式数据库副本上验证迁移，不会修改共享 Material。
 
-### 尚未完成
+### 尚未完成与已知风险
 
 - 手机浏览器端响应式实现已覆盖全局导航、Topic、材料、阅读与视频、标注与问答、概念图、评估、复习、任务、设置、反馈和管理助手；自动化窄屏巡检未发现页面级横向溢出，真实手机长按划词链路已通过。尚需在真实手机 Safari/Chrome 上完成软键盘、横竖屏切换、视频播放和完整学习闭环验收后关闭该待办。
 - 反馈 #38 对应 Scribd 受控预览页，该页面未提供完整 PDF 文件，无法恢复正文。系统现会明确提示改用原始 PDF 直链或 Markdown；仍需用户提供可访问原文件后完成该材料的重新导入验收。
-- 除移动端适配和等待原文件的反馈 #38 外，当前 V2-alpha 已知功能待办已完成。后续新增工作应按真实使用反馈和 V1 功能不退化原则进入下一阶段规划。
+- SQLite 并发与幂等风险本轮明确暂缓：`select_for_update` 在 SQLite 上没有完整行锁语义，草稿发布、推荐采纳和活跃任务复用在并发重复请求下仍可能重复创建。当前单用户、单 worker 运行约束降低了概率，但没有消除风险。扩展到多进程或多人前必须迁移 PostgreSQL，并为活跃任务、草稿发布和推荐采纳增加数据库唯一约束/幂等键。
+- 除真实手机专项验收、等待原文件的反馈 #38 和上述明确暂缓的 SQLite 并发风险外，当前 V2-alpha 已知功能待办已完成。
 
 ## 5. 验证证据
 
@@ -152,11 +169,14 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 (cd backend && ../.venv/bin/python manage.py makemigrations --check --dry-run)
 (cd frontend && npm run build)
 (cd frontend && npm run lint)
+(cd frontend && npm run test:e2e)
 ```
 
 当前自动化基线：
 
-- 后端 `manage.py test api` 共 55 项通过，覆盖系统配置、当前阅读偏好独立更新、Provider 模型发现、管理助手查询、批量变更、幂等与并发保护、Markdown 草稿保存/发布/自动分版/版本恢复边界、带互联网背景资料的多轮问答、Topic 置顶与删除、集合摘要、统一分页与查询索引、补料人工采纳、相关度下限与排除域名、文本型 PDF 提取、远程 URL 安全、非破坏性重新导入与标注保护、受控预览页错误、TTS、跨 Topic 标注、反馈记录和视频学习全链路等关键契约。
+- 后端 `manage.py test api` 共 66 项通过，新增覆盖 Locator/Session 删除闭环、Topic 详情固定查询量与摘要材料契约、任务失败/取消状态一致性、长材料尾部摘要与 Chunk 选择、补料私网拒绝、上传大小和非法筛选参数；原系统配置、管理助手、草稿、问答、补料、TTS、反馈和视频链路测试继续通过。
+- Playwright 浏览器回归使用独立 `/tmp/ai-learning-lab-browser-regression.sqlite3`，自动迁移和写入确定性种子，不读写真实数据库；覆盖桌面 Topic -> 长材料阅读、Markdown 草稿自动保存，以及 390px 下 Topic、材料、任务、复习、设置和阅读页的页面级横向溢出。
+- 正式数据库副本中原最大 Topic 详情由约 713 KB / 54 次查询降至约 40 KB / 10 次查询；所有现有 Topic 详情最多 12 次查询。
 - `ruff format --check backend`、`ruff check backend`、`manage.py check`、`makemigrations --check --dry-run`、前端 build/lint 均通过。
 - Vite 主入口约 10 kB；路由与依赖完成分包，最大 chunk 约 483 kB，不再报告 500 kB 体积告警。
 - 自动化视频学习链路覆盖上传 -> 外挂字幕解析/ASR 任务 -> 清洗与时间轴重建 -> 摘要/TTS 收尾 -> 划词 Locator 时间坐标。
@@ -189,7 +209,7 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 本机服务结论：
 
 - Ollama、faster-whisper 和 SearxNG 已真实跑通。
-- Crawl4AI Docker 镜像在 Apple Silicon 上存在 `SIGILL` 兼容问题；系统已决定自动回退到原生 `trafilatura`，不依赖该容器才能完成补料。
+- Crawl4AI Docker 镜像及配置已移除。补料正文统一复用带初始 URL、DNS 和重定向私网校验的远程材料提取服务，避免两套抓取实现和 SSRF 边界分叉。
 - Edge TTS 是在线服务，正文会发送给微软朗读接口；当前不提供 Web Speech 回退。
 
 ## 6. 接手守则

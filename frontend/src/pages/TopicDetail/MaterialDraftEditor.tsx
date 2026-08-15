@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import Vditor from 'vditor';
 import 'vditor/dist/index.css';
 import {
@@ -34,6 +32,7 @@ import type {
   MaterialDraftVersion,
   MaterialDraftVersionSummary,
 } from '../../api';
+import MarkdownContent from '../../components/MarkdownContent';
 import { useSiteTheme } from '../../appearance';
 import './material-draft.css';
 
@@ -590,11 +589,9 @@ export default function MaterialDraftEditor({
               <Typography.Title level={4}>
                 版本 {selectedVersion.version_number}：{selectedVersion.title || '未命名'}
               </Typography.Title>
-              <div className="topic-discussion__markdown">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {selectedVersion.content || '（空白版本）'}
-                </ReactMarkdown>
-              </div>
+              <MarkdownContent className="topic-discussion__markdown">
+                {selectedVersion.content || '（空白版本）'}
+              </MarkdownContent>
             </div>
           )}
         </Spin>

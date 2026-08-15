@@ -11,8 +11,10 @@ from django.db.models.functions import Length
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view
+from rest_framework.exceptions import ParseError
 from rest_framework.response import Response
 
+from .learning_context import build_topic_context, select_material_context
 from .models import (
     AITask,
     Concept,
@@ -48,7 +50,6 @@ from .serializers import (
     MaterialListSerializer,
     MaterialRecommendationSerializer,
     MaterialSerializer,
-    MaterialTextLocatorSerializer,
     ModelDiscoverySerializer,
     QuestionSerializer,
     ReviewRecordSerializer,
@@ -77,10 +78,7 @@ def _management_assistant_session():
         .first()
     )
     if session is None:
-        session = Session.objects.create(
-            session_scene="management_assistant",
-            system_prompt="全站管理助手",
-        )
+        session = Session.objects.create(session_scene="management_assistant")
     return session
 
 
@@ -349,13 +347,17 @@ def management_assistant_confirm_topic(request):
     )
 
 
-@api_view(["GET", "PUT"])
+@api_view(["GET", "PATCH"])
 def system_configuration_detail(request):
     configuration = SystemConfiguration.load()
     if request.method == "GET":
         return Response(SystemConfigurationSerializer(configuration).data)
 
-    serializer = SystemConfigurationSerializer(configuration, data=request.data)
+    serializer = SystemConfigurationSerializer(
+        configuration,
+        data=request.data,
+        partial=True,
+    )
     serializer.is_valid(raise_exception=True)
     serializer.save()
 
@@ -426,12 +428,16 @@ def _locator_data(topic, data):
     return material, chunk, material.clean_text[start:end], start, end
 
 
-def _create_locator(
-    entity_type, entity_id, topic, material, chunk, text, start, end, source_text=None
-):
+def _create_locator(entity, topic, material, chunk, text, start, end, source_text=None):
+    entity_field = {
+        Concept: "concept",
+        Highlight: "highlight",
+        Question: "question",
+    }.get(type(entity))
+    if entity_field is None:
+        raise ValueError("不支持的定位实体。")
     return MaterialTextLocator.objects.get_or_create(
-        entity_type=entity_type,
-        entity_id=entity_id,
+        **{entity_field: entity},
         material=material,
         start_offset=start,
         end_offset=end,
@@ -446,16 +452,7 @@ def _create_locator(
 
 
 def _build_topic_context(topic):
-    materials = (
-        topic.topic_materials.filter(removed_at__isnull=True, material__status="ready")
-        .select_related("material")
-        .order_by("import_at")
-    )
-    return "\n\n".join(
-        f"材料：{link.material.title}\n{link.material.clean_text}"
-        for link in materials
-        if link.material.clean_text
-    )[:12000]
+    return build_topic_context(topic, max_chars=18000)
 
 
 def _build_review_context(review):
@@ -467,25 +464,22 @@ def _build_review_context(review):
         )
         for concept in review.topic.concepts.all()
     )
-    question_ids = MaterialTextLocator.objects.filter(
-        topic=review.topic, entity_type="question"
-    ).values_list("entity_id", flat=True)
     question_context = "\n\n".join(
         f"学习问答：{question.question_text}\n结论：{question.conclusion}"
-        for question in Question.objects.filter(id__in=question_ids)
+        for question in review.topic.questions.all()
         if question.conclusion
     )
     return "\n\n".join(
         section
         for section in (material_context, concept_context, question_context)
         if section
-    )[:12000]
+    )[:22000]
 
 
 def _delete_material_files(material, material_id):
     relative_paths = set()
     if (
-        material.media_type in {"video", "audio"}
+        material.media_type == "video"
         and material.media_uri
         and "://" not in material.media_uri
     ):
@@ -528,7 +522,35 @@ class TopicViewSet(viewsets.ModelViewSet):
                     distinct=True,
                 )
             ).order_by("-is_pinned", "-updated_at")
-        return queryset
+        locator_queryset = MaterialTextLocator.objects.select_related(
+            "material", "chunk", "topic"
+        )
+        return queryset.prefetch_related(
+            Prefetch(
+                "topic_materials",
+                queryset=TopicMaterial.objects.filter(
+                    removed_at__isnull=True
+                ).select_related("material"),
+            ),
+            Prefetch(
+                "concepts",
+                queryset=Concept.objects.prefetch_related(
+                    Prefetch("locators", queryset=locator_queryset)
+                ),
+            ),
+            Prefetch(
+                "questions",
+                queryset=Question.objects.prefetch_related(
+                    Prefetch("locators", queryset=locator_queryset)
+                ),
+            ),
+            Prefetch(
+                "highlights",
+                queryset=Highlight.objects.prefetch_related(
+                    Prefetch("locators", queryset=locator_queryset)
+                ),
+            ),
+        )
 
     def get_serializer_class(self):
         return TopicListSerializer if self.action == "list" else TopicDetailSerializer
@@ -555,27 +577,18 @@ class TopicViewSet(viewsets.ModelViewSet):
                 list(instance.review_records.values_list("id", flat=True)),
             ),
         ]
-        locator_entities = list(
-            instance.text_locators.values_list("entity_type", "entity_id")
-        )
-        question_ids = [
-            entity_id
-            for entity_type, entity_id in locator_entities
-            if entity_type == "question"
-        ]
-        highlight_ids = [
-            entity_id
-            for entity_type, entity_id in locator_entities
-            if entity_type == "highlight"
-        ]
+        question_ids = list(instance.questions.values_list("id", flat=True))
+        highlight_ids = list(instance.highlights.values_list("id", flat=True))
         related_triggers.extend(
             [
                 ("Question", question_ids),
                 ("Highlight", highlight_ids),
             ]
         )
-        reading_session_ids = Question.objects.filter(id__in=question_ids).values_list(
-            "session_id", flat=True
+        reading_session_ids = list(
+            Question.objects.filter(id__in=question_ids).values_list(
+                "session_id", flat=True
+            )
         )
         session_message_ids = list(
             SessionMessage.objects.filter(
@@ -598,6 +611,7 @@ class TopicViewSet(viewsets.ModelViewSet):
 
         AITask.objects.filter(task_scope).delete()
         instance.delete()
+        Session.objects.filter(pk__in=reading_session_ids).delete()
         if session_is_exclusive:
             Session.objects.filter(pk=session_id).delete()
 
@@ -615,14 +629,19 @@ class TopicViewSet(viewsets.ModelViewSet):
             )
         with transaction.atomic():
             concept, _ = Concept.objects.get_or_create(topic=topic, title=title)
-            _create_locator(
-                "concept", concept.id, topic, material, chunk, text, start, end
-            )
+            _create_locator(concept, topic, material, chunk, text, start, end)
             task, _ = enqueue_or_reuse(
                 "concept_draft",
                 trigger_type="Concept",
                 trigger_id=concept.id,
-                task_data={"source_text": text, "context": material.clean_text},
+                task_data={
+                    "source_text": text,
+                    "context": select_material_context(
+                        material,
+                        title,
+                        text,
+                    ),
+                },
             )
         return Response(
             {
@@ -640,11 +659,9 @@ class TopicViewSet(viewsets.ModelViewSet):
         except (KeyError, TypeError, ValueError) as error:
             return Response({"detail": str(error)}, status=status.HTTP_400_BAD_REQUEST)
         highlight = Highlight.objects.create(
-            user_note=str(request.data.get("user_note", ""))
+            topic=topic, user_note=str(request.data.get("user_note", ""))
         )
-        _create_locator(
-            "highlight", highlight.id, topic, material, chunk, text, start, end
-        )
+        _create_locator(highlight, topic, material, chunk, text, start, end)
         return Response(
             HighlightSerializer(highlight).data, status=status.HTTP_201_CREATED
         )
@@ -681,8 +698,7 @@ class TopicViewSet(viewsets.ModelViewSet):
             trigger_type in {"Question", "Highlight"}
             and not MaterialTextLocator.objects.filter(
                 topic=topic,
-                entity_type=trigger_type.lower(),
-                entity_id=trigger.id,
+                **{trigger_type.lower(): trigger},
             ).exists()
         ):
             return Response(
@@ -901,6 +917,31 @@ class MaterialViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         material_id = instance.id
+        affected_concept_ids = list(
+            instance.text_locators.exclude(concept_id=None).values_list(
+                "concept_id", flat=True
+            )
+        )
+        affected_question_ids = list(
+            instance.text_locators.exclude(question_id=None).values_list(
+                "question_id", flat=True
+            )
+        )
+        affected_highlight_ids = list(
+            instance.text_locators.exclude(highlight_id=None).values_list(
+                "highlight_id", flat=True
+            )
+        )
+        affected_session_ids = list(
+            Question.objects.filter(pk__in=affected_question_ids).values_list(
+                "session_id", flat=True
+            )
+        )
+        affected_message_ids = list(
+            SessionMessage.objects.filter(
+                session_id__in=affected_session_ids
+            ).values_list("id", flat=True)
+        )
         with transaction.atomic():
             AITask.objects.filter(
                 trigger_type="Material",
@@ -911,7 +952,22 @@ class MaterialViewSet(viewsets.ModelViewSet):
                 error_message="材料已删除",
                 finished_at=timezone.now(),
             )
+            annotation_task_scope = (
+                Q(trigger_type="Concept", trigger_id__in=affected_concept_ids)
+                | Q(trigger_type="Question", trigger_id__in=affected_question_ids)
+                | Q(trigger_type="Highlight", trigger_id__in=affected_highlight_ids)
+                | Q(trigger_type="SessionMessage", trigger_id__in=affected_message_ids)
+            )
+            AITask.objects.filter(annotation_task_scope).delete()
             instance.delete()
+            Concept.objects.filter(pk__in=affected_concept_ids, locators=None).delete()
+            Question.objects.filter(
+                pk__in=affected_question_ids, locators=None
+            ).delete()
+            Highlight.objects.filter(
+                pk__in=affected_highlight_ids, locators=None
+            ).delete()
+            Session.objects.filter(pk__in=affected_session_ids, questions=None).delete()
         _delete_material_files(instance, material_id)
 
     def create(self, request, *args, **kwargs):
@@ -968,7 +1024,9 @@ class MaterialViewSet(viewsets.ModelViewSet):
     def re_import(self, request, pk=None):
         material = self.get_object()
         if material.text_locators.filter(
-            entity_type__in=("concept", "highlight", "question")
+            Q(concept__isnull=False)
+            | Q(highlight__isnull=False)
+            | Q(question__isnull=False)
         ).exists():
             return Response(
                 {
@@ -1013,6 +1071,11 @@ class MaterialViewSet(viewsets.ModelViewSet):
             return Response(
                 {"detail": "缺少主题或视频文件。"}, status=status.HTTP_400_BAD_REQUEST
             )
+        if video.size > settings.MAX_VIDEO_UPLOAD_BYTES:
+            return Response(
+                {"detail": "视频文件超过允许的大小。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         suffix = Path(video.name).suffix.lower()
         if suffix not in {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}:
             return Response(
@@ -1022,6 +1085,12 @@ class MaterialViewSet(viewsets.ModelViewSet):
         media_meta = {}
         subtitle = request.FILES.get("subtitle")
         if subtitle is not None:
+            if subtitle.size > settings.MAX_SUBTITLE_UPLOAD_BYTES:
+                default_storage.delete(uri)
+                return Response(
+                    {"detail": "字幕文件超过允许的大小。"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             subtitle_suffix = Path(subtitle.name).suffix.lower()
             if subtitle_suffix not in {".srt", ".vtt"}:
                 default_storage.delete(uri)
@@ -1056,15 +1125,6 @@ class MaterialViewSet(viewsets.ModelViewSet):
             status=status.HTTP_202_ACCEPTED,
         )
 
-    @action(detail=True, methods=["get"], url_path="timeline-markers")
-    def timeline_markers(self, request, pk=None):
-        markers = MaterialTextLocator.objects.filter(
-            material=self.get_object(), time_start_offset__isnull=False
-        ).order_by("time_start_offset")
-        return Response(
-            {"markers": MaterialTextLocatorSerializer(markers, many=True).data}
-        )
-
     @action(detail=True, methods=["get"])
     def annotations(self, request, pk=None):
         material = self.get_object()
@@ -1079,12 +1139,17 @@ class MaterialViewSet(viewsets.ModelViewSet):
             locators = locators.filter(topic_id=int(topic_id))
 
         entity_ids = {
-            entity_type: list(
-                locators.filter(entity_type=entity_type).values_list(
-                    "entity_id", flat=True
+            "concept": list(
+                locators.exclude(concept_id=None).values_list("concept_id", flat=True)
+            ),
+            "question": list(
+                locators.exclude(question_id=None).values_list("question_id", flat=True)
+            ),
+            "highlight": list(
+                locators.exclude(highlight_id=None).values_list(
+                    "highlight_id", flat=True
                 )
-            )
-            for entity_type in ("concept", "question", "highlight")
+            ),
         }
         serializer_context = {
             "request": request,
@@ -1259,15 +1324,22 @@ class QuestionViewSet(viewsets.ModelViewSet):
             material, chunk, text, start, end = _locator_data(topic, request.data)
         except (KeyError, TypeError, ValueError) as error:
             return Response({"detail": str(error)}, status=status.HTTP_400_BAD_REQUEST)
+        question_text = str(request.data.get("question_text", "")).strip()
+        if not question_text:
+            return Response(
+                {"detail": "请输入问题内容。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         session = Session.objects.create(
             session_scene="reading_question", context_material=material
         )
         question = Question.objects.create(
-            session=session, question_text=str(request.data.get("question_text", ""))
+            topic=topic,
+            session=session,
+            question_text=question_text,
         )
         _create_locator(
-            "question",
-            question.id,
+            question,
             topic,
             material,
             chunk,
@@ -1295,6 +1367,19 @@ class QuestionViewSet(viewsets.ModelViewSet):
             status=status.HTTP_202_ACCEPTED,
         )
 
+    def perform_destroy(self, instance):
+        session_id = instance.session_id
+        message_ids = list(instance.session.messages.values_list("id", flat=True))
+        task_scope = Q(trigger_type="Question", trigger_id=instance.id)
+        if message_ids:
+            task_scope |= Q(
+                trigger_type="SessionMessage",
+                trigger_id__in=message_ids,
+            )
+        AITask.objects.filter(task_scope).delete()
+        instance.delete()
+        Session.objects.filter(pk=session_id, questions=None).delete()
+
 
 class ConceptViewSet(viewsets.ModelViewSet):
     queryset = Concept.objects.all()
@@ -1302,11 +1387,15 @@ class ConceptViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         topic = self.request.query_params.get("topic")
-        return (
-            super().get_queryset().filter(topic_id=topic)
-            if topic
-            else super().get_queryset()
-        )
+        if not topic:
+            return super().get_queryset()
+        if not topic.isdigit():
+            raise ParseError("话题参数必须是整数。")
+        return super().get_queryset().filter(topic_id=int(topic))
+
+    def perform_destroy(self, instance):
+        AITask.objects.filter(trigger_type="Concept", trigger_id=instance.id).delete()
+        instance.delete()
 
 
 class ConceptRelationViewSet(viewsets.ModelViewSet):
@@ -1317,6 +1406,10 @@ class ConceptRelationViewSet(viewsets.ModelViewSet):
 class HighlightViewSet(viewsets.ModelViewSet):
     queryset = Highlight.objects.all()
     serializer_class = HighlightSerializer
+
+    def perform_destroy(self, instance):
+        AITask.objects.filter(trigger_type="Highlight", trigger_id=instance.id).delete()
+        instance.delete()
 
 
 class UserFeedbackViewSet(viewsets.ModelViewSet):
@@ -1610,8 +1703,14 @@ class AITaskViewSet(viewsets.ReadOnlyModelViewSet):
         if self.action == "list":
             queryset = queryset.defer("task_data", "full_context", "result_json")
         for field in ("trigger_type", "trigger_id", "status", "task_type"):
-            if self.request.query_params.get(field):
-                queryset = queryset.filter(**{field: self.request.query_params[field]})
+            value = self.request.query_params.get(field)
+            if not value:
+                continue
+            if field == "trigger_id":
+                if not value.isdigit():
+                    raise ParseError("trigger_id 参数必须是整数。")
+                value = int(value)
+            queryset = queryset.filter(**{field: value})
         return queryset
 
     @action(detail=True, methods=["post"])

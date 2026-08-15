@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { viteStaticCopy } from 'vite-plugin-static-copy'
 
+const apiTarget = process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:8000'
+
 const antdForms = new Set([
   'auto-complete', 'button', 'cascader', 'checkbox', 'color-picker', 'date-picker',
   'form', 'input', 'input-number', 'mentions', 'radio', 'rate', 'segmented', 'select',
@@ -42,11 +44,11 @@ export default defineConfig({
     host: '0.0.0.0',
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: apiTarget,
         changeOrigin: false,
       },
       '/media': {
-        target: 'http://127.0.0.1:8000',
+        target: apiTarget,
         changeOrigin: false,
       },
     },

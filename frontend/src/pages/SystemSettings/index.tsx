@@ -22,7 +22,6 @@ import {
   updateSystemConfiguration,
 } from '../../api';
 import type { SystemConfiguration } from '../../api';
-import { siteThemeOptions } from '../../appearance';
 
 type ConfigurationForm = Omit<SystemConfiguration, 'updated_at'>;
 
@@ -83,7 +82,6 @@ const SystemSettings: React.FC = () => {
         form.setFieldsValue(response.data);
         setApiTimeout(response.data.api_timeout_ms);
         setUpdatedAt(response.data.updated_at);
-        void loadModels(response.data);
       })
       .catch(() => message.error('加载系统设置失败'))
       .finally(() => setLoading(false));
@@ -259,11 +257,6 @@ const SystemSettings: React.FC = () => {
                 <Input />
               </Form.Item>
             </Col>
-            <Col xs={24} md={12}>
-              <Form.Item name="crawl4ai_base_url" label="Crawl4AI 地址" rules={requiredRule}>
-                <Input />
-              </Form.Item>
-            </Col>
             <Col span={24}>
               <Form.Item
                 name="supplement_excluded_domains"
@@ -289,40 +282,8 @@ const SystemSettings: React.FC = () => {
           </Row>
         </Card>
 
-        <Card title="界面默认值" loading={loading}>
+        <Card title="请求设置" loading={loading}>
           <Row gutter={16}>
-            <Col xs={24} md={8}>
-              <Form.Item name="default_site_theme" label="全局背景">
-                <Select
-                  options={siteThemeOptions.map((item) => ({
-                    value: item.value,
-                    label: item.label,
-                  }))}
-                />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={8}>
-              <Form.Item name="default_reader_font" label="学习页正文字体">
-                <Select
-                  options={[
-                    { value: 'system', label: '系统字体' },
-                    { value: 'song', label: '宋体' },
-                    { value: 'kai', label: '楷体' },
-                    { value: 'serif', label: '衬线字体' },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={8}>
-              <Form.Item name="default_tts_voice" label="默认朗读音色">
-                <Input placeholder="zh-CN-YunxiNeural" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={8}>
-              <Form.Item name="default_speech_rate" label="默认朗读语速">
-                <InputNumber min={0.5} max={3} step={0.25} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
             <Col xs={24} md={8}>
               <Form.Item
                 name="api_timeout_ms"

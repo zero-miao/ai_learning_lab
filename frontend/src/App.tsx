@@ -3,11 +3,9 @@ import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { BgColorsOutlined, MenuOutlined, SettingOutlined } from '@ant-design/icons';
 import { Button, ConfigProvider, Dropdown, Layout, Popover, Space, Spin, Typography, theme } from 'antd';
 import {
-  applySiteTheme,
   siteThemeOptions,
   useSiteTheme,
 } from './appearance';
-import { getSystemConfiguration, setApiTimeout } from './api';
 import FeedbackButton from './components/FeedbackButton';
 import ManagementAssistant from './components/ManagementAssistant';
 
@@ -43,27 +41,6 @@ function App() {
     };
     document.addEventListener('keydown', handleSelectAll);
     return () => document.removeEventListener('keydown', handleSelectAll);
-  }, []);
-
-  useEffect(() => {
-    void getSystemConfiguration()
-      .then((response) => {
-        setApiTimeout(response.data.api_timeout_ms);
-        applySiteTheme(response.data.current_site_theme);
-        window.localStorage.setItem(
-          'reader-font',
-          response.data.current_reader_font,
-        );
-        window.localStorage.setItem(
-          'reader-tts-voice',
-          response.data.current_tts_voice,
-        );
-        window.localStorage.setItem(
-          'reader-speech-rate',
-          String(response.data.current_speech_rate),
-        );
-      })
-      .catch(() => undefined);
   }, []);
 
   return (

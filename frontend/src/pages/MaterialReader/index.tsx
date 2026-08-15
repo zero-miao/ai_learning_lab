@@ -6,19 +6,15 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import ReactMarkdown from 'react-markdown';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import remarkGfm from 'remark-gfm';
 import {
   Alert,
   Button,
   Collapse,
   Drawer,
   Empty,
-  Form,
   Input,
   List,
-  Modal,
   Popconfirm,
   Result,
   Segmented,
@@ -50,15 +46,14 @@ import {
   deleteHighlight,
   deleteQuestion,
   getAITask,
+  getMaterial,
   getMaterialAnnotations,
   getSession,
-  getSystemConfiguration,
   getTopic,
   listAITasks,
   retryAITask,
   triggerSupplement,
   updateConcept,
-  updateCurrentReadingPreferences,
   updateHighlight,
   createSessionMessage,
 } from '../../api';
@@ -73,31 +68,24 @@ import type {
   Session,
 } from '../../api';
 import UniversalReader from '../../components/UniversalReader';
-import type { ReaderFont, TextSelectionAnchor } from '../../components/UniversalReader';
+import type { TextSelectionAnchor } from '../../components/UniversalReader';
+import {
+  ConceptEditorModal,
+  HighlightEditorModal,
+} from '../../components/AnnotationEditors';
+import MarkdownContent from '../../components/MarkdownContent';
 import { useSiteTheme } from '../../appearance';
+import { useAITaskPolling } from '../../hooks/useAITaskPolling';
+import { useReadingPreferences } from '../../hooks/useReadingPreferences';
 import { useMediaQuery } from '../../useMediaQuery';
 import './styles.css';
 
 const { Text } = Typography;
-const readerFonts: ReaderFont[] = ['system', 'song', 'kai', 'serif'];
-
 interface ReadingViewportAnchor {
   sourceOffset: number;
   top: number;
   scrollContainer: HTMLElement | null;
 }
-
-const MarkdownDigest: React.FC<{ content: string }> = ({ content }) => (
-  <div className="reader-briefing__markdown">
-    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-  </div>
-);
-
-const MarkdownChatMessage: React.FC<{ content: string }> = ({ content }) => (
-  <div className="material-reader__chat-markdown">
-    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-  </div>
-);
 
 const MaterialReader: React.FC = () => {
   const { topicId, materialId } = useParams<{ topicId: string; materialId: string }>();
@@ -133,18 +121,7 @@ const MaterialReader: React.FC = () => {
     setSiteTheme: setReaderTheme,
     option: themeOption,
   } = useSiteTheme();
-  const [readerFont, setReaderFont] = useState<ReaderFont>(() => {
-    const saved = window.localStorage.getItem('reader-font');
-    if (readerFonts.includes(saved as ReaderFont)) return saved as ReaderFont;
-    const configuredDefault = import.meta.env.VITE_DEFAULT_READER_FONT;
-    return readerFonts.includes(configuredDefault as ReaderFont)
-      ? configuredDefault as ReaderFont
-      : 'system';
-  });
-  const [speechPreferences, setSpeechPreferences] = useState(() => ({
-    voice: window.localStorage.getItem('reader-tts-voice') ?? '',
-    rate: Number(window.localStorage.getItem('reader-speech-rate')) || 1,
-  }));
+  const readingPreferences = useReadingPreferences();
   const darkMode = themeOption.dark;
   const [editingConcept, setEditingConcept] = useState<Concept | null>(null);
   const [editingHighlight, setEditingHighlight] = useState<Highlight | null>(null);
@@ -154,24 +131,34 @@ const MaterialReader: React.FC = () => {
   const viewportAnchorRef = useRef<ReadingViewportAnchor | null>(null);
   const [annotationRefreshVersion, setAnnotationRefreshVersion] = useState(0);
 
-  const [conceptForm] = Form.useForm<Partial<Concept>>();
-  const [highlightForm] = Form.useForm<{ user_note: string }>();
-
   const load = useCallback(async () => {
     if (!topicId || !materialId) return;
     setLoadError('');
     try {
-      const [response, annotationsResponse] = await Promise.all([
+      const [response, materialResponse, annotationsResponse, tasksResponse] = await Promise.all([
         getTopic(Number(topicId)),
+        getMaterial(Number(materialId)),
         getMaterialAnnotations(Number(materialId)),
+        listAITasks({
+          trigger_type: 'Material',
+          trigger_id: Number(materialId),
+        }),
       ]);
       setTopic(response.data);
       setAllAnnotations(annotationsResponse.data);
       const relation = response.data.topic_materials.find(
         (item) => item.material_id === Number(materialId),
       );
-      setMaterial(relation?.material ?? null);
+      setMaterial(relation ? materialResponse.data : null);
       if (!relation) setLoadError('该材料未关联到当前话题，可能已被移除。');
+      const activeMaterialTask = tasksResponse.data.results.find((item) =>
+        ['pending', 'running'].includes(item.status),
+      );
+      if (activeMaterialTask) {
+        setTask((await getAITask(activeMaterialTask.id)).data);
+      } else {
+        setTask(null);
+      }
     } catch {
       setLoadError('无法加载学习材料，请检查后端服务后重试。');
       throw new Error('Failed to load material');
@@ -261,26 +248,6 @@ const MaterialReader: React.FC = () => {
   }, [load]);
 
   useEffect(() => {
-    void getSystemConfiguration()
-      .then((response) => {
-        const { current_reader_font, current_tts_voice, current_speech_rate } =
-          response.data;
-        setReaderFont(current_reader_font);
-        setSpeechPreferences({
-          voice: current_tts_voice,
-          rate: current_speech_rate,
-        });
-        window.localStorage.setItem('reader-font', current_reader_font);
-        window.localStorage.setItem('reader-tts-voice', current_tts_voice);
-        window.localStorage.setItem(
-          'reader-speech-rate',
-          String(current_speech_rate),
-        );
-      })
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
     window.localStorage.setItem(
       'reader-highlight-notes',
       showHighlightNotes ? 'visible' : 'hidden',
@@ -293,69 +260,22 @@ const MaterialReader: React.FC = () => {
     return () => document.body.classList.remove('mobile-reader-immersive');
   }, [immersiveMode, isMobile]);
 
-  useEffect(() => {
-    window.localStorage.setItem('reader-font', readerFont);
-  }, [readerFont]);
-
-  const changeReaderFont = (font: ReaderFont) => {
-    setReaderFont(font);
-    window.localStorage.setItem('reader-font', font);
-    void updateCurrentReadingPreferences({
-      current_reader_font: font,
-    }).catch(() => message.warning('字体偏好同步失败'));
-  };
-
-  const changeSpeechPreferences = (
-    values: { voice?: string; rate?: number },
-  ) => {
-    setSpeechPreferences((current) => ({
-      voice: values.voice ?? current.voice,
-      rate: values.rate ?? current.rate,
-    }));
-    if (values.voice !== undefined) {
-      window.localStorage.setItem('reader-tts-voice', values.voice);
-    }
-    if (values.rate !== undefined) {
-      window.localStorage.setItem('reader-speech-rate', String(values.rate));
-    }
-    void updateCurrentReadingPreferences({
-      ...(values.voice === undefined
-        ? {}
-        : { current_tts_voice: values.voice }),
-      ...(values.rate === undefined
-        ? {}
-        : { current_speech_rate: values.rate }),
-    }).catch(() => message.warning('朗读偏好同步失败'));
-  };
-
-  useEffect(() => {
-    if (material?.status !== 'generating_audio') return;
-    const timer = window.setInterval(() => {
-      void load().catch(() => undefined);
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [load, material?.status]);
-
-  useEffect(() => {
-    if (!task || !['pending', 'running'].includes(task.status)) return;
-    const timer = window.setInterval(async () => {
-      const response = await getAITask(task.id);
-      setTask(response.data);
-      if (['succeeded', 'failed'].includes(response.data.status)) {
-        if (response.data.status === 'failed') {
-          message.error(response.data.error_message || 'AI 任务失败');
-        } else {
-          message.success(`${response.data.task_type_display}已完成`);
-        }
-        await refreshAnnotations(true);
-        if (activeSession) {
-          const sessionResponse = await getSession(activeSession.id);
-          setActiveSession(sessionResponse.data);
-        }
+  useAITaskPolling(task ? [task] : [], {
+    onUpdate: ([next]) => setTask((next as AITask | undefined) ?? null),
+    onSettled: async ([settled]) => {
+      if (settled.status === 'failed') {
+        message.error(settled.error_message || 'AI 任务失败');
+      } else {
+        message.success(`${settled.task_type_display}已完成`);
       }
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [activeSession, refreshAnnotations, task]);
+      await refreshAnnotations(true);
+      if (materialId) setMaterial((await getMaterial(Number(materialId))).data);
+      if (activeSession) {
+        setActiveSession((await getSession(activeSession.id)).data);
+      }
+    },
+    onError: () => message.error('刷新任务状态失败'),
+  });
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: 'nearest' });
@@ -460,13 +380,11 @@ const MaterialReader: React.FC = () => {
 
   const handleEditConcept = (concept: Concept) => {
     setEditingConcept(concept);
-    conceptForm.setFieldsValue(concept);
     setConceptModal(true);
   };
 
   const handleEditHighlight = (highlight: Highlight) => {
     setEditingHighlight(highlight);
-    highlightForm.setFieldsValue({ user_note: highlight.user_note });
     setHighlightModal(true);
   };
 
@@ -805,7 +723,11 @@ const MaterialReader: React.FC = () => {
               items={[{
                 key: 'digest',
                 label: <Text strong>材料摘要</Text>,
-                children: <MarkdownDigest content={material.digest} />,
+                children: (
+                  <MarkdownContent className="reader-briefing__markdown">
+                    {material.digest}
+                  </MarkdownContent>
+                ),
               }]}
             />
           )}
@@ -816,14 +738,22 @@ const MaterialReader: React.FC = () => {
             questions={scoped.questions}
             readerTheme={readerTheme}
             onReaderThemeChange={setReaderTheme}
-            readerFont={readerFont}
-            onReaderFontChange={changeReaderFont}
-            preferredSpeechVoice={speechPreferences.voice}
-            preferredSpeechRate={speechPreferences.rate}
-            onSpeechPreferencesChange={changeSpeechPreferences}
+            readerFont={readingPreferences.font}
+            onReaderFontChange={(font) => {
+              void readingPreferences.update({ font }).catch(
+                () => message.warning('字体偏好同步失败'),
+              );
+            }}
+            preferredSpeechVoice={readingPreferences.voice}
+            preferredSpeechRate={readingPreferences.rate}
+            onSpeechPreferencesChange={(values) => {
+              void readingPreferences.update(values).catch(
+                () => message.warning('朗读偏好同步失败'),
+              );
+            }}
             onMarkConcept={(next) => {
               setSelection(next);
-              conceptForm.setFieldsValue({ title: next.text.slice(0, 80) });
+              setEditingConcept(null);
               setConceptModal(true);
             }}
             onAskQuestion={(next) => {
@@ -835,7 +765,7 @@ const MaterialReader: React.FC = () => {
             }}
             onHighlight={(next) => {
               setSelection(next);
-              highlightForm.resetFields();
+              setEditingHighlight(null);
               setHighlightModal(true);
             }}
             onClearAnnotationSelection={() => undefined}
@@ -937,7 +867,9 @@ const MaterialReader: React.FC = () => {
                               textAlign: 'left',
                               border: msg.msg_from === 'ai' && darkMode ? '1px solid #303030' : 'none'
                             }}>
-                              <MarkdownChatMessage content={msg.msg_content} />
+                              <MarkdownContent className="material-reader__chat-markdown">
+                                {msg.msg_content}
+                              </MarkdownContent>
                             </div>
                           </div>
                         )}
@@ -1230,24 +1162,28 @@ const MaterialReader: React.FC = () => {
           },
         ]} />
       </Drawer>
-    <Modal title={editingConcept ? "编辑概念" : "标记概念"} open={conceptModal} focusTriggerAfterClose={false} onCancel={() => { setConceptModal(false); setEditingConcept(null); }} onOk={() => conceptForm.submit()}>
-      <Form form={conceptForm} layout="vertical" onFinish={submitConcept}>
-        <Form.Item name="title" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
-        {editingConcept && (
-          <>
-            <Form.Item name="definition" label="定义"><Input.TextArea rows={3} /></Form.Item>
-            <Form.Item name="principle" label="原理"><Input.TextArea rows={3} /></Form.Item>
-            <Form.Item name="pitfalls" label="易错点"><Input.TextArea rows={3} /></Form.Item>
-            <Form.Item name="applications" label="应用"><Input.TextArea rows={3} /></Form.Item>
-          </>
-        )}
-      </Form>
-    </Modal>
-    <Modal title={editingHighlight ? "编辑高亮" : "添加高亮"} open={highlightModal} focusTriggerAfterClose={false} onCancel={() => { setHighlightModal(false); setEditingHighlight(null); }} onOk={() => highlightForm.submit()}>
-      <Form form={highlightForm} layout="vertical" onFinish={submitHighlight}>
-        <Form.Item name="user_note" label="笔记内容"><Input.TextArea rows={4} /></Form.Item>
-      </Form>
-    </Modal>
+    <ConceptEditorModal
+      open={conceptModal}
+      concept={editingConcept ?? {
+        title: selection?.text.slice(0, 80) ?? '',
+      }}
+      creating={!editingConcept}
+      onCancel={() => {
+        setConceptModal(false);
+        setEditingConcept(null);
+      }}
+      onSubmit={submitConcept}
+    />
+    <HighlightEditorModal
+      open={highlightModal}
+      note={editingHighlight?.user_note ?? ''}
+      creating={!editingHighlight}
+      onCancel={() => {
+        setHighlightModal(false);
+        setEditingHighlight(null);
+      }}
+      onSubmit={submitHighlight}
+    />
     </>
   );
 };

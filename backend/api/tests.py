@@ -9,10 +9,12 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from .ai_gateway import AIGateway
+from .learning_context import select_material_context
 from .models import (
     AITask,
     Concept,
@@ -33,6 +35,7 @@ from .models import (
     UserFeedback,
 )
 from .services import MaterialService, _validate_remote_url
+from .supplement_service import crawl
 from .task_service import claim_due_task, enqueue_or_reuse, execute_task
 from .tasks import TaskRegistry, _create_material_chunks
 
@@ -61,6 +64,10 @@ class V2ErApiTests(TestCase):
         response = self.client.get("/api/system-configuration/")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(SystemConfiguration.objects.filter(singleton_id=1).exists())
+        configuration = SystemConfiguration.load()
+        configuration.llm_api_key = "private-secret"
+        configuration.save(update_fields=["llm_api_key"])
+        response = self.client.get("/api/system-configuration/")
 
         payload = dict(response.data)
         payload.update(
@@ -69,28 +76,23 @@ class V2ErApiTests(TestCase):
                 "llm_model_answer_question": "question-model",
                 "supplement_relevance_threshold": 0.9,
                 "supplement_excluded_domains": "wikipedia.org, example.test",
-                "default_site_theme": "midnight",
-                "default_reader_font": "song",
-                "default_tts_voice": "zh-CN-YunxiNeural",
-                "default_speech_rate": 1.5,
                 "api_timeout_ms": 15000,
             }
         )
-        update_response = self.client.put(
+        update_response = self.client.patch(
             "/api/system-configuration/", payload, format="json"
         )
 
         self.assertEqual(update_response.status_code, 200)
         configuration = SystemConfiguration.load()
-        self.assertEqual(configuration.default_site_theme, "midnight")
-        self.assertEqual(configuration.default_reader_font, "song")
         self.assertEqual(configuration.supplement_relevance_threshold, 0.9)
         self.assertEqual(
             configuration.supplement_excluded_domains,
             "wikipedia.org,example.test",
         )
-        self.assertEqual(configuration.default_tts_voice, "zh-CN-YunxiNeural")
-        self.assertEqual(configuration.default_speech_rate, 1.5)
+        self.assertNotIn("llm_api_key", response.data)
+        self.assertNotIn("llm_api_key", update_response.data)
+        self.assertEqual(configuration.llm_api_key, "private-secret")
         self.assertEqual(
             AIGateway.get_model_for_task("answer_question"), "question-model"
         )
@@ -101,7 +103,7 @@ class V2ErApiTests(TestCase):
         payload = dict(response.data)
         payload["supplement_relevance_threshold"] = 0.8
 
-        update_response = self.client.put(
+        update_response = self.client.patch(
             "/api/system-configuration/", payload, format="json"
         )
 
@@ -134,7 +136,8 @@ class V2ErApiTests(TestCase):
             media_uri="https://www.scribd.com/document/123/example",
         )
 
-        MaterialService.process_material(material)
+        with self.assertRaises(RuntimeError):
+            MaterialService.process_material(material)
 
         material.refresh_from_db()
         self.assertEqual(material.status, "failed")
@@ -148,6 +151,10 @@ class V2ErApiTests(TestCase):
         ):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 _validate_remote_url(url)
+
+    def test_supplement_crawler_rejects_private_urls(self):
+        with self.assertRaises(ValueError):
+            crawl("http://127.0.0.1/private")
 
     def test_failed_web_reimport_preserves_existing_readable_content(self):
         material = Material.objects.create(
@@ -167,7 +174,8 @@ class V2ErApiTests(TestCase):
             end_offset=3,
         )
 
-        MaterialService.process_material(material)
+        with self.assertRaises(RuntimeError):
+            MaterialService.process_material(material)
 
         material.refresh_from_db()
         self.assertEqual(material.status, "failed")
@@ -179,6 +187,27 @@ class V2ErApiTests(TestCase):
     def test_reimport_rejects_material_with_any_annotation(self):
         for entity_type in ("concept", "highlight", "question"):
             with self.subTest(entity_type=entity_type):
+                session = None
+                if entity_type == "concept":
+                    entity = Concept.objects.create(
+                        topic=self.topic,
+                        title=f"概念-{entity_type}",
+                    )
+                elif entity_type == "highlight":
+                    entity = Highlight.objects.create(
+                        topic=self.topic,
+                        user_note="高亮",
+                    )
+                else:
+                    session = Session.objects.create(
+                        session_scene="reading_question",
+                        context_material=self.material,
+                    )
+                    entity = Question.objects.create(
+                        topic=self.topic,
+                        session=session,
+                        question_text="问题",
+                    )
                 locator = MaterialTextLocator.objects.create(
                     material=self.material,
                     chunk=self.chunk,
@@ -186,8 +215,7 @@ class V2ErApiTests(TestCase):
                     source_text="Django",
                     start_offset=0,
                     end_offset=6,
-                    entity_type=entity_type,
-                    entity_id=1,
+                    **{entity_type: entity},
                 )
 
                 response = self.client.post(
@@ -207,6 +235,9 @@ class V2ErApiTests(TestCase):
                     ).exists()
                 )
                 locator.delete()
+                entity.delete()
+                if session:
+                    session.delete()
 
     def test_clean_text_final_failure_marks_material_failed(self):
         self.material.raw_text = ""
@@ -722,6 +753,52 @@ class V2ErApiTests(TestCase):
         self.assertEqual(detail.data["full_context"], task.full_context)
         self.assertEqual(detail.data["result_json"], task.result_json)
 
+    def test_cancelled_running_task_cannot_be_marked_succeeded(self):
+        task = AITask.objects.create(
+            task_type="process",
+            trigger_type="Material",
+            trigger_id=self.material.id,
+            status="running",
+            next_run_at=timezone.now(),
+        )
+
+        class CancellingTask:
+            def __init__(self, **kwargs):
+                self.task_id = kwargs["task_id"]
+
+            def run(self):
+                AITask.objects.filter(pk=self.task_id).update(status="cancelled")
+                return {"unexpected": "result"}
+
+        with patch.object(TaskRegistry, "get_task_class", return_value=CancellingTask):
+            execute_task(task.id)
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, "cancelled")
+
+    def test_failed_process_task_and_material_share_failure_state(self):
+        material = Material.objects.create(
+            title="失败导入",
+            media_type="web_page",
+            media_uri="file:///private",
+        )
+        task = AITask.objects.create(
+            task_type="process",
+            trigger_type="Material",
+            trigger_id=material.id,
+            status="running",
+            attempt_count=1,
+            max_attempts=1,
+            next_run_at=timezone.now(),
+        )
+
+        execute_task(task.id)
+
+        task.refresh_from_db()
+        material.refresh_from_db()
+        self.assertEqual(task.status, "failed")
+        self.assertEqual(material.status, "failed")
+
     def test_task_claims_keep_tts_in_an_independent_lane(self):
         llm_task = AITask.objects.create(
             task_type="briefing",
@@ -874,14 +951,47 @@ class V2ErApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 202)
         concept = Concept.objects.get(pk=response.data["concept"]["id"])
-        locator = MaterialTextLocator.objects.get(
-            entity_type="concept", entity_id=concept.id
-        )
+        locator = MaterialTextLocator.objects.get(concept=concept)
         self.assertEqual(locator.material_id, self.material.id)
         self.assertEqual(locator.topic_id, self.topic.id)
         task = AITask.objects.get(pk=response.data["task"]["id"])
         self.assertEqual(task.trigger_type, "Concept")
         self.assertEqual(task.trigger_id, concept.id)
+
+    def test_topic_detail_embeds_material_summary_with_bounded_queries(self):
+        for index in range(8):
+            concept = Concept.objects.create(
+                topic=self.topic,
+                title=f"概念 {index}",
+            )
+            MaterialTextLocator.objects.create(
+                concept=concept,
+                topic=self.topic,
+                material=self.material,
+                chunk=self.chunk,
+                source_text="Django",
+                start_offset=0,
+                end_offset=6,
+            )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(f"/api/topics/{self.topic.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertLessEqual(len(queries), 12)
+        embedded = response.data["topic_materials"][0]["material"]
+        for field in ("raw_text", "clean_text", "digest", "chunks", "media_meta"):
+            self.assertNotIn(field, embedded)
+
+    def test_invalid_numeric_filters_return_400(self):
+        self.assertEqual(
+            self.client.get("/api/concepts/", {"topic": "invalid"}).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.client.get("/api/ai-tasks/", {"trigger_id": "invalid"}).status_code,
+            400,
+        )
 
     def test_material_annotations_support_current_topic_and_all_topics(self):
         other_topic = Topic.objects.create(title="数据库查询")
@@ -939,17 +1049,87 @@ class V2ErApiTests(TestCase):
         self.assertEqual(response.status_code, 202)
         question = Question.objects.get(pk=response.data["question"]["id"])
         self.assertIsInstance(question.session, Session)
-        self.assertTrue(
-            MaterialTextLocator.objects.filter(
-                entity_type="question", entity_id=question.id
-            ).exists()
-        )
+        self.assertTrue(MaterialTextLocator.objects.filter(question=question).exists())
         message = question.session.messages.get(msg_from="user")
         self.assertEqual(message.msg_content, question.question_text)
         task = AITask.objects.get(pk=response.data["task"]["id"])
         self.assertEqual(task.trigger_type, "SessionMessage")
         self.assertEqual(task.trigger_id, message.id)
         self.assertEqual(task.task_data, {"question_id": question.id})
+
+    def test_empty_question_does_not_leave_session(self):
+        before = Session.objects.count()
+        response = self.client.post(
+            "/api/questions/",
+            {
+                "topic": self.topic.id,
+                "material": self.material.id,
+                "start_offset": 0,
+                "end_offset": 6,
+                "question_text": "  ",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Session.objects.count(), before)
+
+    def test_deleting_question_removes_locator_session_and_tasks(self):
+        response = self.client.post(
+            "/api/questions/",
+            {
+                "topic": self.topic.id,
+                "material": self.material.id,
+                "start_offset": 0,
+                "end_offset": 10,
+                "question_text": "如何删除问题？",
+            },
+            format="json",
+        )
+        question = Question.objects.get(pk=response.data["question"]["id"])
+        session_id = question.session_id
+        task_id = response.data["task"]["id"]
+
+        deleted = self.client.delete(f"/api/questions/{question.id}/")
+
+        self.assertEqual(deleted.status_code, 204)
+        self.assertFalse(MaterialTextLocator.objects.filter(question=question).exists())
+        self.assertFalse(Session.objects.filter(pk=session_id).exists())
+        self.assertFalse(AITask.objects.filter(pk=task_id).exists())
+
+    def test_deleting_annotation_entities_cascades_locators(self):
+        concept_response = self.client.post(
+            f"/api/topics/{self.topic.id}/concepts/",
+            {
+                "title": "待删除概念",
+                "material": self.material.id,
+                "start_offset": 0,
+                "end_offset": 6,
+            },
+            format="json",
+        )
+        highlight_response = self.client.post(
+            f"/api/topics/{self.topic.id}/highlights/",
+            {
+                "material": self.material.id,
+                "start_offset": 0,
+                "end_offset": 6,
+                "user_note": "待删除",
+            },
+            format="json",
+        )
+        concept_id = concept_response.data["concept"]["id"]
+        highlight_id = highlight_response.data["id"]
+
+        self.client.delete(f"/api/concepts/{concept_id}/")
+        self.client.delete(f"/api/highlights/{highlight_id}/")
+
+        self.assertFalse(
+            MaterialTextLocator.objects.filter(concept_id=concept_id).exists()
+        )
+        self.assertFalse(
+            MaterialTextLocator.objects.filter(highlight_id=highlight_id).exists()
+        )
 
     @patch("api.supplement_service.search_with_exclusions", return_value=[])
     @patch("api.tasks.BaseTask._call_llm")
@@ -1096,6 +1276,8 @@ class V2ErApiTests(TestCase):
             format="json",
         )
         question_task_id = question_response.data["task"]["id"]
+        question_id = question_response.data["question"]["id"]
+        reading_session_id = Question.objects.get(pk=question_id).session_id
         other_topic = Topic.objects.create(title="保留的话题")
         other_task, _ = enqueue_or_reuse(
             "supplement_search",
@@ -1108,6 +1290,11 @@ class V2ErApiTests(TestCase):
 
         self.assertEqual(response.status_code, 204)
         self.assertFalse(Session.objects.filter(pk=session_id).exists())
+        self.assertFalse(Session.objects.filter(pk=reading_session_id).exists())
+        self.assertFalse(Question.objects.filter(pk=question_id).exists())
+        self.assertFalse(
+            MaterialTextLocator.objects.filter(question_id=question_id).exists()
+        )
         self.assertFalse(SessionMessage.objects.filter(session_id=session_id).exists())
         self.assertFalse(
             AITask.objects.filter(
@@ -1131,9 +1318,7 @@ class V2ErApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         highlight = Highlight.objects.get(pk=response.data["id"])
         self.assertTrue(
-            MaterialTextLocator.objects.filter(
-                entity_type="highlight", entity_id=highlight.id
-            ).exists()
+            MaterialTextLocator.objects.filter(highlight=highlight).exists()
         )
         relation = TopicMaterial.objects.get(topic=self.topic, material=self.material)
         delete_response = self.client.delete(f"/api/topic-materials/{relation.id}/")
@@ -1181,6 +1366,19 @@ class V2ErApiTests(TestCase):
         self.assertEqual(task.trigger_type, "Material")
         self.assertEqual(task.trigger_id, material.id)
         save.assert_called_once()
+
+    def test_video_upload_rejects_oversized_file(self):
+        video = SimpleUploadedFile("too-large.mp4", b"1234", "video/mp4")
+
+        with self.settings(MAX_VIDEO_UPLOAD_BYTES=3):
+            response = self.client.post(
+                "/api/materials/upload-video/",
+                {"topic": self.topic.id, "video": video},
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Material.objects.count(), 1)
 
     @patch(
         "api.views.default_storage.save",
@@ -1283,8 +1481,7 @@ class V2ErApiTests(TestCase):
 
         self.assertEqual(annotation.status_code, 201)
         locator = MaterialTextLocator.objects.get(
-            entity_type="highlight",
-            entity_id=annotation.data["id"],
+            highlight_id=annotation.data["id"],
         )
         self.assertEqual(locator.source_text, "beta")
         self.assertEqual(locator.time_start_offset, 0.0)
@@ -1299,14 +1496,16 @@ class V2ErApiTests(TestCase):
         )
         TopicMaterial.objects.create(topic=self.topic, material=video)
 
-        response = self.client.get(f"/api/topics/{self.topic.id}/")
-        serialized = next(
+        topic_response = self.client.get(f"/api/topics/{self.topic.id}/")
+        embedded = next(
             item["material"]
-            for item in response.data["topic_materials"]
+            for item in topic_response.data["topic_materials"]
             if item["material_id"] == video.id
         )
+        self.assertNotIn("media_url", embedded)
+        response = self.client.get(f"/api/materials/{video.id}/")
         self.assertEqual(
-            serialized["media_url"], "http://testserver/media/materials/video.mp4"
+            response.data["media_url"], "http://testserver/media/materials/video.mp4"
         )
 
     def test_media_range_request_returns_partial_content(self):
@@ -1756,6 +1955,80 @@ class V2ErApiTests(TestCase):
                 trigger_id=self.material.id,
             ).exists()
         )
+
+    def test_long_material_briefing_reads_the_final_section(self):
+        self.material.clean_text = (
+            ("前段内容。" * 5000)
+            + "\n\n"
+            + ("中段内容。" * 5000)
+            + "\n\n最终章节标记 FINAL-SECTION-MARKER"
+        )
+        self.material.raw_text = self.material.clean_text
+        self.material.digest = ""
+        self.material.save(
+            update_fields=["clean_text", "raw_text", "digest", "updated_at"]
+        )
+        task, _ = enqueue_or_reuse(
+            "briefing",
+            trigger_type="Material",
+            trigger_id=self.material.id,
+        )
+        task_obj = TaskRegistry.get_task_class(task.task_type)(
+            task_id=task.id,
+            task_data=task.task_data,
+            trigger_type=task.trigger_type,
+            trigger_id=task.trigger_id,
+            model=task.model,
+        )
+
+        with patch.object(
+            task_obj,
+            "_call_llm",
+            side_effect=lambda messages, **kwargs: "分段摘要",
+        ) as call_llm:
+            task_obj.run()
+
+        user_contents = [
+            call.args[0][-1]["content"] for call in call_llm.call_args_list
+        ]
+        self.assertGreater(len(user_contents), 1)
+        self.assertTrue(
+            any("FINAL-SECTION-MARKER" in content for content in user_contents)
+        )
+
+    def test_question_context_can_select_relevant_final_chunk(self):
+        sections = [
+            "开头章节 " + ("普通内容 " * 700),
+            "中间章节 " + ("普通内容 " * 700),
+            "最终章节 FINAL-QUESTION-MARKER " + ("尾部内容 " * 700),
+        ]
+        text = "\n\n".join(sections)
+        material = Material.objects.create(
+            title="长问答材料",
+            raw_text=text,
+            clean_text=text,
+            status="ready",
+        )
+        offset = 0
+        for index, section in enumerate(sections):
+            start = text.index(section, offset)
+            MaterialChunk.objects.create(
+                material=material,
+                chunk_index=index,
+                content=section,
+                start_offset=start,
+                end_offset=start + len(section),
+            )
+            offset = start + len(section)
+
+        context = select_material_context(
+            material,
+            "请解释 FINAL-QUESTION-MARKER",
+            max_chars=6000,
+        )
+
+        self.assertIn("FINAL-QUESTION-MARKER", context)
+        self.assertLessEqual(len(context), 6000)
 
     def test_backfill_tts_queues_existing_material(self):
         call_command("backfill_tts")

@@ -4,6 +4,7 @@ import type { TableColumnsType } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { getAITask, listAITasks, retryAITask } from '../../api';
 import type { AITask, AITaskStatus, AITaskSummary } from '../../api';
+import JsonBlock from '../../components/JsonBlock';
 
 const statusColor: Record<AITaskStatus, string> = {
   pending: 'processing',
@@ -15,25 +16,6 @@ const statusColor: Record<AITaskStatus, string> = {
 
 function formatDate(value: string | null) {
   return value ? new Date(value).toLocaleString() : '-';
-}
-
-function JsonBlock({ value }: { value: Record<string, unknown> }) {
-  return Object.keys(value).length ? (
-    <pre style={{
-      margin: 0,
-      maxHeight: 420,
-      overflow: 'auto',
-      whiteSpace: 'pre-wrap',
-      overflowWrap: 'anywhere',
-      padding: '12px',
-      borderRadius: '4px',
-      backgroundColor: 'rgba(0, 0, 0, 0.02)',
-      border: '1px solid rgba(0, 0, 0, 0.06)',
-      fontSize: '13px'
-    }}>
-      {JSON.stringify(value, null, 2)}
-    </pre>
-  ) : <Typography.Text type="secondary">无结果数据</Typography.Text>;
 }
 
 const TaskManagement: React.FC = () => {

@@ -88,20 +88,15 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
                     "asr_model",
                     "tts_voices",
                     "searxng_base_url",
-                    "crawl4ai_base_url",
                     "supplement_relevance_threshold",
                     "supplement_excluded_domains",
                 )
             },
         ),
         (
-            "界面默认值",
+            "界面偏好",
             {
                 "fields": (
-                    "default_site_theme",
-                    "default_reader_font",
-                    "default_tts_voice",
-                    "default_speech_rate",
                     "current_site_theme",
                     "current_reader_font",
                     "current_tts_voice",
@@ -277,11 +272,25 @@ class MaterialTextLocatorAdmin(admin.ModelAdmin):
         "time_range",
         "created_at",
     )
-    list_filter = ("entity_type", "topic", "material__media_type")
+    list_filter = ("topic", "material__media_type")
     search_fields = ("source_text", "material__title", "topic__title")
-    list_select_related = ("topic", "material", "chunk")
+    list_select_related = (
+        "topic",
+        "material",
+        "chunk",
+        "concept",
+        "highlight",
+        "question",
+    )
     readonly_fields = ("created_at",)
-    autocomplete_fields = ("topic", "material", "chunk")
+    autocomplete_fields = (
+        "topic",
+        "material",
+        "chunk",
+        "concept",
+        "highlight",
+        "question",
+    )
 
     @admin.display(description="文本范围")
     def text_range(self, locator):
@@ -305,7 +314,7 @@ class SessionAdmin(admin.ModelAdmin):
         "updated_at",
     )
     list_filter = ("session_scene",)
-    search_fields = ("context_msg", "system_prompt", "context_material__title")
+    search_fields = ("context_material__title",)
     list_select_related = ("context_material",)
     readonly_fields = ("created_at", "updated_at")
     autocomplete_fields = ("context_material",)
@@ -336,16 +345,17 @@ class SessionMessageAdmin(admin.ModelAdmin):
 class QuestionAdmin(admin.ModelAdmin):
     list_display = (
         "question_preview",
+        "topic",
         "session",
         "status",
         "has_conclusion",
         "created_at",
     )
-    list_filter = ("status", "session__session_scene")
-    search_fields = ("question_text", "conclusion")
-    list_select_related = ("session",)
+    list_filter = ("status", "topic", "session__session_scene")
+    search_fields = ("question_text", "conclusion", "topic__title")
+    list_select_related = ("topic", "session")
     readonly_fields = ("created_at",)
-    autocomplete_fields = ("session",)
+    autocomplete_fields = ("topic", "session")
 
     @admin.display(description="问题")
     def question_preview(self, question):
@@ -367,9 +377,7 @@ class ConceptAdmin(admin.ModelAdmin):
 
     @admin.display(description="定位数")
     def locator_count(self, concept):
-        return MaterialTextLocator.objects.filter(
-            entity_type="concept", entity_id=concept.id
-        ).count()
+        return concept.locators.count()
 
 
 @admin.register(ConceptRelation)
@@ -391,9 +399,12 @@ class ConceptRelationAdmin(admin.ModelAdmin):
 
 @admin.register(Highlight)
 class HighlightAdmin(admin.ModelAdmin):
-    list_display = ("id", "note_preview", "locator_count", "updated_at")
-    search_fields = ("user_note",)
+    list_display = ("id", "topic", "note_preview", "locator_count", "updated_at")
+    list_filter = ("topic",)
+    search_fields = ("user_note", "topic__title")
+    list_select_related = ("topic",)
     readonly_fields = ("created_at", "updated_at")
+    autocomplete_fields = ("topic",)
 
     @admin.display(description="备注")
     def note_preview(self, highlight):
@@ -401,9 +412,7 @@ class HighlightAdmin(admin.ModelAdmin):
 
     @admin.display(description="定位数")
     def locator_count(self, highlight):
-        return MaterialTextLocator.objects.filter(
-            entity_type="highlight", entity_id=highlight.id
-        ).count()
+        return highlight.locators.count()
 
 
 @admin.register(Exam)

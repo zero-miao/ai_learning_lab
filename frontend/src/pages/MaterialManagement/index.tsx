@@ -39,6 +39,7 @@ import {
 import type { Material, MaterialStatus, MaterialSummary, TopicSummary } from '../../api';
 import { message } from 'antd';
 import { useMediaQuery } from '../../useMediaQuery';
+import JsonBlock from '../../components/JsonBlock';
 import './styles.css';
 
 const { Paragraph, Text } = Typography;
@@ -55,27 +56,6 @@ const statusColor: Record<MaterialStatus, string> = {
 
 function formatDate(value: string) {
   return new Date(value).toLocaleString();
-}
-
-function JsonBlock({ value }: { value: Record<string, unknown> }) {
-  if (!Object.keys(value).length) return <Text type="secondary">无</Text>;
-  return (
-    <pre style={{
-      margin: 0,
-      maxHeight: 400,
-      overflow: 'auto',
-      whiteSpace: 'pre-wrap',
-      overflowWrap: 'anywhere',
-      padding: '12px',
-      borderRadius: '4px',
-      backgroundColor: 'rgba(0, 0, 0, 0.02)',
-      border: '1px solid rgba(0, 0, 0, 0.06)',
-      fontSize: '13px',
-      lineHeight: 1.6
-    }}>
-      {JSON.stringify(value, null, 2)}
-    </pre>
-  );
 }
 
 const MaterialManagement: React.FC = () => {

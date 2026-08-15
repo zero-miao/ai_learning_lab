@@ -47,20 +47,19 @@ FIELD_ENV_DEFAULTS = {
         "zh-CN-XiaoxiaoNeural|晓晓,zh-CN-YunxiNeural|云希",
     ),
     "searxng_base_url": ("SEARXNG_BASE_URL", "http://127.0.0.1:8080"),
-    "crawl4ai_base_url": ("CRAWL4AI_BASE_URL", "http://127.0.0.1:11235"),
     "supplement_relevance_threshold": ("SUPPLEMENT_RELEVANCE_THRESHOLD", "0.85"),
     "supplement_excluded_domains": (
         "SUPPLEMENT_EXCLUDED_DOMAINS",
         "wikipedia.org,weread.qq.com,douban.com,dedao.cn",
     ),
-    "default_site_theme": ("VITE_DEFAULT_SITE_THEME", "paper"),
-    "default_reader_font": ("VITE_DEFAULT_READER_FONT", "system"),
-    "default_tts_voice": ("DEFAULT_TTS_VOICE", "zh-CN-YunxiNeural"),
-    "default_speech_rate": ("DEFAULT_SPEECH_RATE", "1.5"),
+    "current_site_theme": ("VITE_DEFAULT_SITE_THEME", "paper"),
+    "current_reader_font": ("VITE_DEFAULT_READER_FONT", "system"),
+    "current_tts_voice": ("DEFAULT_TTS_VOICE", "zh-CN-YunxiNeural"),
+    "current_speech_rate": ("DEFAULT_SPEECH_RATE", "1.5"),
     "api_timeout_ms": ("VITE_API_TIMEOUT_MS", "10000"),
 }
 
-FLOAT_FIELDS = {"supplement_relevance_threshold", "default_speech_rate"}
+FLOAT_FIELDS = {"supplement_relevance_threshold", "current_speech_rate"}
 INTEGER_FIELDS = {"api_timeout_ms"}
 
 

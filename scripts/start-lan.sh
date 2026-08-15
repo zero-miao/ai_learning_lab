@@ -4,6 +4,7 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 backend_pid=""
+worker_pid=""
 frontend_pid=""
 
 node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)"
@@ -34,6 +35,9 @@ cleanup() {
     pkill -TERM -P "$backend_pid" 2>/dev/null || true
     kill "$backend_pid" 2>/dev/null || true
   fi
+  if [[ -n "$worker_pid" ]]; then
+    kill "$worker_pid" 2>/dev/null || true
+  fi
   wait 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
@@ -56,7 +60,7 @@ if [[ -n "$lan_ip" ]]; then
 else
   printf 'LAN URL: use this Mac local IP on port 5173\n'
 fi
-printf 'Press Ctrl-C to stop both services.\n'
+printf 'Press Ctrl-C to stop all services.\n'
 
 (
   cd "$project_root/backend"
@@ -65,9 +69,17 @@ printf 'Press Ctrl-C to stop both services.\n'
 backend_pid=$!
 
 (
+  cd "$project_root/backend"
+  exec "$project_root/.venv/bin/python" manage.py run_ai_worker
+) &
+worker_pid=$!
+
+(
   cd "$project_root/frontend"
   exec "$node_binary" ./node_modules/vite/bin/vite.js
 ) &
 frontend_pid=$!
 
-wait "$frontend_pid"
+while kill -0 "$backend_pid" "$worker_pid" "$frontend_pid" 2>/dev/null; do
+  sleep 2
+done

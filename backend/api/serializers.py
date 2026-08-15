@@ -51,6 +51,13 @@ class CurrentReadingPreferencesSerializer(serializers.ModelSerializer):
 
 
 class SystemConfigurationSerializer(serializers.ModelSerializer):
+    llm_api_key = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        trim_whitespace=False,
+    )
+
     class Meta:
         model = SystemConfiguration
         fields = [
@@ -74,13 +81,8 @@ class SystemConfigurationSerializer(serializers.ModelSerializer):
             "asr_model",
             "tts_voices",
             "searxng_base_url",
-            "crawl4ai_base_url",
             "supplement_relevance_threshold",
             "supplement_excluded_domains",
-            "default_site_theme",
-            "default_reader_font",
-            "default_tts_voice",
-            "default_speech_rate",
             "current_site_theme",
             "current_reader_font",
             "current_tts_voice",
@@ -95,6 +97,11 @@ class SystemConfigurationSerializer(serializers.ModelSerializer):
             "current_speech_rate",
             "updated_at",
         ]
+
+    def update(self, instance, validated_data):
+        if validated_data.get("llm_api_key") == "":
+            validated_data.pop("llm_api_key")
+        return super().update(instance, validated_data)
 
     def validate_tts_voices(self, value):
         voices = [item.strip() for item in value.split(",") if item.strip()]
@@ -118,6 +125,14 @@ class SystemConfigurationSerializer(serializers.ModelSerializer):
 class MaterialTextLocatorSerializer(serializers.ModelSerializer):
     material_title = serializers.CharField(source="material.title", read_only=True)
     topic_title = serializers.CharField(source="topic.title", read_only=True)
+    entity_type = serializers.SerializerMethodField()
+    entity_id = serializers.SerializerMethodField()
+
+    def get_entity_type(self, locator):
+        return locator.entity_type
+
+    def get_entity_id(self, locator):
+        return locator.entity_id
 
     class Meta:
         model = MaterialTextLocator
@@ -162,7 +177,7 @@ class MaterialSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     def get_media_url(self, material):
-        if material.media_type not in {"video", "audio"} or not material.media_uri:
+        if material.media_type != "video" or not material.media_uri:
             return ""
         path = f"{settings.MEDIA_URL}{material.media_uri}"
         request = self.context.get("request")
@@ -291,8 +306,28 @@ class MaterialListSerializer(MaterialSerializer):
         read_only_fields = fields
 
 
+class EmbeddedMaterialSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = Material
+        fields = [
+            "id",
+            "title",
+            "created_by",
+            "media_type",
+            "media_uri",
+            "status",
+            "status_display",
+            "error",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
 class TopicMaterialSerializer(serializers.ModelSerializer):
-    material = MaterialSerializer(read_only=True)
+    material = EmbeddedMaterialSerializer(read_only=True)
     material_id = serializers.IntegerField(source="material.id", read_only=True)
 
     class Meta:
@@ -323,9 +358,7 @@ class QuestionSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     def get_locators(self, question):
-        locators = MaterialTextLocator.objects.filter(
-            entity_type="question", entity_id=question.id
-        ).select_related("material", "chunk", "topic")
+        locators = question.locators.all()
         material_id = self.context.get("material_id")
         topic_id = self.context.get("topic_id")
         if material_id is not None:
@@ -354,9 +387,7 @@ class ConceptSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     def get_locators(self, concept):
-        locators = MaterialTextLocator.objects.filter(
-            entity_type="concept", entity_id=concept.id
-        ).select_related("material", "chunk", "topic")
+        locators = concept.locators.all()
         material_id = self.context.get("material_id")
         topic_id = self.context.get("topic_id")
         if material_id is not None:
@@ -388,9 +419,7 @@ class HighlightSerializer(serializers.ModelSerializer):
     locators = serializers.SerializerMethodField()
 
     def get_locators(self, highlight):
-        locators = MaterialTextLocator.objects.filter(
-            entity_type="highlight", entity_id=highlight.id
-        ).select_related("material", "chunk", "topic")
+        locators = highlight.locators.all()
         material_id = self.context.get("material_id")
         topic_id = self.context.get("topic_id")
         if material_id is not None:
@@ -425,11 +454,9 @@ class SessionSerializer(serializers.ModelSerializer):
         model = Session
         fields = [
             "id",
-            "system_prompt",
             "model",
             "session_scene",
             "context_material",
-            "context_msg",
             "created_at",
             "updated_at",
             "messages",
@@ -542,29 +569,24 @@ class TopicDetailSerializer(serializers.ModelSerializer):
         source="get_mastery_level_display", read_only=True
     )
     topic_materials = serializers.SerializerMethodField()
-    concepts = ConceptSerializer(many=True, read_only=True)
+    concepts = serializers.SerializerMethodField()
     questions = serializers.SerializerMethodField()
     highlights = serializers.SerializerMethodField()
     concept_relations = serializers.SerializerMethodField()
     learning_output = serializers.SerializerMethodField()
 
     def get_topic_materials(self, topic):
-        links = topic.topic_materials.filter(removed_at__isnull=True).select_related(
-            "material"
-        )
+        links = topic.topic_materials.filter(removed_at__isnull=True)
         return TopicMaterialSerializer(links, many=True, context=self.context).data
 
+    def get_concepts(self, topic):
+        return ConceptSerializer(topic.concepts.all(), many=True).data
+
     def get_questions(self, topic):
-        ids = MaterialTextLocator.objects.filter(
-            topic=topic, entity_type="question"
-        ).values_list("entity_id", flat=True)
-        return QuestionSerializer(Question.objects.filter(id__in=ids), many=True).data
+        return QuestionSerializer(topic.questions.all(), many=True).data
 
     def get_highlights(self, topic):
-        ids = MaterialTextLocator.objects.filter(
-            topic=topic, entity_type="highlight"
-        ).values_list("entity_id", flat=True)
-        return HighlightSerializer(Highlight.objects.filter(id__in=ids), many=True).data
+        return HighlightSerializer(topic.highlights.all(), many=True).data
 
     def get_concept_relations(self, topic):
         relations = ConceptRelation.objects.filter(
@@ -573,12 +595,9 @@ class TopicDetailSerializer(serializers.ModelSerializer):
         return ConceptRelationSerializer(relations.distinct(), many=True).data
 
     def get_learning_output(self, topic):
-        question_count = MaterialTextLocator.objects.filter(
-            topic=topic, entity_type="question"
-        ).count()
         return {
             "concept_count": topic.concepts.count(),
-            "question_count": question_count,
+            "question_count": topic.questions.count(),
             "map_node_count": topic.concepts.count(),
         }
 

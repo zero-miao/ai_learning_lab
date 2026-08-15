@@ -1,18 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { Alert, Button, Card, Empty, Form, Input, List, Modal, Space, Tag, Typography, message } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import {
   createReviewPrompt,
-  getAITask,
   getReviews,
   listAITasks,
   retryAITask,
   submitReview,
 } from '../../api';
 import type { AITaskSummary, ReviewRecord } from '../../api';
+import MarkdownContent from '../../components/MarkdownContent';
+import { useAITaskPolling } from '../../hooks/useAITaskPolling';
 import './styles.css';
 
 const activeTaskStatuses = ['pending', 'running'];
@@ -65,33 +64,26 @@ const ReviewPage: React.FC = () => {
     [tasks],
   );
 
-  useEffect(() => {
-    if (!activeTasks.length) return;
-    const timer = window.setInterval(async () => {
-      try {
-        const refreshed = await Promise.all(
-          activeTasks.map(async (task) => (await getAITask(task.id)).data),
-        );
-        setTasks((current) => {
-          const next = { ...current };
-          refreshed.forEach((task) => { next[taskKey(task)] = task; });
-          return next;
+  useAITaskPolling(activeTasks, {
+    onUpdate: (refreshed) => {
+      setTasks((current) => {
+        const next = { ...current };
+        refreshed.forEach((task) => {
+          next[taskKey(task)] = task;
         });
-        const finished = refreshed.filter((task) => !activeTaskStatuses.includes(task.status));
-        if (finished.length) {
-          finished.forEach((task) => {
-            if (task.status === 'succeeded') {
-              message.success(`${task.task_type_display}已完成`);
-            }
-          });
-          await load();
+        return next;
+      });
+    },
+    onSettled: async (finished) => {
+      finished.forEach((task) => {
+        if (task.status === 'succeeded') {
+          message.success(`${task.task_type_display}已完成`);
         }
-      } catch {
-        message.error('刷新复习任务状态失败');
-      }
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [activeTasks, load]);
+      });
+      await load();
+    },
+    onError: () => message.error('刷新复习任务状态失败'),
+  });
 
   const setTask = (task: AITaskSummary) => {
     setTasks((current) => ({ ...current, [taskKey(task)]: task }));
@@ -218,7 +210,7 @@ const ReviewPage: React.FC = () => {
                     <Typography.Text type="secondary">应复习：{new Date(item.due_at).toLocaleString()}</Typography.Text>
                     {item.review_prompt && (
                       <div className="review__markdown">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.review_prompt}</ReactMarkdown>
+                        <MarkdownContent>{item.review_prompt}</MarkdownContent>
                       </div>
                     )}
                     {item.feedback && <Typography.Text>反馈：{item.feedback}</Typography.Text>}
@@ -243,7 +235,7 @@ const ReviewPage: React.FC = () => {
     >
       {active?.review_prompt && (
         <div className="review__markdown">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{active.review_prompt}</ReactMarkdown>
+          <MarkdownContent>{active.review_prompt}</MarkdownContent>
         </div>
       )}
       <Form form={form} layout="vertical" onFinish={(values) => void submit(values)}><Form.Item name="response_text" label="本次主动回忆与应用" rules={[{ required: true }]}><Input.TextArea rows={8} /></Form.Item></Form>

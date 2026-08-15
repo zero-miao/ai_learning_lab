@@ -53,15 +53,20 @@ export interface MaterialChunk {
   end_time: number | null;
 }
 
-export interface MaterialSummary {
+export interface EmbeddedMaterial {
   id: number;
   title: string;
   created_by: 'manual' | 'ai_recommended';
   created_at: string;
   updated_at: string;
   error: string;
-  media_type: 'text' | 'web_page' | 'video' | 'audio';
+  media_type: 'text' | 'web_page' | 'video';
   media_uri: string;
+  status: MaterialStatus;
+  status_display: string;
+}
+
+export interface MaterialSummary extends EmbeddedMaterial {
   tts_assets: Array<{
     voice: string;
     label: string;
@@ -69,8 +74,6 @@ export interface MaterialSummary {
     url: string;
     error: string;
   }>;
-  status: MaterialStatus;
-  status_display: string;
   topic_links: Array<{
     topic: number;
     topic_title: string;
@@ -122,7 +125,7 @@ export interface MaterialDraftVersion extends MaterialDraftVersionSummary {
 export interface TopicMaterial {
   id: number;
   topic: number;
-  material: Material;
+  material: EmbeddedMaterial;
   material_id: number;
   import_by: 'manual' | 'ai_recommended';
   import_at: string;
@@ -225,11 +228,9 @@ export interface MaterialRecommendation {
 
 export interface Session {
   id: number;
-  system_prompt: string;
   model: string;
   session_scene: string;
   context_material: number | null;
-  context_msg: string;
   created_at: string;
   updated_at: string;
   messages: SessionMessage[];
@@ -346,7 +347,7 @@ export interface ReviewRecord {
 export interface SystemConfiguration {
   llm_provider_type: 'ollama' | 'openai';
   llm_base_url: string;
-  llm_api_key: string;
+  llm_api_key?: string;
   llm_model: string;
   llm_model_management_assistant: string;
   llm_model_topic_chat: string;
@@ -364,21 +365,8 @@ export interface SystemConfiguration {
   asr_model: string;
   tts_voices: string;
   searxng_base_url: string;
-  crawl4ai_base_url: string;
   supplement_relevance_threshold: number;
   supplement_excluded_domains: string;
-  default_site_theme:
-    | 'paper'
-    | 'sepia'
-    | 'green'
-    | 'gray'
-    | 'dark'
-    | 'midnight'
-    | 'charcoal'
-    | 'coffee';
-  default_reader_font: 'system' | 'song' | 'kai' | 'serif';
-  default_tts_voice: string;
-  default_speech_rate: number;
   current_site_theme:
     | 'paper'
     | 'sepia'
@@ -436,15 +424,16 @@ export interface UserFeedback {
 export const getSystemConfiguration = () =>
   api.get<SystemConfiguration>('system-configuration/');
 export const discoverProviderModels = (
-  data: Pick<
-    SystemConfiguration,
-    'llm_provider_type' | 'llm_base_url' | 'llm_api_key'
-  >,
+  data: {
+    llm_provider_type: SystemConfiguration['llm_provider_type'];
+    llm_base_url: string;
+    llm_api_key?: string;
+  },
 ) => api.post<{ models: string[] }>('system-configuration/models/', data);
 export const updateSystemConfiguration = (
-  data: Omit<SystemConfiguration, 'updated_at'>,
+  data: Partial<Omit<SystemConfiguration, 'updated_at'>>,
 ) =>
-  api.put<SystemConfiguration>('system-configuration/', data);
+  api.patch<SystemConfiguration>('system-configuration/', data);
 export type CurrentReadingPreferences = Pick<
   SystemConfiguration,
   | 'current_site_theme'

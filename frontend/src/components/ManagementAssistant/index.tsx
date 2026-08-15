@@ -6,8 +6,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import {
   Alert,
   Button,
@@ -40,6 +38,8 @@ import type {
   ManagementAssistantTask,
   SessionMessage,
 } from '../../api';
+import { useAITaskPolling } from '../../hooks/useAITaskPolling';
+import MarkdownContent from '../MarkdownContent';
 import './styles.css';
 
 interface TopicDraft {
@@ -109,13 +109,12 @@ export default function ManagementAssistant() {
     [tasks],
   );
 
-  useEffect(() => {
-    if (!open || !activeTask) return;
-    const timer = window.setInterval(() => {
-      void load().catch(() => undefined);
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [activeTask, load, open]);
+  useAITaskPolling(tasks, {
+    enabled: open,
+    onUpdate: (nextTasks) => setTasks(nextTasks as ManagementAssistantTask[]),
+    onSettled: load,
+    onError: () => message.error('刷新管理助手任务失败'),
+  });
 
   useLayoutEffect(() => {
     const container = messagesRef.current;
@@ -391,9 +390,7 @@ export default function ManagementAssistant() {
                           : token.colorText,
                     }}
                   >
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {item.msg_content}
-                    </ReactMarkdown>
+                    <MarkdownContent>{item.msg_content}</MarkdownContent>
                   </div>
                   {item.msg_from === 'ai' && actionCard(item.id)}
                 </div>

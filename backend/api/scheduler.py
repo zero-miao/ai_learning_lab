@@ -27,7 +27,7 @@ _lane_claim_options = {
 def start_scheduler():
     global _scheduler
     if _scheduler is not None and _scheduler.running:
-        return
+        return _scheduler
 
     recover_interrupted_tasks()
     _scheduler = BackgroundScheduler()
@@ -40,6 +40,7 @@ def start_scheduler():
         max_instances=1,
     )
     _scheduler.start()
+    return _scheduler
 
 
 def dispatch_due_task():
