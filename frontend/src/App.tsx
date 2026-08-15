@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import {
   BgColorsOutlined,
   CommentOutlined,
+  InboxOutlined,
   MenuOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
@@ -26,6 +27,7 @@ const ExamPage = lazy(() => import('./pages/Exam'));
 const ReviewPage = lazy(() => import('./pages/Review'));
 const SystemSettings = lazy(() => import('./pages/SystemSettings'));
 const FeedbackManagement = lazy(() => import('./pages/FeedbackManagement'));
+const BrowserCaptures = lazy(() => import('./pages/BrowserCaptures'));
 
 function App() {
   const navigate = useNavigate();
@@ -64,6 +66,12 @@ function App() {
         </Title>
         <nav className="app-header__desktop-nav" aria-label="主导航">
           <Button onClick={() => navigate('/materials')}>材料管理</Button>
+          <Button
+            icon={<InboxOutlined />}
+            aria-label="采集收件箱"
+            title="采集收件箱"
+            onClick={() => navigate('/captures')}
+          />
           <Button onClick={() => navigate('/tasks')}>任务管理</Button>
           <Button onClick={() => navigate('/reviews')}>复习计划</Button>
           <Button
@@ -119,6 +127,7 @@ function App() {
             items: [
               { key: '/topics', label: '我的话题' },
               { key: '/materials', label: '材料管理' },
+              { key: '/captures', label: '采集收件箱' },
               { key: '/tasks', label: '任务管理' },
               { key: '/reviews', label: '复习计划' },
               { key: '/feedback', label: '反馈记录' },
@@ -161,6 +170,8 @@ function App() {
             <Route path="/topics/:topicId/materials/:materialId" element={<MaterialReader />} />
             <Route path="/topics/:topicId/exam" element={<ExamPage />} />
             <Route path="/materials" element={<MaterialManagement />} />
+            <Route path="/captures" element={<BrowserCaptures />} />
+            <Route path="/captures/:id" element={<BrowserCaptures />} />
             <Route path="/tasks" element={<TaskManagement />} />
             <Route path="/reviews" element={<ReviewPage />} />
             <Route path="/feedback" element={<FeedbackManagement />} />

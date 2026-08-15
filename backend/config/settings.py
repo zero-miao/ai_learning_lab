@@ -144,6 +144,7 @@ MAX_SUBTITLE_UPLOAD_BYTES = int(
 )
 
 REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [],
     "DEFAULT_PAGINATION_CLASS": "api.pagination.StandardPageNumberPagination",
     "PAGE_SIZE": 20,
 }

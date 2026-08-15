@@ -283,6 +283,64 @@ class MaterialDraftVersion(models.Model):
         return f"{self.draft} - 版本 {self.version_number}"
 
 
+class CapturedDocument(models.Model):
+    STATUS_CHOICES = [
+        ("receiving", "接收中"),
+        ("ready", "待整理"),
+        ("imported", "已导入"),
+        ("failed", "失败"),
+    ]
+
+    title = models.CharField(max_length=255, verbose_name="标题")
+    source_url = models.URLField(max_length=2000, blank=True, verbose_name="来源地址")
+    site_name = models.CharField(
+        max_length=255, blank=True, default="", verbose_name="站点名称"
+    )
+    adapter = models.CharField(max_length=100, verbose_name="采集适配器")
+    snapshot_json = models.JSONField(default=dict, verbose_name="文档快照")
+    markdown = models.TextField(blank=True, default="", verbose_name="Markdown 正文")
+    asset_manifest = models.JSONField(default=list, blank=True, verbose_name="资源清单")
+    warnings = models.JSONField(default=list, blank=True, verbose_name="采集告警")
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="receiving",
+        db_index=True,
+        verbose_name="状态",
+    )
+    draft = models.OneToOneField(
+        MaterialDraft,
+        related_name="source_capture",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        verbose_name="生成的草稿",
+    )
+    material = models.OneToOneField(
+        Material,
+        related_name="source_capture",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        verbose_name="导入的材料",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "浏览器采集"
+        verbose_name_plural = "浏览器采集"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["status", "-created_at"], name="capture_status_created_idx"
+            )
+        ]
+
+    def __str__(self):
+        return self.title
+
+
 class MaterialChunk(models.Model):
     material = models.ForeignKey(
         Material,

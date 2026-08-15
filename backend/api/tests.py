@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import connection
@@ -17,6 +18,7 @@ from .ai_gateway import AIGateway
 from .learning_context import select_material_context
 from .models import (
     AITask,
+    CapturedDocument,
     Concept,
     Highlight,
     Material,
@@ -108,6 +110,22 @@ class V2ErApiTests(TestCase):
         )
 
         self.assertEqual(update_response.status_code, 400)
+
+    def test_local_api_does_not_apply_session_csrf_authentication(self):
+        user = get_user_model().objects.create_user(
+            username="local-api-test", password="test-password"
+        )
+        csrf_client = APIClient(enforce_csrf_checks=True)
+        csrf_client.force_login(user)
+
+        response = csrf_client.post(
+            "/api/topics/",
+            {"title": "无需 CSRF Token 的话题"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(Topic.objects.filter(title="无需 CSRF Token 的话题").exists())
 
     @patch("api.services._validate_remote_url")
     @patch("api.services._download_pdf", return_value=b"%PDF-1.7 content")
@@ -668,6 +686,270 @@ class V2ErApiTests(TestCase):
         self.assertIn("继续编辑", listed.data["results"][0]["content"])
         self.assertEqual(invalid_topic.status_code, 200)
         self.assertEqual(invalid_topic.data["count"], 0)
+
+    def test_browser_capture_can_upload_image_and_import_material(self):
+        snapshot = {
+            "title": "登录后文档",
+            "source_url": "https://example.com/private",
+            "site_name": "Example",
+            "adapter": "generic-document",
+            "blocks": [
+                {"id": "h1", "type": "heading", "level": 1, "text": "第一章"},
+                {
+                    "id": "p1",
+                    "type": "paragraph",
+                    "spans": [{"text": "只有登录后才能看到的正文。"}],
+                },
+            ],
+            "warnings": [],
+        }
+        created = self.client.post(
+            "/api/browser-captures/", {"snapshot_json": snapshot}, format="json"
+        )
+        capture_id = created.data["id"]
+        completed = self.client.post(f"/api/browser-captures/{capture_id}/complete/")
+        imported = self.client.post(
+            f"/api/browser-captures/{capture_id}/import/",
+            {"topic": self.topic.id},
+            format="json",
+        )
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(completed.status_code, 200)
+        self.assertIn("# 第一章", completed.data["markdown"])
+        self.assertEqual(imported.status_code, 201)
+        material = Material.objects.get(pk=imported.data["material"])
+        self.assertEqual(material.clean_text, completed.data["markdown"])
+        self.assertEqual(material.media_meta["source_url"], snapshot["source_url"])
+        self.assertEqual(material.status, "summarizing")
+        self.assertTrue(material.chunks.exists())
+        self.assertTrue(
+            AITask.objects.filter(
+                task_type="briefing",
+                trigger_type="Material",
+                trigger_id=material.id,
+            ).exists()
+        )
+
+    def test_browser_capture_does_not_apply_session_csrf_authentication(self):
+        user = get_user_model().objects.create_user(
+            username="capture-test", password="test-password"
+        )
+        csrf_client = APIClient(enforce_csrf_checks=True)
+        csrf_client.force_login(user)
+
+        response = csrf_client.post(
+            "/api/browser-captures/",
+            {
+                "snapshot_json": {
+                    "title": "扩展采集",
+                    "blocks": [{"id": "p1", "type": "paragraph", "text": "正文"}],
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+    def test_browser_capture_draft_defers_material_and_moves_image_on_publish(self):
+        image = b"\x89PNG\r\n\x1a\ncapture-image"
+        digest = __import__("hashlib").sha256(image).hexdigest()
+        asset_id = f"sha256:{digest}"
+        snapshot = {
+            "title": "带图采集",
+            "source_url": "https://example.com/private",
+            "site_name": "Example",
+            "adapter": "generic-document",
+            "blocks": [
+                {"id": "p1", "type": "paragraph", "text": "正文"},
+                {
+                    "id": "i1",
+                    "type": "image",
+                    "asset_id": asset_id,
+                    "alt": "示意图",
+                },
+            ],
+        }
+
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            created = self.client.post(
+                "/api/browser-captures/", {"snapshot_json": snapshot}, format="json"
+            )
+            capture_id = created.data["id"]
+            uploaded = self.client.put(
+                f"/api/browser-captures/{capture_id}/assets/{asset_id}/",
+                {"file": SimpleUploadedFile("image.png", image, "image/png")},
+                format="multipart",
+            )
+            self.client.post(f"/api/browser-captures/{capture_id}/complete/")
+            baseline_materials = Material.objects.count()
+            drafted = self.client.post(
+                f"/api/browser-captures/{capture_id}/create-draft/",
+                {"topic": self.topic.id},
+                format="json",
+            )
+
+            self.assertEqual(uploaded.status_code, 201)
+            self.assertEqual(drafted.status_code, 201)
+            self.assertEqual(Material.objects.count(), baseline_materials)
+            self.assertEqual(AITask.objects.count(), 0)
+            draft_id = drafted.data["draft"]
+            capture_before_publish = CapturedDocument.objects.get(pk=capture_id)
+            edited_content = capture_before_publish.markdown.replace(
+                "正文", "用户编辑后的正文"
+            )
+            self.client.patch(
+                f"/api/material-drafts/{draft_id}/",
+                {"title": "编辑后的标题", "content": edited_content},
+                format="json",
+            )
+            published = self.client.post(f"/api/material-drafts/{draft_id}/publish/")
+            material = Material.objects.get(pk=published.data["material"]["id"])
+            capture = CapturedDocument.objects.get(pk=capture_id)
+
+            self.assertEqual(published.status_code, 201)
+            self.assertEqual(material.title, "编辑后的标题")
+            self.assertIn("用户编辑后的正文", material.clean_text)
+            self.assertEqual(capture.status, "imported")
+            self.assertEqual(capture.material, material)
+            self.assertIsNone(capture.draft)
+            self.assertIn(
+                f"/media/materials/images/{material.id}/", material.clean_text
+            )
+            self.assertTrue(
+                Path(media_root, capture.asset_manifest[0]["path"]).exists()
+            )
+
+    def test_browser_capture_draft_creation_is_idempotent_and_blocks_direct_import(
+        self,
+    ):
+        created = self.client.post(
+            "/api/browser-captures/",
+            {
+                "snapshot_json": {
+                    "title": "重复操作",
+                    "blocks": [{"id": "p1", "type": "paragraph", "text": "正文"}],
+                }
+            },
+            format="json",
+        )
+        capture_id = created.data["id"]
+        self.client.post(f"/api/browser-captures/{capture_id}/complete/")
+        baseline_materials = Material.objects.count()
+
+        first = self.client.post(
+            f"/api/browser-captures/{capture_id}/create-draft/",
+            {"topic": self.topic.id},
+            format="json",
+        )
+        second = self.client.post(
+            f"/api/browser-captures/{capture_id}/create-draft/",
+            {"topic": self.topic.id},
+            format="json",
+        )
+        imported = self.client.post(
+            f"/api/browser-captures/{capture_id}/import/",
+            {"topic": self.topic.id},
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.data["draft"], first.data["draft"])
+        self.assertEqual(MaterialDraft.objects.filter(title="重复操作").count(), 1)
+        self.assertEqual(imported.status_code, 409)
+        self.assertEqual(Material.objects.count(), baseline_materials)
+
+    def test_browser_capture_list_uses_summary_and_table_cells_are_escaped(self):
+        created = self.client.post(
+            "/api/browser-captures/",
+            {
+                "snapshot_json": {
+                    "title": "表格采集",
+                    "blocks": [
+                        {
+                            "id": "t1",
+                            "type": "table",
+                            "rows": [
+                                ["列|一", "列二"],
+                                ["第一行", "多行\n内容"],
+                            ],
+                        }
+                    ],
+                }
+            },
+            format="json",
+        )
+        capture_id = created.data["id"]
+        completed = self.client.post(f"/api/browser-captures/{capture_id}/complete/")
+        listed = self.client.get("/api/browser-captures/")
+        detail = self.client.get(f"/api/browser-captures/{capture_id}/")
+
+        self.assertEqual(completed.status_code, 200)
+        self.assertIn("| 列\\|一 | 列二 |", completed.data["markdown"])
+        self.assertIn("| 第一行 | 多行<br>内容 |", completed.data["markdown"])
+        self.assertNotIn("snapshot_json", listed.data["results"][0])
+        self.assertNotIn("markdown", listed.data["results"][0])
+        self.assertIn("snapshot_json", detail.data)
+        self.assertIn("markdown", detail.data)
+
+    def test_browser_capture_rejects_asset_with_wrong_digest(self):
+        snapshot = {
+            "title": "错误资源",
+            "blocks": [
+                {
+                    "id": "i1",
+                    "type": "image",
+                    "asset_id": "sha256:deadbeef",
+                    "alt": "图片",
+                }
+            ],
+        }
+        created = self.client.post(
+            "/api/browser-captures/", {"snapshot_json": snapshot}, format="json"
+        )
+
+        response = self.client.put(
+            f"/api/browser-captures/{created.data['id']}/assets/sha256:deadbeef/",
+            {
+                "file": SimpleUploadedFile(
+                    "image.png",
+                    b"\x89PNG\r\n\x1a\nwrong",
+                    "image/png",
+                )
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("asset_id", response.data["detail"])
+
+    def test_deleting_capture_draft_removes_capture_without_material(self):
+        created = self.client.post(
+            "/api/browser-captures/",
+            {
+                "snapshot_json": {
+                    "title": "稍后删除",
+                    "blocks": [{"id": "p1", "type": "paragraph", "text": "正文"}],
+                }
+            },
+            format="json",
+        )
+        capture_id = created.data["id"]
+        self.client.post(f"/api/browser-captures/{capture_id}/complete/")
+        drafted = self.client.post(
+            f"/api/browser-captures/{capture_id}/create-draft/",
+            {"topic": self.topic.id},
+            format="json",
+        )
+        baseline_materials = Material.objects.count()
+
+        response = self.client.delete(f"/api/material-drafts/{drafted.data['draft']}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(CapturedDocument.objects.filter(pk=capture_id).exists())
+        self.assertEqual(Material.objects.count(), baseline_materials)
+        self.assertEqual(AITask.objects.count(), 0)
 
     def test_publish_markdown_draft_creates_material_and_starts_briefing(self):
         draft = MaterialDraft.objects.create(

@@ -26,6 +26,7 @@ V2 不是独立新产品，也不是 V1 的缩减版重写，而是同一产品�
 `ai-learning-lab` 是本地单用户的 AI 辅助学习系统，覆盖材料导入、阅读理解、知识沉淀、掌握度评估、间隔复习、本地视频学习和自动补料。
 
 - 保持本地单体架构和 SQLite 持久化，不引入多用户鉴权、Celery、Redis、消息队列或复杂 Docker 编排。
+- REST API 不使用 DRF SessionAuthentication，避免同一主机登录 Django Admin 后触发 CSRF 校验；Django Admin 继续使用独立的 Session 登录与 CSRF 保护。
 - 允许在可信本地局域网内访问，但不提供用户隔离；不得通过端口映射或公网隧道暴露服务。
 - 局域网启动统一使用 `./scripts/start-lan.sh`；脚本负责加载 Node 20、分别启动 Django Web、`run_ai_worker` 和 Vite，并输出 LAN URL，不要求调用者预先切换 Node 版本。AI worker 不得重新绑定到 `runserver` 的 `AppConfig.ready()`。
 - 不以公网部署、云备份、同步协作为目标。前端正式支持电脑浏览器和手机浏览器，采用同一套 React 代码与 API，通过响应式布局提供两种界面。
@@ -60,6 +61,7 @@ V2 不是独立新产品，也不是 V1 的缩减版重写，而是同一产品�
 | `MaterialDraftVersion` | MaterialDraft 的不可变历史快照；支持按需查看，并可保留当前内容后恢复为新的当前版本。 |
 | `TopicMaterial` | Topic 与 Material 的关联语境，保存分类、相关度、导入理由和软删除状态。 |
 | `MaterialRecommendation` | 自动补料候选及人工采纳状态。候选不会直接成为 Topic 材料。 |
+| `CapturedDocument` | 浏览器扩展提交的临时文档快照、Markdown、资源清单和告警；确认前不创建正式材料。 |
 | `MaterialChunk` | 正文 offset；视频额外保存真实时间区间。 |
 | `MaterialTextLocator` | Concept、Highlight、Question 共用的原文定位器，通过三个可空外键和“恰有一个实体”约束保证完整性，同时承载文字和媒体时间坐标。 |
 | `Session` / `SessionMessage` | 阅读问答和 Topic 讨论的统一多轮会话。 |
@@ -147,7 +149,7 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 - 全站支持随时提交使用反馈，反馈包含类型、描述、页面和设备上下文，并可在 Django Admin 中筛选和跟进。
 - 全站管理助手支持普通对话、以 Markdown 表格列出 Topic 学习目标/范围，以及确认后幂等执行批量创建/更新；缺字段项不会阻塞其他变更，执行过程复用 AITask 的排队、失败和重试能力。
 - 数据库中真实使用反馈 #1-#35、#37、#39-#41 已完成。补料与阅读问答默认排除 wikipedia.org、weread.qq.com、douban.com 和 dedao.cn；学习阅读页通过固定阅读工具栏提供 Markdown 标题目录；远程文本型 PDF 已接入 Firecrawl AnyDoc 本地解析。Markdown 草稿采用 Vditor 全屏沉浸写作和 5 秒自动保存，支持常用 Markdown 快捷语法、固定工具栏、`Ctrl+S` / `Cmd+S` 主动保存、深色编辑主题、可收起的浮动目录及原生表格行列操作；发布、删除与继续编辑并列在草稿列表。超过 10 分钟未保存后的首次改动自动生成历史版本，并支持只读查看与恢复。
-- 反馈 #40 的网页正文图片本地化和 #41 的反馈记录筛选页已通过用户验收。反馈 #42（飞书文档）与 #43（登录态浏览器采集）留待下一轮开发。
+- 反馈 #40 的网页正文图片本地化和 #41 的反馈记录筛选页已通过用户验收。反馈 #42（飞书文档）与 #43（登录态浏览器采集）已合并为“采集当前页面”能力；复杂飞书文档的表格、正文边界、块顺序和折叠恢复已通过真实页面技术验收，详见第 5 节。
 - 手机端长按划词创建概念、高亮和问答已在真实手机浏览器验收通过；触控选区通过 `selectionchange + touchend` 多阶段捕获，底部操作栏在原生选区折叠时保持可操作。
 - `0041_harden_locator_ownership` 会把有效 Locator 迁移到真实实体外键，删除指向不存在实体的 Locator，并清理无 Topic 归属的 Question/Highlight 及其独占 Session；已在正式数据库副本上验证迁移，不会修改共享 Material。
 
@@ -155,11 +157,42 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 
 - 手机浏览器端响应式实现已覆盖全局导航、Topic、材料、阅读与视频、标注与问答、概念图、评估、复习、任务、设置、反馈和管理助手；自动化窄屏巡检未发现页面级横向溢出，真实手机长按划词链路已通过。尚需在真实手机 Safari/Chrome 上完成软键盘、横竖屏切换、视频播放和完整学习闭环验收后关闭该待办。
 - 反馈 #38 对应 Scribd 受控预览页，该页面未提供完整 PDF 文件，无法恢复正文。系统现会明确提示改用原始 PDF 直链或 Markdown；仍需用户提供可访问原文件后完成该材料的重新导入验收。
-- 登录态浏览器采集尚未实现，反馈 #42/#43 留待下一轮开发。
+- 登录态浏览器采集基础链路和复杂飞书文档已完成技术验收与用户预览验收。
 - SQLite 并发与幂等风险本轮明确暂缓：`select_for_update` 在 SQLite 上没有完整行锁语义，草稿发布、推荐采纳和活跃任务复用在并发重复请求下仍可能重复创建。当前单用户、单 worker 运行约束降低了概率，但没有消除风险。扩展到多进程或多人前必须迁移 PostgreSQL，并为活跃任务、草稿发布和推荐采纳增加数据库唯一约束/幂等键。
-- 除真实手机专项验收、等待原文件的反馈 #38、待开发的反馈 #42/#43 和上述明确暂缓的 SQLite 并发风险外，当前 V2-alpha 已知功能待办已完成。
+- 除真实手机专项验收、等待原文件的反馈 #38 和上述明确暂缓的 SQLite 并发风险外，当前 V2-alpha 其他已知功能待办已完成。
 
-## 5. 验证证据
+## 5. 浏览器采集交接（2026-08-15）
+
+### 已实现
+
+- 设计文档为 [docs/browser_capture_design.md](docs/browser_capture_design.md)。当前工作区已新增 Django `CapturedDocument`、迁移 `0042_captureddocument`、浏览器采集 API、收件箱/预览 UI，以及 `browser-extension/` 下的 Manifest V3 扩展。
+- 扩展直接连接 `http://127.0.0.1:8000`，支持自动、文章正文、完整文档、选区和可见内容。采集 API 不使用 Session Authentication，扩展请求不携带 Cookie，因此本地提交不触发 CSRF；网页图片仍在页面/扩展登录态下读取。
+- 飞书适配器使用 `.bear-web-x-container` 滚动，并在多个 `.root-render-unit-container` 中选择包含可见正文的根节点；最多扫描三轮，连续一轮无新增后收敛，按最外层块 ID 和视觉位置排序。文档少于 500 字直接失败，不生成首屏残片。
+- 飞书表格按 `.docx-table-block` 整体解析，排除单元格子块，并在主扫描后对表格顶部、中部和底部补扫，合并虚拟渲染的非空单元格。Markdown 转换会转义管道符和换行。
+- 图片在滚动时即时读取 Blob/Data URL，按 SHA-256 去重并上传。页面读取和 service worker 下载均有超时；SVG、HTML 占位图等会告警并跳过，不再中止整篇采集。
+- 折叠块以稳定标题文本跟踪，`data-record-id` 和数字块 ID 只作回退；采集结束从顶部回扫并恢复原折叠状态。
+- 长文真实验收记录 #21（“保险小白福音｜一文带你入门保险”）成功得到 1,345 块、42,111 字、87 个图片引用、86 个去重本地资源；01 到 09 章节顺序完整，资源文件无缺失。该记录可继续用于长文回归。
+
+### 复杂飞书文档修复与验收
+
+复现文档：
+
+- `https://bytedance.larkoffice.com/docx/ZVpFdpSsroYMY8xnEBnckDb6nag`
+- 修复前记录 #24 有 305 块，其中表格单元格重复成散落段落，末尾混入目录、头像、SVG 占位图和空列表。
+- 修复后记录 #25 有 142 个语义块、27 个标题、6 张表格和 9,884 字符 Markdown。六张表格分别为 7×4、8×7、6×2、5×4、6×3、6×4，所有单元格均完整。
+- 标题顺序完整覆盖 `1`、`1.1` 至 `1.6`、`2`、`2.1` 至 `2.6`、`3`、`3.1` 至 `3.6`、`4`、`4.1` 至 `4.3`、`5`、`6`。
+- 最后八块依次为学习阶段表格、第 6 节标题及真实正文，末块为“d.关系”；不再包含目录、头像、back-ref、SVG 或空列表。
+- 人为折叠“2.AI 会如何重塑人类社会”后验收：采集前 2 个 folded，采集展开 2 个区块，结束后仍为 2 个 folded，且无恢复失败告警。
+
+### 当前验证状态
+
+- `npm run build`（`browser-extension/`）通过。
+- `git diff --check` 通过。
+- `./.venv/bin/python backend/manage.py test api.tests.V2ErApiTests` 共 77 项通过。
+- 前端 build/lint、Ruff、Django check、迁移检查均通过。
+- 当前 `dist` 已通过外部 Chrome 真实 DOM 注入验收；用户已在重新加载扩展后完成最终预览验收。
+
+## 6. 验证证据
 
 标准回归命令：
 
@@ -176,7 +209,7 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 
 当前自动化基线：
 
-- 后端 `manage.py test api` 共 69 项通过，新增覆盖网页图片下载与本地媒体访问、清洗过程图片占位保护、失败重导入保留旧图片及材料删除资源清理；原 Locator/Session 删除闭环、Topic 查询量、任务状态、长材料、补料、上传、系统配置、管理助手、草稿、问答、TTS、反馈和视频链路测试继续通过。
+- 后端 `api.tests.V2ErApiTests` 共 77 项通过，新增覆盖本地 API Session/CSRF 边界、浏览器采集、资源上传校验、直接导入、草稿编辑后发布、重复建草稿幂等、列表摘要和表格转义；原网页图片、Locator/Session 删除闭环、任务状态、长材料、补料、系统配置、草稿、问答、TTS、反馈和视频链路测试继续通过。
 - Playwright 浏览器回归使用独立 `/tmp/ai-learning-lab-browser-regression.sqlite3`，自动迁移和写入确定性种子，不读写真实数据库；覆盖桌面 Topic -> 长材料阅读、Markdown 草稿自动保存、反馈状态筛选，以及 390px 下 Topic、材料、任务、复习、反馈、设置和阅读页的页面级横向溢出。
 - 正式数据库副本中原最大 Topic 详情由约 713 KB / 54 次查询降至约 40 KB / 10 次查询；所有现有 Topic 详情最多 12 次查询。
 - `ruff format --check backend`、`ruff check backend`、`manage.py check`、`makemigrations --check --dry-run`、前端 build/lint 均通过。
@@ -214,7 +247,7 @@ V2 已移除 `AIResponse`、`ConceptAnchor`、`DiscussionMessage`。禁止重新
 - Crawl4AI Docker 镜像及配置已移除。补料正文统一复用带初始 URL、DNS 和重定向私网校验的远程材料提取服务，避免两套抓取实现和 SSRF 边界分叉。
 - Edge TTS 是在线服务，正文会发送给微软朗读接口；当前不提供 Web Speech 回退。
 
-## 6. 接手守则
+## 7. 接手守则
 
 1. 不覆盖或回退工作区中来源不明的未提交变更。
 2. 判断功能是否可删除时，先对照 V1 能力；V2 迁移本身不是下线理由。
