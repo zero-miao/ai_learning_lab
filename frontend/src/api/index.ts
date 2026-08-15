@@ -647,5 +647,12 @@ export const retryAITask = (id: number) =>
 export const createUserFeedback = (
   data: Pick<UserFeedback, 'category' | 'feature' | 'description' | 'page_url' | 'page_title' | 'user_agent' | 'context'>,
 ) => api.post<UserFeedback>('feedback/', data);
+export const getUserFeedback = (
+  params?: PaginationParams & {
+    status?: UserFeedback['status'];
+    category?: FeedbackCategory;
+    feature?: FeedbackFeature;
+  },
+) => api.get<PaginatedResponse<UserFeedback>>('feedback/', { params });
 
 export default api;

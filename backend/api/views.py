@@ -493,6 +493,10 @@ def _delete_material_files(material, material_id):
         path = voice_data.get("path") if isinstance(voice_data, dict) else None
         if path:
             relative_paths.add(str(path))
+    for image_data in media_meta.get("images", []):
+        path = image_data.get("path") if isinstance(image_data, dict) else None
+        if path:
+            relative_paths.add(str(path))
 
     for relative_path in relative_paths:
         default_storage.delete(relative_path)
@@ -501,6 +505,9 @@ def _delete_material_files(material, material_id):
     tts_directory = (media_root / "materials" / "tts" / str(material_id)).resolve()
     if tts_directory.is_relative_to(media_root):
         shutil.rmtree(tts_directory, ignore_errors=True)
+    image_directory = (media_root / "materials" / "images" / str(material_id)).resolve()
+    if image_directory.is_relative_to(media_root):
+        shutil.rmtree(image_directory, ignore_errors=True)
 
 
 class TopicViewSet(viewsets.ModelViewSet):

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { FormOutlined } from '@ant-design/icons';
+import { CommentOutlined, FormOutlined } from '@ant-design/icons';
 import { Button, Form, Input, Modal, Select, Typography, message } from 'antd';
+import { useNavigate } from 'react-router-dom';
 import { createUserFeedback } from '../../api';
 import type { FeedbackCategory, FeedbackFeature } from '../../api';
 import './styles.css';
@@ -35,6 +36,7 @@ function inferFeature(pathname: string): FeedbackFeature {
   if (pathname.startsWith('/materials')) return 'material_management';
   if (pathname.startsWith('/reviews')) return 'review';
   if (pathname.startsWith('/tasks')) return 'task_management';
+  if (pathname.startsWith('/feedback')) return 'feedback';
   if (pathname.startsWith('/settings')) return 'system_settings';
   return 'other';
 }
@@ -61,6 +63,7 @@ function loadDraft(): FeedbackDraft {
 }
 
 export default function FeedbackButton() {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [draft, setDraft] = useState<FeedbackDraft>(loadDraft);
@@ -134,6 +137,17 @@ export default function FeedbackButton() {
         <Typography.Paragraph type="secondary">
           当前页面和设备信息会自动附上，便于后续定位问题。
         </Typography.Paragraph>
+        <Button
+          type="link"
+          icon={<CommentOutlined />}
+          style={{ paddingInline: 0, marginBottom: 8 }}
+          onClick={() => {
+            setOpen(false);
+            navigate('/feedback');
+          }}
+        >
+          查看反馈记录
+        </Button>
         <Form layout="vertical">
           <Form.Item label="反馈类型" required>
             <Select

@@ -109,12 +109,15 @@ class V2ErApiTests(TestCase):
 
         self.assertEqual(update_response.status_code, 400)
 
+    @patch("api.services._validate_remote_url")
     @patch("api.services._download_pdf", return_value=b"%PDF-1.7 content")
     @patch(
         "api.services.anydoc.to_markdown_bytes",
         return_value="# PDF 标题\n\n提取后的正文",
     )
-    def test_pdf_url_uses_anydoc_extraction(self, to_markdown, download_pdf):
+    def test_pdf_url_uses_anydoc_extraction(
+        self, to_markdown, download_pdf, _validate_url
+    ):
         material = Material.objects.create(
             title="PDF 材料",
             media_type="web_page",
@@ -128,6 +131,95 @@ class V2ErApiTests(TestCase):
         self.assertEqual(material.error, "")
         download_pdf.assert_called_once_with(material.media_uri)
         to_markdown.assert_called_once_with(b"%PDF-1.7 content", "pdf")
+
+    @patch("api.services._validate_remote_url")
+    @patch("api.services._download_remote_resource")
+    def test_web_import_localizes_supported_images(self, download, _validate_url):
+        page_url = "https://example.com/guide"
+        image_url = "https://example.com/assets/diagram.png"
+        html = b"""
+        <html><body><article>
+        <h1>Architecture guide</h1>
+        <p>This guide contains enough useful article content for extraction.</p>
+        <img src="/assets/diagram.png" alt="System diagram">
+        <p>The diagram explains the complete learning system architecture.</p>
+        <img src="/assets/diagram.png" alt="Architecture overview">
+        </article></body></html>
+        """
+
+        def download_resource(url, **_kwargs):
+            if url == page_url:
+                return html, page_url, "text/html"
+            if url == image_url:
+                return b"\x89PNG\r\n\x1a\nimage-data", image_url, "image/png"
+            raise AssertionError(f"unexpected URL: {url}")
+
+        download.side_effect = download_resource
+        material = Material.objects.create(
+            title="带图网页",
+            media_type="web_page",
+            media_uri=page_url,
+        )
+
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            MaterialService.process_material(material)
+            material.refresh_from_db()
+            image = material.media_meta["images"][0]
+            image_path = Path(media_root) / image["path"]
+
+            self.assertTrue(image_path.exists())
+            self.assertIn(f"/media/{image['path']}", material.raw_text)
+            self.assertNotIn(image_url, material.raw_text)
+            self.assertIn("![System diagram]", material.raw_text)
+            self.assertIn("![Architecture overview]", material.raw_text)
+            self.assertEqual(image["source_url"], image_url)
+            self.assertEqual(image["content_type"], "image/png")
+            self.assertEqual(len(material.media_meta["images"]), 1)
+            self.assertEqual(download.call_count, 2)
+            response = self.client.get(f"/media/{image['path']}")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                b"".join(response.streaming_content),
+                b"\x89PNG\r\n\x1a\nimage-data",
+            )
+
+    @patch(
+        "api.tasks.BaseTask._call_llm",
+        return_value=(
+            "# Clean title\n\nAILAB_IMAGE_TOKEN_0000\n\nCleaned explanation."
+        ),
+    )
+    def test_clean_text_preserves_localized_markdown_images(self, _call_llm):
+        material = Material.objects.create(
+            title="带图材料",
+            media_type="web_page",
+            raw_text=(
+                "# Raw title\n\n"
+                "![System diagram](/media/materials/images/1/diagram.png)\n\n"
+                "Raw explanation."
+            ),
+            status="pending",
+        )
+        task, _ = enqueue_or_reuse(
+            "clean_text",
+            trigger_type="Material",
+            trigger_id=material.id,
+        )
+
+        TaskRegistry.get_task_class(task.task_type)(
+            task_id=task.id,
+            task_data=task.task_data,
+            trigger_type=task.trigger_type,
+            trigger_id=task.trigger_id,
+            model=task.model,
+        ).run()
+
+        material.refresh_from_db()
+        self.assertIn(
+            "![System diagram](/media/materials/images/1/diagram.png)",
+            material.clean_text,
+        )
+        self.assertNotIn("AILAB_IMAGE_TOKEN", material.clean_text)
 
     def test_restricted_document_preview_fails_with_actionable_error(self):
         material = Material.objects.create(
@@ -183,6 +275,36 @@ class V2ErApiTests(TestCase):
         self.assertEqual(material.clean_text, "旧正文")
         self.assertEqual(material.digest, "旧摘要")
         self.assertTrue(MaterialChunk.objects.filter(pk=chunk.pk).exists())
+
+    def test_failed_web_reimport_preserves_existing_image_files(self):
+        material = Material.objects.create(
+            title="已有带图网页材料",
+            media_type="web_page",
+            media_uri="file:///tmp/private.html",
+            raw_text="旧原文",
+            clean_text="旧正文",
+            status="ready",
+            media_meta={
+                "images": [
+                    {
+                        "source_url": "https://example.com/old.png",
+                        "path": "materials/images/old.png",
+                        "content_type": "image/png",
+                        "size": 4,
+                    }
+                ]
+            },
+        )
+
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            image_path = Path(media_root) / "materials/images/old.png"
+            image_path.parent.mkdir(parents=True)
+            image_path.write_bytes(b"data")
+
+            with self.assertRaises(RuntimeError):
+                MaterialService.process_material(material)
+
+            self.assertTrue(image_path.exists())
 
     def test_reimport_rejects_material_with_any_annotation(self):
         for entity_type in ("concept", "highlight", "question"):
@@ -1532,6 +1654,14 @@ class V2ErApiTests(TestCase):
         self.material.media_uri = "materials/source.mp4"
         self.material.media_meta = {
             "subtitle_uri": "materials/source.srt",
+            "images": [
+                {
+                    "source_url": "https://example.com/diagram.png",
+                    "path": f"materials/images/{self.material.id}/diagram.png",
+                    "content_type": "image/png",
+                    "size": 4,
+                }
+            ],
             "tts": {
                 "voices": {
                     "voice": {
@@ -1558,6 +1688,11 @@ class V2ErApiTests(TestCase):
                 / "tts"
                 / str(self.material.id)
                 / "voice.mp3",
+                Path(media_root)
+                / "materials"
+                / "images"
+                / str(self.material.id)
+                / "diagram.png",
             ]
             for path in paths:
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -1570,6 +1705,11 @@ class V2ErApiTests(TestCase):
             self.assertFalse(
                 (
                     Path(media_root) / "materials" / "tts" / str(self.material.id)
+                ).exists()
+            )
+            self.assertFalse(
+                (
+                    Path(media_root) / "materials" / "images" / str(self.material.id)
                 ).exists()
             )
 

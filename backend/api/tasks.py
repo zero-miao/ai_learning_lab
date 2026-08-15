@@ -539,6 +539,12 @@ class CleanTextTask(BaseTask):
             if not source_text:
                 raise ValueError("没有可用的文本内容进行清洗。")
             else:
+                from .services import (
+                    protect_markdown_images,
+                    restore_markdown_images,
+                )
+
+                source_text, protected_images = protect_markdown_images(source_text)
                 # 改进的分段逻辑：按段落分组，避免重叠导致的内容重复
                 max_chunk_size = 8000
                 paragraphs = source_text.split("\n")
@@ -598,7 +604,8 @@ class CleanTextTask(BaseTask):
                                 "1. 去除噪音，保留核心内容、标题层级和段落结构。\n"
                                 "2. 对于视频转录稿，修正 ASR 错误，添加标点，按逻辑分段。\n"
                                 "3. 重要：我会提供【上文参考】和【下文参考】以帮助你理解上下文，防止断章取义。\n"
-                                "4. 禁令：仅输出【目标文本】清洗后的结果，严禁包含参考信息的内容，严禁包含任何解释或开场白。"
+                                "4. `AILAB_IMAGE_TOKEN_` 开头的图片占位符必须原样保留，不能删除、改写或重复。\n"
+                                "5. 禁令：仅输出【目标文本】清洗后的结果，严禁包含参考信息的内容，严禁包含任何解释或开场白。"
                             ),
                         },
                         {
@@ -616,6 +623,10 @@ class CleanTextTask(BaseTask):
 
                 # 合并清洗后的结果，尝试去重重叠部分（简单合并或交给 AI 处理合并，这里采用简单换行合并）
                 clean_content = "\n\n".join(clean_parts)
+                clean_content = restore_markdown_images(
+                    clean_content,
+                    protected_images,
+                )
 
                 with transaction.atomic():
                     material.clean_text = clean_content
