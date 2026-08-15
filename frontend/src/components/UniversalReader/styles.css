@@ -47,6 +47,15 @@
   padding-inline: clamp(20px, 3vw, 48px);
 }
 
+.universal-reader__content img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin: 24px auto;
+  object-fit: contain;
+}
+
 .universal-reader__header {
   display: flex;
   align-items: flex-start;

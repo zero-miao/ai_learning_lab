@@ -11,6 +11,7 @@ from api.models import (
     SystemConfiguration,
     Topic,
     TopicMaterial,
+    UserFeedback,
 )
 
 
@@ -81,6 +82,14 @@ class Command(BaseCommand):
         MaterialTextLocator.objects.create(concept=concept, **locator_defaults)
         MaterialTextLocator.objects.create(highlight=highlight, **locator_defaults)
         ReviewRecord.objects.create(topic=topic, due_at=timezone.now())
+        UserFeedback.objects.create(
+            category="usability",
+            feature="material_reader",
+            description="浏览器回归反馈：阅读页需要稳定保留当前位置。",
+            page_url=f"http://localhost:5173/topics/{topic.id}/materials/{material.id}",
+            page_title="浏览器回归材料",
+            status="new",
+        )
         self.stdout.write(
             self.style.SUCCESS(f"Seeded topic={topic.id}, material={material.id}.")
         )

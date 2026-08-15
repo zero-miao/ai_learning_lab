@@ -1,6 +1,11 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { BgColorsOutlined, MenuOutlined, SettingOutlined } from '@ant-design/icons';
+import {
+  BgColorsOutlined,
+  CommentOutlined,
+  MenuOutlined,
+  SettingOutlined,
+} from '@ant-design/icons';
 import { Button, ConfigProvider, Dropdown, Layout, Popover, Space, Spin, Typography, theme } from 'antd';
 import {
   siteThemeOptions,
@@ -20,6 +25,7 @@ const MaterialManagement = lazy(() => import('./pages/MaterialManagement'));
 const ExamPage = lazy(() => import('./pages/Exam'));
 const ReviewPage = lazy(() => import('./pages/Review'));
 const SystemSettings = lazy(() => import('./pages/SystemSettings'));
+const FeedbackManagement = lazy(() => import('./pages/FeedbackManagement'));
 
 function App() {
   const navigate = useNavigate();
@@ -60,6 +66,12 @@ function App() {
           <Button onClick={() => navigate('/materials')}>材料管理</Button>
           <Button onClick={() => navigate('/tasks')}>任务管理</Button>
           <Button onClick={() => navigate('/reviews')}>复习计划</Button>
+          <Button
+            icon={<CommentOutlined />}
+            aria-label="查看反馈记录"
+            title="查看反馈记录"
+            onClick={() => navigate('/feedback')}
+          />
           <Button
             icon={<SettingOutlined />}
             aria-label="系统设置"
@@ -109,6 +121,7 @@ function App() {
               { key: '/materials', label: '材料管理' },
               { key: '/tasks', label: '任务管理' },
               { key: '/reviews', label: '复习计划' },
+              { key: '/feedback', label: '反馈记录' },
               { key: '/settings', label: '系统设置' },
               {
                 key: 'theme',
@@ -150,6 +163,7 @@ function App() {
             <Route path="/materials" element={<MaterialManagement />} />
             <Route path="/tasks" element={<TaskManagement />} />
             <Route path="/reviews" element={<ReviewPage />} />
+            <Route path="/feedback" element={<FeedbackManagement />} />
             <Route path="/settings" element={<SystemSettings />} />
           </Routes>
         </Suspense>

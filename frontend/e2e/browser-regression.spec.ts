@@ -58,6 +58,26 @@ test('Markdown 草稿停止输入后自动保存', async ({ page }) => {
   );
 });
 
+test('反馈记录支持按状态过滤', async ({ page }) => {
+  await page.goto('/feedback');
+  await expect(page.getByRole('heading', { name: '反馈记录' })).toBeVisible();
+  await expect(page.getByText('浏览器回归反馈：阅读页需要稳定保留当前位置。'))
+    .toBeVisible();
+
+  await page.getByLabel('反馈状态').click();
+  await page.locator('.ant-select-dropdown')
+    .getByText('已解决', { exact: true })
+    .click();
+  await expect(page.getByText('没有符合条件的反馈')).toBeVisible();
+
+  await page.getByLabel('反馈状态').click();
+  await page.locator('.ant-select-dropdown')
+    .getByText('待处理', { exact: true })
+    .click();
+  await expect(page.getByText('浏览器回归反馈：阅读页需要稳定保留当前位置。'))
+    .toBeVisible();
+});
+
 test('390px 手机视口关键页面无页面级横向溢出', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   for (const path of [
@@ -66,6 +86,7 @@ test('390px 手机视口关键页面无页面级横向溢出', async ({ page }) 
     '/materials',
     '/tasks',
     '/reviews',
+    '/feedback',
     '/settings',
     '/topics/1/materials/1',
   ]) {
