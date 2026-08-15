@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 from django.db import transaction
 
 from .ai_gateway import AIGateway
+from .learning_context import select_material_context, split_text
 
 
 def _supplement_context(task):
@@ -35,7 +36,7 @@ def _supplement_context(task):
         context = f"概念：{trigger.title}\n定义：{trigger.definition or '待补充'}"
     elif trigger_type == "Question":
         locator = MaterialTextLocator.objects.filter(
-            entity_type="question", entity_id=trigger.id, topic=topic
+            question=trigger, topic=topic
         ).first()
         context = (
             f"问题：{trigger.question_text}\n"
@@ -43,7 +44,7 @@ def _supplement_context(task):
         )
     elif trigger_type == "Highlight":
         locator = MaterialTextLocator.objects.filter(
-            entity_type="highlight", entity_id=trigger.id, topic=topic
+            highlight=trigger, topic=topic
         ).first()
         if locator is None:
             raise ValueError("高亮不属于补料主题。")
@@ -283,6 +284,14 @@ class BaseTask(metaclass=TaskRegistry):
             return None
         return model_cls.objects.filter(pk=self.trigger_id).first()
 
+    def _ensure_active(self):
+        from .models import AITask
+        from .task_service import TaskCancelled
+
+        task = AITask.objects.filter(pk=self.task_id).only("status").first()
+        if task is None or task.status == "cancelled":
+            raise TaskCancelled()
+
     def _call_llm(
         self,
         messages: List[Dict[str, str]],
@@ -290,8 +299,10 @@ class BaseTask(metaclass=TaskRegistry):
         model: Optional[str] = None,
     ) -> str:
         """调用 LLM 并记录上下文"""
+        self._ensure_active()
         provider = AIGateway.get_provider(model or self.model)
         response = provider.generate_response(messages, response_format=response_format)
+        self._ensure_active()
 
         # 记录上下文
         self._append_context(messages)
@@ -357,18 +368,63 @@ class BriefingTask(BaseTask):
         if not material.clean_text:
             raise ValueError("材料正文不存在，无法生成阅读前导。")
 
-        messages = [
-            {
-                "role": "system",
-                "content": "你是一个专业的学习助手。请为这份学习材料生成一份快速熟悉指南，包含核心问题、关键词和阅读建议。请务必覆盖整份材料的核心要点，不要遗漏重要信息。",
-            },
-            {
-                "role": "user",
-                "content": f"学习材料内容（已清洗）：\n{material.clean_text[:15000]}",
-            },
-        ]
+        source_chunks = split_text(material.clean_text)
+        summaries = []
+        for index, chunk in enumerate(source_chunks):
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是学习材料摘要助手。提取当前片段的核心问题、关键概念、"
+                        "论证关系和结论，不遗漏会影响理解的信息。只总结给定片段。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"材料《{material.title}》第 {index + 1}/{len(source_chunks)} "
+                        f"部分：\n{chunk}"
+                    ),
+                },
+            ]
+            summaries.append(self._call_llm(messages).strip())
 
-        digest = self._call_llm(messages)
+        while len(summaries) > 1:
+            summary_batches = split_text("\n\n".join(summaries))
+            next_level = []
+            for batch in summary_batches:
+                next_level.append(
+                    self._call_llm(
+                        [
+                            {
+                                "role": "system",
+                                "content": (
+                                    "将分段摘要合并为完整的快速熟悉指南，包含核心问题、"
+                                    "关键词、主要结论和阅读建议。去除重复，但不能遗漏后段信息。"
+                                ),
+                            },
+                            {"role": "user", "content": batch},
+                        ]
+                    ).strip()
+                )
+            if len(next_level) >= len(summaries):
+                summaries = [
+                    self._call_llm(
+                        [
+                            {
+                                "role": "system",
+                                "content": "合并以下摘要，保留全部核心信息。",
+                            },
+                            {
+                                "role": "user",
+                                "content": "\n\n".join(next_level),
+                            },
+                        ]
+                    ).strip()
+                ]
+            else:
+                summaries = next_level
+        digest = summaries[0]
         material.digest = digest
         material.status = "generating_audio"
         material.save(update_fields=["digest", "status", "updated_at"])
@@ -401,6 +457,7 @@ class EdgeTTSTask(BaseTask):
         tts_meta, successful = synthesize_material(
             material, force=bool(self.task_data.get("force"))
         )
+        self._ensure_active()
         if successful == 0:
             raise RuntimeError("所有配置音色均生成失败。")
 
@@ -602,15 +659,7 @@ class AnswerQuestionTask(BaseTask):
             raise ValueError("问题不存在。")
 
         session = question.session
-        context = (
-            session.context_material.clean_text if session.context_material else ""
-        ) or self.task_data.get("context", "")
-        if not context:
-            raise ValueError("问题缺少材料上下文。")
-
-        locator = MaterialTextLocator.objects.filter(
-            entity_type="question", entity_id=question.id
-        ).first()
+        locator = MaterialTextLocator.objects.filter(question=question).first()
         source_text = (
             locator.source_text
             if locator
@@ -623,6 +672,17 @@ class AnswerQuestionTask(BaseTask):
         latest_question = (
             user_message.msg_content if user_message else question.question_text
         )
+        context = (
+            select_material_context(
+                session.context_material,
+                latest_question,
+                source_text,
+            )
+            if session.context_material
+            else self.task_data.get("context", "")
+        )
+        if not context:
+            raise ValueError("问题缺少材料上下文。")
         web_context = ""
         try:
             from .supplement_service import (
@@ -1449,6 +1509,7 @@ class ASRTask(BaseTask):
         material.save(update_fields=["status"])
 
         result = process_video(material, self.model)
+        self._ensure_active()
 
         # 视频转录后，触发 AI 清洗以优化排版和修正 ASR 错误
         from .task_service import enqueue_or_reuse

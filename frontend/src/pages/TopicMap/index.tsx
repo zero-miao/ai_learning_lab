@@ -4,6 +4,7 @@ import { Button, Card, Drawer, Empty, Form, Input, List, Modal, Popconfirm, Sele
 import { ArrowLeftOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import { createConceptRelation, deleteConcept, deleteConceptRelation, getTopic, updateConcept, updateConceptRelation } from '../../api';
 import type { Concept, ConceptRelation, Topic } from '../../api';
+import { ConceptEditorModal } from '../../components/AnnotationEditors';
 
 const MAP_WIDTH = 960;
 const MAP_HEIGHT = 560;
@@ -27,7 +28,6 @@ const TopicMap: React.FC = () => {
   const [editOpen, setEditOpen] = useState(false);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [relationForm] = Form.useForm<Pick<ConceptRelation, 'from_concept' | 'to_concept' | 'relation_type' | 'description'>>();
-  const [conceptForm] = Form.useForm<Partial<Concept>>();
   const load = useCallback(async () => {
     if (!id) return;
     const response = await getTopic(Number(id));
@@ -94,7 +94,7 @@ const TopicMap: React.FC = () => {
         </div> : <Empty description="从阅读页标记概念后，思维导图会在这里生长。" />}
       </Card>
     </Space>
-    <Drawer title="概念详情" open={Boolean(selected)} onClose={() => setSelected(null)} width={440} extra={selected && <Space><Button icon={<EditOutlined />} onClick={() => { conceptForm.setFieldsValue(selected); setEditOpen(true); }}>编辑</Button><Popconfirm title="删除概念？" onConfirm={() => void deleteConcept(selected.id).then(load)}><Button danger icon={<DeleteOutlined />} /></Popconfirm></Space>}>
+    <Drawer title="概念详情" open={Boolean(selected)} onClose={() => setSelected(null)} width={440} extra={selected && <Space><Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>编辑</Button><Popconfirm title="删除概念？" onConfirm={() => void deleteConcept(selected.id).then(load)}><Button danger icon={<DeleteOutlined />} /></Popconfirm></Space>}>
       {selected && <Space direction="vertical" style={{ display: 'flex' }}><Typography.Title level={3}>{selected.title}</Typography.Title><Typography.Paragraph>{selected.definition || '待生成定义'}</Typography.Paragraph><List header="材料来源" dataSource={selected.locators} renderItem={(locator) => <List.Item actions={[<Button key="source" type="link" onClick={() => navigate(`/topics/${topic.id}/materials/${locator.material}?locator=${locator.id}`)}>查看原文</Button>]}>{locator.source_text}</List.Item>} /></Space>}
     </Drawer>
     <Modal title={relation ? '编辑概念关系' : '建立概念关系'} open={relationOpen} onCancel={() => setRelationOpen(false)} onOk={() => relationForm.submit()}>
@@ -112,7 +112,16 @@ const TopicMap: React.FC = () => {
         </div>
       )}
     </Modal>
-    <Modal title="编辑概念" open={editOpen} onCancel={() => setEditOpen(false)} onOk={() => conceptForm.submit()}><Form form={conceptForm} layout="vertical" onFinish={async (values) => { if (selected) await updateConcept(selected.id, values); setEditOpen(false); await load(); }}><Form.Item name="title" label="名称"><Input /></Form.Item><Form.Item name="definition" label="定义"><Input.TextArea rows={3} /></Form.Item><Form.Item name="principle" label="原理"><Input.TextArea rows={3} /></Form.Item><Form.Item name="pitfalls" label="易错点"><Input.TextArea rows={3} /></Form.Item><Form.Item name="applications" label="应用"><Input.TextArea rows={3} /></Form.Item></Form></Modal>
+    <ConceptEditorModal
+      open={editOpen}
+      concept={selected}
+      onCancel={() => setEditOpen(false)}
+      onSubmit={async (values) => {
+        if (selected) await updateConcept(selected.id, values);
+        setEditOpen(false);
+        await load();
+      }}
+    />
   </div>;
 };
 

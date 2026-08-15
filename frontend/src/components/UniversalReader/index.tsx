@@ -32,6 +32,7 @@ import {
 } from '@ant-design/icons';
 import { Button, Divider, Drawer, Input, Popover, Space, Tag, Tooltip, Typography, message } from 'antd';
 import type { Concept, Highlight, Material, Question } from '../../api';
+import type { ReaderFont } from '../../readingPreferencesContext';
 import {
   siteThemeOptions,
   type SiteTheme,
@@ -48,7 +49,7 @@ export interface TextSelectionAnchor {
 }
 
 export type ReaderTheme = SiteTheme;
-export type ReaderFont = 'system' | 'song' | 'kai' | 'serif';
+export type { ReaderFont } from '../../readingPreferencesContext';
 
 interface UniversalReaderProps {
   material: Material;
@@ -208,7 +209,6 @@ const mediaTypeLabels: Record<Material['media_type'], string> = {
   text: '文本',
   web_page: '网页',
   video: '视频',
-  audio: '音频',
 };
 
 const readerFontOptions: Array<{
@@ -661,12 +661,11 @@ export default function UniversalReader({
   const [speechState, setSpeechState] = React.useState<
     'idle' | 'speaking' | 'paused'
   >('idle');
-  const [speechRate, setSpeechRate] = React.useState(() => {
-    const saved = Number(window.localStorage.getItem('reader-speech-rate'));
-    return saved >= 0.5 && saved <= 3 ? saved : 1;
-  });
+  const [speechRate, setSpeechRate] = React.useState(
+    preferredSpeechRate ?? 1,
+  );
   const [speechVoiceURI, setSpeechVoiceURI] = React.useState(
-    () => window.localStorage.getItem('reader-tts-voice') ?? '',
+    preferredSpeechVoice ?? '',
   );
   const [spokenChunkId, setSpokenChunkId] = React.useState<number | null>(null);
   const [openToolPanel, setOpenToolPanel] = React.useState<
@@ -1072,7 +1071,6 @@ export default function UniversalReader({
 
   const changeSpeechRate = (rate: number) => {
     setSpeechRate(rate);
-    window.localStorage.setItem('reader-speech-rate', String(rate));
     onSpeechPreferencesChange?.({ rate });
     if (audioRef.current) audioRef.current.playbackRate = rate;
   };
@@ -1080,7 +1078,6 @@ export default function UniversalReader({
   const changeSpeechVoice = (voiceURI: string) => {
     stopSpeech();
     setSpeechVoiceURI(voiceURI);
-    window.localStorage.setItem('reader-tts-voice', voiceURI);
     onSpeechPreferencesChange?.({ voice: voiceURI });
   };
 

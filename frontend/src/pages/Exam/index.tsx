@@ -4,7 +4,6 @@ import { Alert, Button, Card, Input, List, Result, Space, Spin, Tag, Typography,
 import { ArrowLeftOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import {
   createExam,
-  getAITask,
   getExam,
   getExams,
   getTopic,
@@ -14,6 +13,7 @@ import {
   submitExam,
 } from '../../api';
 import type { AITaskSummary, Exam, Topic } from '../../api';
+import { useAITaskPolling } from '../../hooks/useAITaskPolling';
 
 const activeTaskStatuses = ['pending', 'running'];
 const visibleTaskStatuses = ['pending', 'running', 'failed', 'cancelled'];
@@ -92,26 +92,19 @@ const ExamPage: React.FC = () => {
 
   useEffect(() => { void load().catch(() => message.error('加载掌握度评估失败')); }, [load]);
 
-  useEffect(() => {
-    if (!task || !activeTaskStatuses.includes(task.status)) return;
-    const timer = window.setInterval(async () => {
-      try {
-        const next = (await getAITask(task.id)).data;
-        setTask(next);
-        if (next.status === 'succeeded') {
-          const examId = next.result_json.exam_id;
-          if (typeof examId === 'number') {
-            selectExam((await getExam(examId)).data);
-          }
-          await load(typeof examId === 'number' ? examId : undefined);
-          message.success(`${next.task_type_display}已完成`);
-        }
-      } catch {
-        message.error('刷新评估任务状态失败');
+  useAITaskPolling(task ? [task] : [], {
+    onUpdate: ([next]) => setTask(next ?? null),
+    onSettled: async ([next]) => {
+      if (next.status !== 'succeeded') return;
+      const examId = next.result_json.exam_id;
+      if (typeof examId === 'number') {
+        selectExam((await getExam(examId)).data);
       }
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [load, selectExam, task]);
+      await load(typeof examId === 'number' ? examId : undefined);
+      message.success(`${next.task_type_display}已完成`);
+    },
+    onError: () => message.error('刷新评估任务状态失败'),
+  });
 
   const generate = async () => {
     if (!topic) return;

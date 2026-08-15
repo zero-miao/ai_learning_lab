@@ -133,3 +133,4 @@ class MaterialService:
             material.status = "failed"
             material.error = f"导入时发生错误：{str(error)[:300]}"
             material.save(update_fields=["status", "error", "updated_at"])
+            raise RuntimeError(material.error) from error

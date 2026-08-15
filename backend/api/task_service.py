@@ -1,10 +1,11 @@
 from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 from .ai_gateway import AIGateway
-from .models import AITask
+from .models import AITask, Material
 
 RETRY_DELAYS_SECONDS = (5, 15, 45)
 INTERACTIVE_TASK_PRIORITY = 100
@@ -15,6 +16,17 @@ MATERIAL_TASK_FAILURE_PREFIXES = {
     "asr": "视频处理失败",
     "edge_tts": "朗读音频生成失败",
 }
+MATERIAL_RETRY_STATUSES = {
+    "process": "pending",
+    "asr": "pending",
+    "clean_text": "cleaning",
+    "briefing": "summarizing",
+    "edge_tts": "generating_audio",
+}
+
+
+class TaskCancelled(Exception):
+    pass
 
 
 def _mark_material_task_failed(task, message):
@@ -126,7 +138,9 @@ def claim_due_task(*, task_types=None, exclude_task_types=None):
 
 
 def _handle_failure(task_id, error):
-    task = AITask.objects.get(pk=task_id)
+    task = AITask.objects.filter(pk=task_id).first()
+    if task is None or task.status == "cancelled":
+        return
     message = str(error) or error.__class__.__name__
     if task.attempt_count >= task.max_attempts:
         task.status = "failed"
@@ -143,12 +157,26 @@ def _handle_failure(task_id, error):
     task.save()
     if task.attempt_count >= task.max_attempts:
         _mark_material_task_failed(task, message)
+    elif task.trigger_type == "Material":
+        retry_status = MATERIAL_RETRY_STATUSES.get(task.task_type)
+        if retry_status:
+            Material.objects.filter(pk=task.trigger_id).update(status=retry_status)
 
 
 def execute_task(task_id):
     from .tasks import TaskRegistry
 
-    task = AITask.objects.get(pk=task_id)
+    task = AITask.objects.filter(pk=task_id).first()
+    if task is not None and task.status == "pending":
+        claimed = AITask.objects.filter(pk=task_id, status="pending").update(
+            status="running",
+            started_at=timezone.now(),
+            finished_at=None,
+            attempt_count=F("attempt_count") + 1,
+        )
+        task = AITask.objects.filter(pk=task_id).first() if claimed else None
+    if task is None or task.status != "running":
+        return
     try:
         task_cls = TaskRegistry.get_task_class(task.task_type)
         task_obj = task_cls(
@@ -159,11 +187,13 @@ def execute_task(task_id):
             model=task.model,
         )
         result = task_obj.run()
+    except TaskCancelled:
+        return
     except Exception as error:
         _handle_failure(task_id, error)
         return
 
-    AITask.objects.filter(pk=task_id).update(
+    AITask.objects.filter(pk=task_id, status="running").update(
         status="succeeded",
         result_json=result,
         error_message="",

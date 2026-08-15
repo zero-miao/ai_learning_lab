@@ -38,8 +38,7 @@ function isSiteTheme(value: string | null): value is SiteTheme {
 }
 
 export function getInitialSiteTheme(): SiteTheme {
-  const saved = window.localStorage.getItem(STORAGE_KEY)
-    ?? window.localStorage.getItem('reader-theme');
+  const saved = window.localStorage.getItem(STORAGE_KEY);
   if (isSiteTheme(saved)) return saved;
   const configuredDefault = import.meta.env.VITE_DEFAULT_SITE_THEME;
   if (isSiteTheme(configuredDefault)) return configuredDefault;
@@ -48,16 +47,8 @@ export function getInitialSiteTheme(): SiteTheme {
     : 'paper';
 }
 
-export function hasStoredSiteTheme() {
-  return Boolean(
-    window.localStorage.getItem(STORAGE_KEY)
-    ?? window.localStorage.getItem('reader-theme'),
-  );
-}
-
 export function applySiteTheme(value: SiteTheme) {
   window.localStorage.setItem(STORAGE_KEY, value);
-  window.localStorage.setItem('reader-theme', value);
   window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: value }));
 }
 

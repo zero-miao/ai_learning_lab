@@ -152,7 +152,7 @@ cp .env.example .env
 ./scripts/start-lan.sh
 ```
 
-脚本会同时启动后端和前端，并输出类似
+脚本会同时启动 Django Web、独立 AI worker 和前端，并输出类似
 `LAN URL: http://192.168.1.10:5173/` 的访问地址。其他设备直接在浏览器中打开该地址即可。
 若 macOS 提示网络访问权限，请允许 Python 和 Node 接收入站连接。局域网 IP 变化后重新运行
 脚本并使用新地址。
@@ -170,7 +170,19 @@ python manage.py runserver 0.0.0.0:8000
 
 后端健康检查接口：`http://127.0.0.1:8000/api/health/`
 
-### 2. 启动前端
+### 2. 启动 AI worker
+
+在另一个终端执行：
+
+```bash
+cd backend
+source ../.venv/bin/activate
+python manage.py run_ai_worker
+```
+
+Web 进程不再隐式运行任务调度器；手工启动时必须同时运行 worker。
+
+### 3. 启动前端
 
 ```bash
 cd frontend
@@ -180,7 +192,15 @@ npm run dev
 前端本机访问地址：`http://localhost:5173/`。Vite 同时监听局域网地址，并把同源
 `/api/` 和 `/media/` 请求代理到后端。
 
-### 3. LLM 配置
+可重复浏览器回归使用独立临时数据库和隔离端口，不会访问正式数据：
+
+```bash
+cd frontend
+npx playwright install chromium
+npm run test:e2e
+```
+
+### 4. LLM 配置
 
 AI 功能默认读取项目根目录 `.env`，当前正式配置已指向本地 Ollama。启动后端前请确认 Ollama 服务已运行，并已拉取 `.env` 中声明的模型。
 

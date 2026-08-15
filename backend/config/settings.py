@@ -136,6 +136,12 @@ USE_TZ = True
 STATIC_URL = "static/"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = PROJECT_ROOT / os.getenv("DJANGO_MEDIA_ROOT", "backend/media")
+MAX_VIDEO_UPLOAD_BYTES = int(
+    os.getenv("MAX_VIDEO_UPLOAD_BYTES", str(2 * 1024 * 1024 * 1024))
+)
+MAX_SUBTITLE_UPLOAD_BYTES = int(
+    os.getenv("MAX_SUBTITLE_UPLOAD_BYTES", str(5 * 1024 * 1024))
+)
 
 REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "api.pagination.StandardPageNumberPagination",

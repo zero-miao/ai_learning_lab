@@ -1,6 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import {
   Alert,
   Button,
@@ -28,7 +26,6 @@ import {
   adoptMaterialRecommendation,
   createDiscussionMessage,
   dismissMaterialRecommendation,
-  getAITask,
   getDiscussion,
   triggerSupplement,
 } from '../../api';
@@ -38,6 +35,8 @@ import type {
   MaterialRecommendation,
   SessionMessage,
 } from '../../api';
+import MarkdownContent from '../../components/MarkdownContent';
+import { useAITaskPolling } from '../../hooks/useAITaskPolling';
 
 interface Props {
   topicId: number;
@@ -85,24 +84,16 @@ const TopicDiscussionDrawer: React.FC<Props> = ({
       .finally(() => setLoading(false));
   }, [load, open]);
 
-  useEffect(() => {
-    if (!open || !tasks.some((task) => ['pending', 'running'].includes(task.status))) {
-      return;
-    }
-    const timer = window.setInterval(async () => {
-      const nextTasks = await Promise.all(
-        tasks.map(async (task) => {
-          if (!['pending', 'running'].includes(task.status)) return task;
-          return (await getAITask(task.id)).data;
-        }),
-      );
-      const failed = nextTasks.find((task) => task.status === 'failed');
-      if (failed) message.error(failed.error_message || `${failed.task_type_display}失败`);
-      const completedSupplement = nextTasks.find(
-        (task) =>
-          task.task_type === 'supplement_search' &&
-          task.status === 'succeeded' &&
-          tasks.find((current) => current.id === task.id)?.status !== 'succeeded',
+  useAITaskPolling(tasks, {
+    enabled: open,
+    onUpdate: (nextTasks) => setTasks(nextTasks as AITask[]),
+    onSettled: async (settled) => {
+      const failed = settled.find((task) => task.status === 'failed');
+      if (failed) {
+        message.error(failed.error_message || `${failed.task_type_display}失败`);
+      }
+      const completedSupplement = settled.find(
+        (task) => task.task_type === 'supplement_search' && task.status === 'succeeded',
       );
       if (completedSupplement) {
         const count = Number(completedSupplement.result_json.recommended_count ?? 0);
@@ -110,25 +101,10 @@ const TopicDiscussionDrawer: React.FC<Props> = ({
           count ? `找到 ${count} 篇候选材料，请人工采纳。` : '未找到达到相关度要求的资料。',
         );
       }
-      const completed = nextTasks.some(
-        (task) =>
-          task.status !== tasks.find((current) => current.id === task.id)?.status &&
-          ['succeeded', 'failed', 'cancelled'].includes(task.status),
-      );
-      setTasks(nextTasks);
-      if (
-        completed ||
-        nextTasks.some(
-          (task) =>
-            task.task_type === 'supplement_search' &&
-            ['pending', 'running'].includes(task.status),
-        )
-      ) {
-        await load();
-      }
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [load, open, tasks]);
+      await load();
+    },
+    onError: () => message.error('刷新讨论任务状态失败'),
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -404,9 +380,7 @@ const TopicDiscussionDrawer: React.FC<Props> = ({
                   }}
                 >
                   <div className="topic-discussion__markdown">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {item.msg_content}
-                    </ReactMarkdown>
+                    <MarkdownContent>{item.msg_content}</MarkdownContent>
                   </div>
                 </div>
                 {item.msg_from === 'ai' && recommendationCards(item.id)}

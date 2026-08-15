@@ -63,24 +63,12 @@ class SystemConfiguration(models.Model):
         default=("zh-CN-XiaoxiaoNeural|晓晓,zh-CN-YunxiNeural|云希")
     )
     searxng_base_url = models.URLField(default="http://127.0.0.1:8080")
-    crawl4ai_base_url = models.URLField(default="http://127.0.0.1:11235")
     supplement_relevance_threshold = models.FloatField(
         default=0.85,
         validators=[MinValueValidator(0.85), MaxValueValidator(1)],
     )
     supplement_excluded_domains = models.TextField(
         default="wikipedia.org,weread.qq.com,douban.com,dedao.cn"
-    )
-    default_site_theme = models.CharField(
-        max_length=20, choices=SITE_THEME_CHOICES, default="paper"
-    )
-    default_reader_font = models.CharField(
-        max_length=20, choices=READER_FONT_CHOICES, default="system"
-    )
-    default_tts_voice = models.CharField(max_length=100, default="zh-CN-YunxiNeural")
-    default_speech_rate = models.FloatField(
-        default=1.5,
-        validators=[MinValueValidator(0.5), MaxValueValidator(3)],
     )
     current_site_theme = models.CharField(
         max_length=20, choices=SITE_THEME_CHOICES, default="paper"
@@ -180,7 +168,6 @@ class Material(models.Model):
         ("text", "纯文本"),
         ("web_page", "网页"),
         ("video", "视频"),
-        ("audio", "音频"),
     ]
     STATUS_CHOICES = [
         ("pending", "待处理"),
@@ -386,7 +373,6 @@ class TopicMaterial(models.Model):
 
 
 class Session(models.Model):
-    system_prompt = models.TextField(blank=True, verbose_name="系统提示词")
     model = models.CharField(max_length=100, blank=True, verbose_name="使用模型")
     session_scene = models.CharField(
         max_length=100, blank=True, verbose_name="会话场景"
@@ -399,7 +385,6 @@ class Session(models.Model):
         blank=True,
         verbose_name="上下文材料",
     )
-    context_msg = models.TextField(blank=True, verbose_name="压缩上下文")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
 
@@ -507,12 +492,6 @@ class MaterialRecommendation(models.Model):
 
 
 class MaterialTextLocator(models.Model):
-    ENTITY_TYPE_CHOICES = [
-        ("concept", "概念"),
-        ("highlight", "高亮"),
-        ("question", "问题"),
-    ]
-
     material = models.ForeignKey(
         Material,
         related_name="text_locators",
@@ -542,28 +521,87 @@ class MaterialTextLocator(models.Model):
     time_end_offset = models.FloatField(
         null=True, blank=True, verbose_name="媒体结束时间（秒）"
     )
-    entity_type = models.CharField(
-        max_length=20, choices=ENTITY_TYPE_CHOICES, verbose_name="实体类型"
+    concept = models.ForeignKey(
+        "Concept",
+        related_name="locators",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        verbose_name="关联概念",
     )
-    entity_id = models.PositiveBigIntegerField(verbose_name="实体ID")
+    highlight = models.ForeignKey(
+        "Highlight",
+        related_name="locators",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        verbose_name="关联高亮",
+    )
+    question = models.ForeignKey(
+        "Question",
+        related_name="locators",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        verbose_name="关联问题",
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
 
     class Meta:
         verbose_name = "材料文本定位器"
         verbose_name_plural = "材料文本定位器"
         indexes = [
-            models.Index(
-                fields=["entity_type", "entity_id"],
-                name="locator_entity_idx",
-            ),
+            models.Index(fields=["concept"], name="locator_concept_idx"),
+            models.Index(fields=["highlight"], name="locator_highlight_idx"),
+            models.Index(fields=["question"], name="locator_question_idx"),
             models.Index(
                 fields=["material", "time_start_offset"],
                 name="locator_timeline_idx",
             ),
         ]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(
+                        concept__isnull=False,
+                        highlight__isnull=True,
+                        question__isnull=True,
+                    )
+                    | models.Q(
+                        concept__isnull=True,
+                        highlight__isnull=False,
+                        question__isnull=True,
+                    )
+                    | models.Q(
+                        concept__isnull=True,
+                        highlight__isnull=True,
+                        question__isnull=False,
+                    )
+                ),
+                name="locator_exactly_one_entity",
+            )
+        ]
+
+    @property
+    def entity_type(self):
+        if self.concept_id:
+            return "concept"
+        if self.highlight_id:
+            return "highlight"
+        return "question"
+
+    @property
+    def entity_id(self):
+        return self.concept_id or self.highlight_id or self.question_id
 
 
 class Question(models.Model):
+    topic = models.ForeignKey(
+        Topic,
+        related_name="questions",
+        on_delete=models.CASCADE,
+        verbose_name="所属主题",
+    )
     session = models.ForeignKey(
         Session,
         related_name="questions",
@@ -684,6 +722,12 @@ class ConceptRelation(models.Model):
 
 
 class Highlight(models.Model):
+    topic = models.ForeignKey(
+        Topic,
+        related_name="highlights",
+        on_delete=models.CASCADE,
+        verbose_name="所属主题",
+    )
     user_note = models.TextField(blank=True, verbose_name="用户备注")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")

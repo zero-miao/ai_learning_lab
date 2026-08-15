@@ -5,8 +5,7 @@ from urllib.error import URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
-import trafilatura
-
+from .services import extract_web_text
 from .system_config import get_config_value
 
 
@@ -71,30 +70,7 @@ def search_with_exclusions(query, *, limit=10, excluded_domains=(), timeout=20):
 
 
 def crawl(url):
-    base_url = get_config_value("crawl4ai_base_url").rstrip("/")
-    try:
-        payload = _json_request(
-            f"{base_url}/crawl",
-            method="POST",
-            payload={"urls": [url]},
-            timeout=45,
-        )
-        result = (payload.get("results") or [payload])[0]
-        content = str(
-            result.get("markdown")
-            or result.get("fit_markdown")
-            or result.get("cleaned_html")
-            or ""
-        ).strip()
-        if result.get("success", True) and content:
-            return content
-    except ValueError:
-        pass
-
-    downloaded = trafilatura.fetch_url(url)
-    content = (
-        trafilatura.extract(downloaded, include_comments=False) if downloaded else ""
-    )
+    content = extract_web_text(url).strip()
     if not content:
         raise ValueError("抓取失败或正文为空。")
     return content
